@@ -36,9 +36,14 @@ NODE_ENV=production
 
 في Railway Dashboard → Settings:
 
-- **Root Directory**: `backend`
-- **Build Command**: `npm install`
-- **Start Command**: `npm start`
+- **Root Directory**: `.` (اتركه فارغ)
+- **Build Command**: `cd backend && npm install --production`
+- **Start Command**: `cd backend && npm start`
+
+أو استخدم الملفات المرفقة:
+
+- ✅ `railway.json` - إعدادات Railway
+- ✅ `nixpacks.toml` - إعدادات Nixpacks
 
 ### 4. Deploy
 

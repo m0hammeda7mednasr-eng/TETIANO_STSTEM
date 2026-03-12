@@ -9,7 +9,9 @@
     "dev:frontend": "cd frontend && npm start",
     "dev:backend": "cd backend && npm run dev",
     "build": "cd frontend && npm install && npm run build",
-    "start": "cd backend && npm start"
+    "start": "cd backend && npm install --production && npm start",
+    "railway:build": "cd backend && npm install --production",
+    "railway:start": "cd backend && npm start"
   },
   "keywords": [
     "shopify",

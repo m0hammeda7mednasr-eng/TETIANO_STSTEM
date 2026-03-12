@@ -33,6 +33,10 @@ app.use(
       "http://localhost:3002",
       "http://localhost:3003",
       process.env.FRONTEND_URL,
+      // Vercel domains
+      /^https:\/\/.*\.vercel\.app$/,
+      // Railway domains (for testing)
+      /^https:\/\/.*\.railway\.app$/,
     ].filter(Boolean),
     credentials: true,
   }),

@@ -456,9 +456,7 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
   if (query.payment_status && query.payment_status !== "all") {
     const paymentStatus = String(query.payment_status).toLowerCase();
     filtered = filtered.filter((order) => {
-      const status = String(order.financial_status || order.status || "")
-        .toLowerCase()
-        .trim();
+      const status = getOrderFinancialStatus(order);
       if (paymentStatus === "paid_or_partial") {
         return status === "paid" || status === "partially_paid";
       }
@@ -490,9 +488,7 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
   if (query.refund_filter && query.refund_filter !== "all") {
     const refundFilter = String(query.refund_filter).toLowerCase().trim();
     filtered = filtered.filter((order) => {
-      const status = String(order.financial_status || order.status || "")
-        .toLowerCase()
-        .trim();
+      const status = getOrderFinancialStatus(order);
       const data = parseJsonField(order.data);
       const refunds = Array.isArray(data?.refunds) ? data.refunds : [];
       const refundedFromTransactions = refunds.reduce((sum, refund) => {
@@ -535,7 +531,9 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
   if (String(query.cancelled_only || "").toLowerCase() === "true") {
     filtered = filtered.filter((order) => {
       const data = parseJsonField(order.data);
-      const status = String(order.financial_status || order.status || "")
+      const status = String(
+        getOrderFinancialStatus(order) || order.status || "",
+      )
         .toLowerCase()
         .trim();
       return (
@@ -1139,6 +1137,7 @@ router.get(
     );
     const normalizedOrders = (data || []).map((order) => ({
       ...order,
+      financial_status: getOrderFinancialStatus(order),
       payment_method: resolveOrderPaymentMethod(order),
     }));
     const filteredOrders = applyOrdersQueryFilters(normalizedOrders, req.query);

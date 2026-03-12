@@ -52,6 +52,25 @@ const formatOrderTotal = (amount) =>
     maximumFractionDigits: 2,
   })} ${CURRENCY_LABEL}`;
 
+const parseOrderData = (order) => {
+  if (!order) return {};
+  if (typeof order.data === "string") {
+    try {
+      return JSON.parse(order.data);
+    } catch {
+      return {};
+    }
+  }
+  return order.data || {};
+};
+
+const getOrderFinancialStatus = (order) => {
+  const data = parseOrderData(order);
+  return String(data.financial_status || order.financial_status || order.status || "")
+    .toLowerCase()
+    .trim();
+};
+
 const PAYMENT_STATUS_STYLE = {
   paid: "bg-emerald-100 text-emerald-700 border border-emerald-200",
   pending: "bg-amber-100 text-amber-700 border border-amber-200",
@@ -448,10 +467,10 @@ export default function Dashboard() {
                           <td className="px-5 py-3.5 text-sm">
                             <span
                               className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getPaymentStatusClassName(
-                                order.financial_status || order.status,
+                                getOrderFinancialStatus(order),
                               )}`}
                             >
-                              {order.financial_status || order.status || "-"}
+                              {getOrderFinancialStatus(order) || "-"}
                             </span>
                           </td>
                           <td className="px-5 py-3.5 text-sm text-slate-600">

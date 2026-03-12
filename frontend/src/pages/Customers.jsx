@@ -45,6 +45,15 @@ const getOrderCustomerId = (order) => {
   return String(orderData?.customer?.id || "");
 };
 
+const getOrderFinancialStatus = (order) => {
+  const orderData = parseJson(order?.data);
+  return String(
+    orderData?.financial_status || order?.financial_status || order?.status || "",
+  )
+    .toLowerCase()
+    .trim();
+};
+
 export default function Customers() {
   const { hasPermission } = useAuth();
   const canViewOrders = hasPermission("can_view_orders");
@@ -536,7 +545,7 @@ export default function Customers() {
                                 {formatAmount(order.total_price)}
                               </td>
                               <td className="py-2 text-sm text-slate-600">
-                                {order.financial_status || order.status || "-"}
+                                {getOrderFinancialStatus(order) || "-"}
                               </td>
                               <td className="py-2 text-sm text-slate-600">
                                 {order.fulfillment_status || "unfulfilled"}

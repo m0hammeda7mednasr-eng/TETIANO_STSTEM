@@ -66,7 +66,7 @@ const parseOrderData = (order) => {
 const getOrderMeta = (order) => {
   const data = parseOrderData(order);
   const paymentStatus = String(
-    order.financial_status || order.status || data.financial_status || "",
+    data.financial_status || order.financial_status || order.status || "",
   )
     .toLowerCase()
     .trim();

@@ -71,7 +71,7 @@ const parseLineItems = (order) => {
 
 const getOrderFinancialStatus = (order) => {
   const data = parseOrderData(order);
-  return String(order?.financial_status || order?.status || data?.financial_status || "")
+  return String(data?.financial_status || order?.financial_status || order?.status || "")
     .toLowerCase()
     .trim();
 };

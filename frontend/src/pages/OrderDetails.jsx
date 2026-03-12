@@ -106,7 +106,7 @@ export default function OrderDetails() {
     }
   };
 
-  const isShopifyPaidOrder = (orderValue) => {
+  const getOrderFinancialStatus = (orderValue) => {
     const rawData = orderValue?.data;
     let parsedData = {};
     if (typeof rawData === "string") {
@@ -119,11 +119,15 @@ export default function OrderDetails() {
       parsedData = rawData;
     }
 
-    const status = String(
-      orderValue?.financial_status || parsedData?.financial_status || "",
+    return String(
+      parsedData?.financial_status || orderValue?.financial_status || orderValue?.status || "",
     )
       .toLowerCase()
       .trim();
+  };
+
+  const isShopifyPaidOrder = (orderValue) => {
+    const status = getOrderFinancialStatus(orderValue);
     return status === "paid" || status === "partially_paid";
   };
 
@@ -384,10 +388,10 @@ export default function OrderDetails() {
                 <div className="mt-1 flex items-center gap-2">
                   <span
                     className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusColor(
-                      order.financial_status || order.status,
+                      getOrderFinancialStatus(order),
                     )}`}
                   >
-                    {order.financial_status || order.status || "unknown"}
+                    {getOrderFinancialStatus(order) || "unknown"}
                   </span>
                 </div>
               </div>
@@ -843,9 +847,9 @@ export default function OrderDetails() {
                 </h2>
                 <div className="space-y-3">
                   <span
-                    className={`inline-block px-4 py-2 rounded-full text-sm font-semibold ${getStatusColor(order.financial_status || order.status)}`}
+                    className={`inline-block px-4 py-2 rounded-full text-sm font-semibold ${getStatusColor(getOrderFinancialStatus(order))}`}
                   >
-                    {order.financial_status || order.status}
+                    {getOrderFinancialStatus(order) || "unknown"}
                   </span>
                   {order.payment_gateway_names &&
                     order.payment_gateway_names.length > 0 && (

@@ -163,13 +163,15 @@ export default function Orders() {
   const [lastLiveEventAt, setLastLiveEventAt] = useState(null);
   const refreshTimeoutRef = useRef(null);
 
-  const fetchOrders = useCallback(async ({ silent = false } = {}) => {
+  const fetchOrders = useCallback(async ({ silent = false, forceSync = false } = {}) => {
     if (!silent) {
       setLoading(true);
       setError("");
     }
     try {
-      const response = await api.get("/shopify/orders");
+      const response = await api.get(
+        forceSync ? "/shopify/orders?sync_recent=force" : "/shopify/orders",
+      );
       setOrders(extractArray(response.data));
       setLastUpdatedAt(new Date());
     } catch (requestError) {
@@ -206,7 +208,7 @@ export default function Orders() {
   );
 
   useEffect(() => {
-    fetchOrders();
+    fetchOrders({ forceSync: true });
 
     const interval = setInterval(() => {
       fetchOrders({ silent: true });
@@ -468,7 +470,7 @@ export default function Orders() {
                 </div>
               </div>
               <button
-                onClick={() => fetchOrders()}
+                onClick={() => fetchOrders({ forceSync: true })}
                 disabled={loading}
                 className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-60"
               >

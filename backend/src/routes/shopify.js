@@ -594,6 +594,7 @@ const syncRecentOrdersWithCooldown = async ({
   isAdmin,
   latestKnownOrderAt,
   waitForCompletion = false,
+  forceRun = false,
 }) => {
   try {
     const tokenData = await resolveSyncToken({
@@ -618,7 +619,11 @@ const syncRecentOrdersWithCooldown = async ({
     if (state?.inFlight) {
       return { triggered: false, reason: "in_flight" };
     }
-    if (state?.lastRunMs && nowMs - state.lastRunMs < ORDER_BACKGROUND_SYNC_COOLDOWN_MS) {
+    if (
+      !forceRun &&
+      state?.lastRunMs &&
+      nowMs - state.lastRunMs < ORDER_BACKGROUND_SYNC_COOLDOWN_MS
+    ) {
       return { triggered: false, reason: "cooldown" };
     }
 
@@ -1178,6 +1183,7 @@ router.get(
     const latestKnownOrderAt = getLatestOrderTimestamp(data || []);
     const syncRecentParam = String(req.query.sync_recent || "").toLowerCase().trim();
     const shouldSyncRecent = syncRecentParam !== "false";
+    const forceSyncRecent = syncRecentParam === "force";
     let liveSyncResult = null;
     if (shouldSyncRecent) {
       liveSyncResult = await syncRecentOrdersWithCooldown({
@@ -1186,6 +1192,7 @@ router.get(
         isAdmin,
         latestKnownOrderAt,
         waitForCompletion: true,
+        forceRun: forceSyncRecent,
       });
 
       if (liveSyncResult?.triggered) {

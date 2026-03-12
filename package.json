@@ -1,24 +1,25 @@
 {
-  "name": "shopify-store-manager",
+  "name": "tetiano-system",
   "version": "1.0.0",
-  "description": "Shopify Store Management System with Admin and Customer Dashboards",
+  "description": "TETIANO System - Shopify Store Management with Admin and Customer Dashboards",
   "main": "backend/src/server.js",
   "scripts": {
     "install-all": "npm install && cd frontend && npm install && cd ../backend && npm install",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:frontend": "cd frontend && npm start",
     "dev:backend": "cd backend && npm run dev",
-    "build": "npm run build:frontend && npm run build:backend",
-    "build:frontend": "cd frontend && npm run build",
-    "build:backend": "cd backend && npm run build"
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && npm start",
+    "vercel-build": "cd frontend && npm install && npm run build"
   },
   "keywords": [
     "shopify",
     "ecommerce",
     "management",
-    "dashboard"
+    "dashboard",
+    "tetiano"
   ],
-  "author": "",
+  "author": "TETIANO Team",
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.2"

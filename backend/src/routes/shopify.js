@@ -588,11 +588,12 @@ const buildBackgroundSyncKey = ({ userId, storeId, shop }) =>
     shop || "",
   ).trim()}`;
 
-const maybeSyncRecentOrdersInBackground = async ({
+const syncRecentOrdersWithCooldown = async ({
   userId,
   requestedStoreId,
   isAdmin,
   latestKnownOrderAt,
+  waitForCompletion = false,
 }) => {
   try {
     const tokenData = await resolveSyncToken({
@@ -602,7 +603,7 @@ const maybeSyncRecentOrdersInBackground = async ({
     });
 
     if (!tokenData?.access_token || !tokenData?.shop) {
-      return;
+      return { triggered: false, reason: "not_connected" };
     }
 
     const syncOwnerUserId = tokenData.user_id || userId;
@@ -615,10 +616,10 @@ const maybeSyncRecentOrdersInBackground = async ({
     const nowMs = Date.now();
     const state = orderBackgroundSyncState.get(key);
     if (state?.inFlight) {
-      return;
+      return { triggered: false, reason: "in_flight" };
     }
     if (state?.lastRunMs && nowMs - state.lastRunMs < ORDER_BACKGROUND_SYNC_COOLDOWN_MS) {
-      return;
+      return { triggered: false, reason: "cooldown" };
     }
 
     const latestKnownMs = parseTimestampValue(latestKnownOrderAt);
@@ -627,25 +628,52 @@ const maybeSyncRecentOrdersInBackground = async ({
       latestKnownMs > 0 ? Math.max(fallbackStart, latestKnownMs - 60 * 60 * 1000) : fallbackStart,
     ).toISOString();
 
-    orderBackgroundSyncState.set(key, {
-      inFlight: true,
-      lastRunMs: state?.lastRunMs || 0,
-    });
+    const runSync = async () => {
+      orderBackgroundSyncState.set(key, {
+        inFlight: true,
+        lastRunMs: state?.lastRunMs || 0,
+      });
 
-    await ShopifyService.syncRecentOrders(
-      syncOwnerUserId,
-      tokenData.shop,
-      tokenData.access_token,
-      syncStoreId,
-      { updatedAtMin },
-    );
+      try {
+        const result = await ShopifyService.syncRecentOrders(
+          syncOwnerUserId,
+          tokenData.shop,
+          tokenData.access_token,
+          syncStoreId,
+          { updatedAtMin },
+        );
 
-    orderBackgroundSyncState.set(key, {
-      inFlight: false,
-      lastRunMs: Date.now(),
+        orderBackgroundSyncState.set(key, {
+          inFlight: false,
+          lastRunMs: Date.now(),
+        });
+
+        return result;
+      } catch (syncError) {
+        orderBackgroundSyncState.set(key, {
+          inFlight: false,
+          lastRunMs: Date.now(),
+        });
+        throw syncError;
+      }
+    };
+
+    if (waitForCompletion) {
+      await runSync();
+      return { triggered: true, reason: "performed" };
+    }
+
+    runSync().catch((syncError) => {
+      console.error("Background recent orders sync failed:", syncError);
     });
+    return { triggered: true, reason: "started_background" };
   } catch (error) {
-    console.error("Background recent orders sync failed:", error);
+    console.error("Recent orders sync failed:", error);
+    return {
+      triggered: false,
+      reason: "failed",
+      error: error?.message || String(error),
+    };
   }
 };
 
@@ -899,6 +927,10 @@ router.post(
       tokenData.access_token,
       syncStoreId,
     );
+    const latestSyncedOrder = [...(orders || [])].sort(
+      (a, b) =>
+        parseTimestampValue(b?.updated_at) - parseTimestampValue(a?.updated_at),
+    )[0] || null;
     let webhookSync = null;
     try {
       webhookSync = await ensureWebhooksRegistered({
@@ -923,6 +955,15 @@ router.post(
         orders: orders.length,
         customers: customers.length,
       },
+      latest_order: latestSyncedOrder
+        ? {
+            shopify_id: latestSyncedOrder.shopify_id || null,
+            order_number: latestSyncedOrder.order_number || null,
+            financial_status: latestSyncedOrder.status || null,
+            created_at: latestSyncedOrder.created_at || null,
+            updated_at: latestSyncedOrder.updated_at || null,
+          }
+        : null,
     });
   } catch (error) {
     console.error("Sync error:", error);
@@ -1127,11 +1168,36 @@ router.get(
   requirePermission("can_view_orders"),
   async (req, res) => {
   try {
-    const { data, error } = await Order.findByUser(req.user.id);
+    const isAdmin = await resolveIsAdmin(req);
+    let { data, error } = await Order.findByUser(req.user.id);
     if (error) {
       console.error("Error fetching orders:", error);
       return res.status(500).json({ error: error.message });
     }
+
+    const latestKnownOrderAt = getLatestOrderTimestamp(data || []);
+    const syncRecentParam = String(req.query.sync_recent || "").toLowerCase().trim();
+    const shouldSyncRecent = syncRecentParam !== "false";
+    let liveSyncResult = null;
+    if (shouldSyncRecent) {
+      liveSyncResult = await syncRecentOrdersWithCooldown({
+        userId: req.user.id,
+        requestedStoreId: getRequestedStoreId(req),
+        isAdmin,
+        latestKnownOrderAt,
+        waitForCompletion: true,
+      });
+
+      if (liveSyncResult?.triggered) {
+        const refreshed = await Order.findByUser(req.user.id);
+        if (!refreshed.error) {
+          data = refreshed.data || [];
+        } else {
+          console.error("Error refreshing orders after live sync:", refreshed.error);
+        }
+      }
+    }
+
     console.log(
       `Returning ${data?.length || 0} orders for user ${req.user.id}`,
     );
@@ -1141,18 +1207,10 @@ router.get(
       payment_method: resolveOrderPaymentMethod(order),
     }));
     const filteredOrders = applyOrdersQueryFilters(normalizedOrders, req.query);
-    const latestKnownOrderAt = getLatestOrderTimestamp(data || []);
+    if (liveSyncResult) {
+      res.setHeader("X-Orders-Live-Sync", liveSyncResult.reason || "attempted");
+    }
     res.json(filteredOrders);
-
-    // Keep orders fresh even if webhooks are delayed/missed.
-    maybeSyncRecentOrdersInBackground({
-      userId: req.user.id,
-      requestedStoreId: getRequestedStoreId(req),
-      isAdmin: req.user?.role === "admin",
-      latestKnownOrderAt,
-    }).catch((backgroundSyncError) => {
-      console.error("Recent orders background sync trigger failed:", backgroundSyncError);
-    });
   } catch (e) {
     console.error("Exception fetching orders:", e);
     res.status(500).json({ error: e.message });

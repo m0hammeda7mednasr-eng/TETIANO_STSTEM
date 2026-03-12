@@ -34,6 +34,7 @@ const VALID_ORDER_STATUSES = new Set([
 export const MANAGED_WEBHOOK_TOPICS = [
   "orders/create",
   "orders/updated",
+  "orders/paid",
   "orders/cancelled",
   "products/create",
   "products/update",
@@ -666,6 +667,7 @@ export const handleShopifyWebhook = async ({ topic, shopDomain, payload }) => {
   if (
     normalizedTopic === "orders/create" ||
     normalizedTopic === "orders/updated" ||
+    normalizedTopic === "orders/paid" ||
     normalizedTopic === "orders/cancelled"
   ) {
     const result = await upsertOrderForTokens(normalizedShop, payload);

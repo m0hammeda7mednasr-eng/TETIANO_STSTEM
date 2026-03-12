@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Calendar, Edit, Paperclip, Plus, Save, Trash2, X } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api, { getErrorMessage } from "../utils/api";
+import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
 const DEFAULT_FORM = {
@@ -64,7 +65,7 @@ export default function MyReports() {
       }
 
       const response = await api.get("/daily-reports/my-reports");
-      setReports(Array.isArray(response.data) ? response.data : []);
+      setReports(extractArray(response.data));
     } catch (error) {
       if (!silent) {
         setMessage({ type: "error", text: getErrorMessage(error) });

@@ -158,7 +158,7 @@ export default function Orders() {
                         {order.items_count}
                       </td>
                       <td className="px-6 py-4 text-sm font-bold text-gray-800">
-                        ${parseFloat(order.total_price).toFixed(2)}
+                        {parseFloat(order.total_price).toFixed(2)} LE
                       </td>
                       <td className="px-6 py-4">
                         <span

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
+import { extractArray, extractObject } from "../utils/response";
 import {
   DollarSign,
   Edit,
@@ -21,6 +22,10 @@ const SUMMARY_DEFAULT = {
   total_sold_units: 0,
   profit_margin: 0,
 };
+
+const CURRENCY_LABEL = "LE";
+
+const formatAmount = (value) => `${Number(value || 0).toFixed(2)} ${CURRENCY_LABEL}`;
 
 export default function NetProfit() {
   const [products, setProducts] = useState([]);
@@ -63,11 +68,11 @@ export default function NetProfit() {
   const fetchProfitability = async () => {
     try {
       const { data } = await api.get("/dashboard/products");
-      const list = Array.isArray(data?.data) ? data.data : [];
+      const list = extractArray(data);
       setProducts(list);
       setSummary({
         ...SUMMARY_DEFAULT,
-        ...(data?.summary || {}),
+        ...extractObject(data?.summary),
       });
     } catch (error) {
       setProducts([]);
@@ -79,7 +84,7 @@ export default function NetProfit() {
   const fetchOperationalCosts = async () => {
     try {
       const { data } = await api.get("/operational-costs");
-      setOperationalCosts(Array.isArray(data) ? data : []);
+      setOperationalCosts(extractArray(data));
     } catch (error) {
       setOperationalCosts([]);
     }
@@ -266,25 +271,25 @@ export default function NetProfit() {
           <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
             <SummaryCard
               label="Total Revenue"
-              value={`$${summary.total_revenue.toFixed(2)}`}
+              value={formatAmount(summary.total_revenue)}
               icon={DollarSign}
               color="from-blue-500 to-blue-700"
             />
             <SummaryCard
               label="Total Cost"
-              value={`$${summary.total_cost.toFixed(2)}`}
+              value={formatAmount(summary.total_cost)}
               icon={Package}
               color="from-orange-500 to-orange-700"
             />
             <SummaryCard
               label="Operational Costs"
-              value={`$${summary.total_operational_costs.toFixed(2)}`}
+              value={formatAmount(summary.total_operational_costs)}
               icon={TrendingUp}
               color="from-yellow-500 to-yellow-700"
             />
             <SummaryCard
               label="Total Net Profit"
-              value={`$${summary.total_net_profit.toFixed(2)}`}
+              value={formatAmount(summary.total_net_profit)}
               icon={TrendingUp}
               color="from-emerald-500 to-emerald-700"
             />
@@ -437,7 +442,7 @@ export default function NetProfit() {
                           {product.orders_count || 0}
                         </td>
                         <td className="px-4 py-3 text-sm">
-                          ${Number(product.avg_selling_price || 0).toFixed(2)}
+                          {formatAmount(product.avg_selling_price)}
                         </td>
                         <td className="px-4 py-3 text-sm">
                           {isEditing ? (
@@ -451,21 +456,20 @@ export default function NetProfit() {
                               className="w-24 px-2 py-1 border rounded"
                             />
                           ) : (
-                            `$${Number(product.cost_price || 0).toFixed(2)}`
+                            formatAmount(product.cost_price)
                           )}
                         </td>
                         <td className="px-4 py-3 text-sm">
-                          ${Number(product.profit_per_unit || 0).toFixed(2)}
+                          {formatAmount(product.profit_per_unit)}
                         </td>
                         <td className="px-4 py-3 text-sm text-blue-700 font-semibold">
-                          ${Number(product.total_revenue || 0).toFixed(2)}
+                          {formatAmount(product.total_revenue)}
                         </td>
                         <td className="px-4 py-3 text-sm text-yellow-700">
-                          $
-                          {(
+                          {formatAmount(
                             Number(product.operational_costs_total || 0) +
-                            Number(product.fixed_cost_share || 0)
-                          ).toFixed(2)}
+                              Number(product.fixed_cost_share || 0),
+                          )}
                           {opCosts.length > 0 && (
                             <div className="mt-1 text-xs text-gray-500 space-y-1">
                               {opCosts.slice(0, 2).map((cost) => (
@@ -495,7 +499,7 @@ export default function NetProfit() {
                               : "text-red-700"
                           }`}
                         >
-                          ${Number(product.net_profit || 0).toFixed(2)}
+                          {formatAmount(product.net_profit)}
                         </td>
                         <td className="px-4 py-3 text-sm">
                           {Number(product.profit_margin || 0).toFixed(2)}%

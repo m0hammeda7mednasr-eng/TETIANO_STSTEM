@@ -3,6 +3,7 @@ import api from "../utils/api";
 import Sidebar from "../components/Sidebar";
 import { Clock, User, List } from "lucide-react";
 import { format } from "date-fns";
+import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
 const POLLING_INTERVAL_MS = 30000;
@@ -21,7 +22,7 @@ export default function ActivityLog() {
         }
 
         const response = await api.get("/activity-log", { params: filters });
-        setLogs(Array.isArray(response.data) ? response.data : []);
+        setLogs(extractArray(response.data));
       } catch (err) {
         if (!silent) {
           console.error("Error fetching activity log:", err);

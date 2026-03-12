@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { Loader, Save, X } from "lucide-react";
 
+const CURRENCY_LABEL = "LE";
+
 export default function ProductEditModal({
   product,
   onClose,
@@ -73,7 +75,7 @@ export default function ProductEditModal({
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Price ({product.currency || "USD"})
+              Price ({CURRENCY_LABEL})
             </label>
             <input
               type="number"
@@ -89,7 +91,7 @@ export default function ProductEditModal({
           {canEditCost && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Cost Price ({product.currency || "USD"})
+                Cost Price ({CURRENCY_LABEL})
               </label>
               <input
                 type="number"
@@ -127,7 +129,7 @@ export default function ProductEditModal({
                 <div className="flex justify-between">
                   <span>Unit Profit:</span>
                   <span className="font-bold">
-                    {profit} {product.currency || "USD"}
+                    {profit} {CURRENCY_LABEL}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -147,8 +149,8 @@ export default function ProductEditModal({
           <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg text-sm">
             <p className="font-semibold mb-1">Note:</p>
             <p>
-              Changes are saved locally first, then synced with Shopify in the
-              background.
+              Changes are applied only after successful Shopify sync. If sync
+              fails, no local change is kept.
             </p>
           </div>
         </div>

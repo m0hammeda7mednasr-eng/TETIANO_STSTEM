@@ -249,7 +249,7 @@ export default function Sidebar() {
         </nav>
 
         <div className="mt-auto p-4 border-t border-slate-700/80 bg-slate-900/70 backdrop-blur shrink-0 space-y-2">
-          {hasPermission("can_manage_settings") && (
+          {isAdmin && (
             <Link
               to="/settings"
               onClick={() => setIsOpen(false)}

@@ -12,9 +12,11 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
+import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
 const POLLING_INTERVAL_MS = 30000;
+const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
   searchTerm: "",
@@ -25,6 +27,7 @@ const INITIAL_FILTERS = {
   amountMin: "",
   amountMax: "",
   paymentFilter: "all",
+  paymentMethodFilter: "all",
   fulfillmentFilter: "all",
   refundFilter: "all",
   cancelledOnly: false,
@@ -36,6 +39,15 @@ const INITIAL_FILTERS = {
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatAmount = (value) => `${toNumber(value).toFixed(2)} ${CURRENCY_LABEL}`;
+
+const PAYMENT_METHOD_LABELS = {
+  shopify: "Shopify",
+  instapay: "InstaPay",
+  wallet: "Wallet",
+  none: "None",
 };
 
 const parseOrderData = (order) => {
@@ -100,6 +112,16 @@ const getOrderMeta = (order) => {
     (hasAnyRefund && totalPrice > 0 && refundedAmount >= totalPrice);
   const isPaid = paymentStatus === "paid" || paymentStatus === "partially_paid";
   const isFulfilled = fulfillmentStatus === "fulfilled";
+  const manualPaymentMethod = String(
+    order.payment_method || order.manual_payment_method || data.tetiano_payment_method || "",
+  )
+    .toLowerCase()
+    .trim();
+  const paymentMethod = isPaid
+    ? "shopify"
+    : manualPaymentMethod === "instapay" || manualPaymentMethod === "wallet"
+      ? manualPaymentMethod
+      : "none";
 
   return {
     paymentStatus,
@@ -112,6 +134,7 @@ const getOrderMeta = (order) => {
     isFullRefund,
     isPaid,
     isFulfilled,
+    paymentMethod,
     orderNumberNumeric: toNumber(order.order_number),
     createdAtDate: new Date(order.created_at),
   };
@@ -144,7 +167,7 @@ export default function Orders() {
     }
     try {
       const response = await api.get("/shopify/orders");
-      setOrders(Array.isArray(response.data) ? response.data : []);
+      setOrders(extractArray(response.data));
       setLastUpdatedAt(new Date());
     } catch (requestError) {
       console.error("Error fetching orders:", requestError);
@@ -253,6 +276,12 @@ export default function Orders() {
         }
         return status === filters.paymentFilter;
       });
+    }
+
+    if (filters.paymentMethodFilter !== "all") {
+      result = result.filter(
+        (order) => order._meta.paymentMethod === filters.paymentMethodFilter,
+      );
     }
 
     if (filters.fulfillmentFilter !== "all") {
@@ -375,6 +404,14 @@ export default function Orders() {
     return "bg-gray-100 text-gray-800";
   };
 
+  const getPaymentMethodColor = (method) => {
+    const normalized = String(method || "").toLowerCase();
+    if (normalized === "shopify") return "bg-emerald-100 text-emerald-800";
+    if (normalized === "instapay") return "bg-blue-100 text-blue-800";
+    if (normalized === "wallet") return "bg-violet-100 text-violet-800";
+    return "bg-slate-100 text-slate-700";
+  };
+
   return (
     <div className="flex h-screen bg-slate-100">
       <Sidebar />
@@ -420,7 +457,7 @@ export default function Orders() {
             />
             <SummaryCard
               label="Total Value"
-              value={`$${summary.totalAmount.toFixed(2)}`}
+              value={formatAmount(summary.totalAmount)}
               icon={TrendingUp}
               color="from-emerald-500 to-emerald-700"
             />
@@ -560,6 +597,23 @@ export default function Orders() {
               </div>
 
               <div>
+                <label className="block text-xs text-slate-500 mb-1">Payment Method</label>
+                <select
+                  value={filters.paymentMethodFilter}
+                  onChange={(event) =>
+                    handleFilterChange("paymentMethodFilter", event.target.value)
+                  }
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                >
+                  <option value="all">All</option>
+                  <option value="shopify">Shopify</option>
+                  <option value="instapay">InstaPay</option>
+                  <option value="wallet">Wallet</option>
+                  <option value="none">None</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-xs text-slate-500 mb-1">Fulfillment</label>
                 <select
                   value={filters.fulfillmentFilter}
@@ -643,7 +697,7 @@ export default function Orders() {
 
           <div className="bg-white rounded-xl shadow overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1100px]">
+              <table className="w-full min-w-[1220px]">
                 <thead>
                   <tr className="bg-slate-50 border-b">
                     <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
@@ -662,6 +716,9 @@ export default function Orders() {
                       Payment
                     </th>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                      Payment Method
+                    </th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
                       Fulfillment
                     </th>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
@@ -678,7 +735,7 @@ export default function Orders() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan="9" className="px-6 py-10 text-center text-slate-500">
+                      <td colSpan="10" className="px-6 py-10 text-center text-slate-500">
                         Loading orders...
                       </td>
                     </tr>
@@ -702,7 +759,7 @@ export default function Orders() {
                           {toNumber(order.items_count).toLocaleString()}
                         </td>
                         <td className="px-4 py-3 text-sm font-semibold text-slate-800">
-                          {order._meta.totalPrice.toFixed(2)} {order.currency || "USD"}
+                          {formatAmount(order._meta.totalPrice)}
                         </td>
                         <td className="px-4 py-3">
                           <span
@@ -711,6 +768,15 @@ export default function Orders() {
                             )}`}
                           >
                             {order._meta.paymentStatus || "n/a"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-semibold ${getPaymentMethodColor(
+                              order._meta.paymentMethod,
+                            )}`}
+                          >
+                            {PAYMENT_METHOD_LABELS[order._meta.paymentMethod] || "None"}
                           </span>
                         </td>
                         <td className="px-4 py-3">
@@ -758,7 +824,7 @@ export default function Orders() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="9" className="px-6 py-12 text-center text-slate-500">
+                      <td colSpan="10" className="px-6 py-12 text-center text-slate-500">
                         <ShoppingCart size={44} className="mx-auto mb-3 text-slate-300" />
                         <p className="font-semibold mb-1">No matching orders found</p>
                         <p className="text-sm">Try adjusting or resetting filters.</p>

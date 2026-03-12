@@ -19,6 +19,79 @@ import {
   Download,
 } from "lucide-react";
 
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const toArray = (value) => (Array.isArray(value) ? value : []);
+
+const percentage = (part, total) => {
+  const safeTotal = toNumber(total);
+  if (safeTotal <= 0) return 0;
+  return (toNumber(part) / safeTotal) * 100;
+};
+
+const normalizeAnalyticsResponse = (raw = {}) => {
+  const financial = raw?.financial || {};
+  const summary = raw?.summary || {};
+  const ordersByStatus = raw?.ordersByStatus || {};
+
+  const totalOrders = toNumber(summary.totalOrders);
+  const paidOrders = toNumber(ordersByStatus.paid);
+  const cancelledOrders = toNumber(ordersByStatus.cancelled);
+  const refundedOrders = toNumber(ordersByStatus.refunded);
+
+  return {
+    financial: {
+      totalRevenue: toNumber(financial.totalRevenue),
+      refundedAmount: toNumber(financial.refundedAmount),
+      pendingAmount: toNumber(financial.pendingAmount),
+      netRevenue: toNumber(financial.netRevenue),
+    },
+    summary: {
+      totalOrders,
+      successRate: toNumber(
+        summary.successRate || percentage(paidOrders, totalOrders),
+      ),
+      cancellationRate: toNumber(
+        summary.cancellationRate || percentage(cancelledOrders, totalOrders),
+      ),
+      refundRate: toNumber(
+        summary.refundRate || percentage(refundedOrders, totalOrders),
+      ),
+    },
+    ordersByStatus: {
+      pending: toNumber(ordersByStatus.pending),
+      paid: paidOrders,
+      refunded: refundedOrders,
+      cancelled: cancelledOrders,
+      fulfilled: toNumber(ordersByStatus.fulfilled),
+      unfulfilled: toNumber(ordersByStatus.unfulfilled),
+    },
+    monthlyTrends: toArray(raw?.monthlyTrends).map((month) => ({
+      month: month?.month || "-",
+      orders: toNumber(month?.orders),
+      revenue: toNumber(month?.revenue),
+      cancelled: toNumber(month?.cancelled),
+      refunded: toNumber(month?.refunded),
+    })),
+    topProducts: toArray(raw?.topProducts).map((product) => ({
+      ...product,
+      title: product?.title || "Unknown Product",
+      total_quantity: toNumber(product?.total_quantity),
+      orders_count: toNumber(product?.orders_count),
+      total_revenue: toNumber(product?.total_revenue),
+    })),
+    topCustomers: toArray(raw?.topCustomers).map((customer) => ({
+      ...customer,
+      email: customer?.email || customer?.name || "Unknown Customer",
+      orders_count: toNumber(customer?.orders_count),
+      total_spent: toNumber(customer?.total_spent),
+    })),
+  };
+};
+
 const Analytics = () => {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -33,7 +106,7 @@ const Analytics = () => {
     try {
       setLoading(true);
       const response = await dashboardAPI.getAnalytics();
-      setAnalytics(response.data);
+      setAnalytics(normalizeAnalyticsResponse(response.data));
       setError("");
     } catch (err) {
       console.error("Error fetching analytics:", err);
@@ -264,8 +337,10 @@ const Analytics = () => {
                 <MetricCard
                   title="متوسط قيمة الطلب"
                   value={formatCurrency(
-                    analytics.financial.totalRevenue /
-                      analytics.summary.totalOrders || 0,
+                    analytics.summary.totalOrders > 0
+                      ? analytics.financial.totalRevenue /
+                          analytics.summary.totalOrders
+                      : 0,
                   )}
                   change="+5.3%"
                   changeType="positive"
@@ -390,31 +465,46 @@ const Analytics = () => {
                       <div
                         className="bg-green-500"
                         style={{
-                          width: `${(analytics.ordersByStatus.paid / analytics.summary.totalOrders) * 100}%`,
+                          width: `${percentage(
+                            analytics.ordersByStatus.paid,
+                            analytics.summary.totalOrders,
+                          )}%`,
                         }}
                       ></div>
                       <div
                         className="bg-yellow-500"
                         style={{
-                          width: `${(analytics.ordersByStatus.pending / analytics.summary.totalOrders) * 100}%`,
+                          width: `${percentage(
+                            analytics.ordersByStatus.pending,
+                            analytics.summary.totalOrders,
+                          )}%`,
                         }}
                       ></div>
                       <div
                         className="bg-blue-500"
                         style={{
-                          width: `${(analytics.ordersByStatus.fulfilled / analytics.summary.totalOrders) * 100}%`,
+                          width: `${percentage(
+                            analytics.ordersByStatus.fulfilled,
+                            analytics.summary.totalOrders,
+                          )}%`,
                         }}
                       ></div>
                       <div
                         className="bg-red-500"
                         style={{
-                          width: `${(analytics.ordersByStatus.cancelled / analytics.summary.totalOrders) * 100}%`,
+                          width: `${percentage(
+                            analytics.ordersByStatus.cancelled,
+                            analytics.summary.totalOrders,
+                          )}%`,
                         }}
                       ></div>
                       <div
                         className="bg-orange-500"
                         style={{
-                          width: `${(analytics.ordersByStatus.refunded / analytics.summary.totalOrders) * 100}%`,
+                          width: `${percentage(
+                            analytics.ordersByStatus.refunded,
+                            analytics.summary.totalOrders,
+                          )}%`,
                         }}
                       ></div>
                     </div>

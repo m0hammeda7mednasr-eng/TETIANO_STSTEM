@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api, { getErrorMessage } from "../utils/api";
+import { extractArray } from "../utils/response";
 import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
@@ -29,7 +30,7 @@ export default function MyTasks() {
       }
 
       const response = await api.get("/tasks");
-      setTasks(Array.isArray(response.data) ? response.data : []);
+      setTasks(extractArray(response.data));
     } catch (error) {
       if (!silent) {
         setMessage({ type: "error", text: getErrorMessage(error) });

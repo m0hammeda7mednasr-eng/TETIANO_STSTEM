@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../../components/Sidebar";
 import api from "../../utils/api";
+import { extractArray } from "../../utils/response";
 import { subscribeToSharedDataUpdates } from "../../utils/realtime";
 import {
   Activity,
@@ -36,20 +37,20 @@ const AdminPage = () => {
       ]);
 
       if (logsResult.status === "fulfilled") {
-        setActivityLogs(logsResult.value.data || []);
+        setActivityLogs(extractArray(logsResult.value.data));
       } else if (!silent) {
         setError("Failed to load activity logs");
       }
 
       if (requestsResult.status === "fulfilled") {
-        const pending = (requestsResult.value.data || []).filter(
+        const pending = extractArray(requestsResult.value.data).filter(
           (request) => request.status === "pending",
         );
         setPendingRequestsCount(pending.length);
       }
 
       if (usersResult.status === "fulfilled") {
-        setUsersCount((usersResult.value.data || []).length);
+        setUsersCount(extractArray(usersResult.value.data).length);
       }
     } catch (requestError) {
       if (!silent) {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { getErrorMessage } from "../utils/api";
+import { extractArray } from "../utils/response";
 import Sidebar from "../components/Sidebar";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import {
@@ -136,7 +137,7 @@ export default function Users() {
       const response = await api.get("/users");
 
 
-      setUsers(Array.isArray(response.data) ? response.data : []);
+      setUsers(extractArray(response.data));
     } catch (err) {
       console.error("Error fetching users:", err);
       setMessage({
@@ -151,7 +152,7 @@ export default function Users() {
   const fetchAccessRequests = async () => {
     try {
       const response = await api.get("/access-requests/all");
-      setAccessRequests(Array.isArray(response.data) ? response.data : []);
+      setAccessRequests(extractArray(response.data));
     } catch (err) {
       console.error("Error fetching access requests:", err);
       setMessage({ type: "error", text: getErrorMessage(err) });
@@ -161,7 +162,7 @@ export default function Users() {
   const fetchDailyReports = async () => {
     try {
       const response = await api.get("/daily-reports/all");
-      setDailyReports(Array.isArray(response.data) ? response.data : []);
+      setDailyReports(extractArray(response.data));
     } catch (err) {
       console.error("Error fetching daily reports:", err);
       setMessage({ type: "error", text: getErrorMessage(err) });

@@ -104,16 +104,43 @@ export class ProductUpdateService {
         shopifyUpdates.inventory_quantity = inventory;
 
       if (Object.keys(shopifyUpdates).length > 0) {
-        this.syncToShopify(userId, productId, shopifyUpdates).catch((err) => {
-          console.error("Shopify sync failed:", err);
-        });
+        try {
+          await this.syncToShopify(userId, productId, shopifyUpdates);
+        } catch (syncError) {
+          const rollbackData = {
+            pending_sync: false,
+            sync_error: syncError.message,
+            local_updated_at: new Date().toISOString(),
+          };
+
+          if (Object.prototype.hasOwnProperty.call(oldValues, "price")) {
+            rollbackData.price = oldValues.price;
+          }
+          if (Object.prototype.hasOwnProperty.call(oldValues, "cost_price")) {
+            rollbackData.cost_price = oldValues.cost_price;
+          }
+          if (Object.prototype.hasOwnProperty.call(oldValues, "inventory_quantity")) {
+            rollbackData.inventory_quantity = oldValues.inventory_quantity;
+          }
+
+          const { error: rollbackError } = await Product.update(
+            productId,
+            rollbackData,
+          );
+          if (rollbackError) {
+            console.error("Rollback failed after Shopify sync failure:", rollbackError);
+          }
+          throw new Error(
+            `Shopify sync failed. Local changes were reverted: ${syncError.message}`,
+          );
+        }
       }
 
       return {
         success: true,
         localUpdate: true,
         shopifySync:
-          Object.keys(shopifyUpdates).length > 0 ? "pending" : "not_needed",
+          Object.keys(shopifyUpdates).length > 0 ? "synced" : "not_needed",
       };
     } catch (error) {
       console.error("Update product error:", error);
@@ -133,53 +160,7 @@ export class ProductUpdateService {
       throw new Error("Price exceeds maximum allowed value");
     }
 
-    try {
-      // Get current product
-      const { data: product, error } = await Product.findByIdForUser(
-        userId,
-        productId,
-      );
-      if (error || !product) {
-        throw new Error("Product not found");
-      }
-
-      // Save old value for rollback
-      const oldPrice = product.price;
-
-      // Update locally
-      const { error: updateError } = await Product.update(productId, {
-        price: newPrice,
-        pending_sync: true,
-        local_updated_at: new Date().toISOString(),
-      });
-
-      if (updateError) {
-        throw updateError;
-      }
-
-      // Log operation
-      await this.logSyncOperation(userId, productId, "product_update", {
-        field: "price",
-        old_value: oldPrice,
-        new_value: newPrice,
-      });
-
-      // Sync to Shopify asynchronously (don't wait)
-      this.syncToShopify(userId, productId, { price: newPrice }).catch(
-        (err) => {
-          console.error("Shopify sync failed:", err);
-        },
-      );
-
-      return {
-        success: true,
-        localUpdate: true,
-        shopifySync: "pending",
-      };
-    } catch (error) {
-      console.error("Update price error:", error);
-      throw error;
-    }
+    return this.updateProduct(userId, productId, { price: newPrice });
   }
 
   /**
@@ -194,53 +175,7 @@ export class ProductUpdateService {
       throw new Error("Inventory exceeds maximum allowed value");
     }
 
-    try {
-      // Get current product
-      const { data: product, error } = await Product.findByIdForUser(
-        userId,
-        productId,
-      );
-      if (error || !product) {
-        throw new Error("Product not found");
-      }
-
-      // Save old value
-      const oldQuantity = product.inventory_quantity;
-
-      // Update locally
-      const { error: updateError } = await Product.update(productId, {
-        inventory_quantity: newQuantity,
-        pending_sync: true,
-        local_updated_at: new Date().toISOString(),
-      });
-
-      if (updateError) {
-        throw updateError;
-      }
-
-      // Log operation
-      await this.logSyncOperation(userId, productId, "product_update", {
-        field: "inventory_quantity",
-        old_value: oldQuantity,
-        new_value: newQuantity,
-      });
-
-      // Sync to Shopify asynchronously
-      this.syncToShopify(userId, productId, {
-        inventory_quantity: newQuantity,
-      }).catch((err) => {
-        console.error("Shopify sync failed:", err);
-      });
-
-      return {
-        success: true,
-        localUpdate: true,
-        shopifySync: "pending",
-      };
-    } catch (error) {
-      console.error("Update inventory error:", error);
-      throw error;
-    }
+    return this.updateProduct(userId, productId, { inventory: newQuantity });
   }
 
   /**
@@ -261,21 +196,29 @@ export class ProductUpdateService {
       }
 
       // Build Shopify API payload
-      const variant_id = product.data?.variants?.[0]?.id;
+      const parsedProductData =
+        typeof product.data === "string"
+          ? JSON.parse(product.data || "{}")
+          : product.data || {};
+      const variant_id = parsedProductData?.variants?.[0]?.id;
       if (!variant_id) {
           throw new Error("Variant ID not found for this product.");
+      }
+
+      const variantPayload = {
+        id: variant_id,
+      };
+      if (updates.price !== undefined) {
+        variantPayload.price = updates.price?.toString();
+      }
+      if (updates.inventory_quantity !== undefined) {
+        variantPayload.inventory_quantity = updates.inventory_quantity;
       }
 
       const shopifyPayload = {
         product: {
           id: parseInt(product.shopify_id),
-          variants: [
-            {
-              id: variant_id, 
-              price: updates.price?.toString(),
-              inventory_quantity: updates.inventory_quantity,
-            },
-          ],
+          variants: [variantPayload],
         },
       };
 

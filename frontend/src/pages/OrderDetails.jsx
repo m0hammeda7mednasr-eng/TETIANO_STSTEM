@@ -18,6 +18,14 @@ import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { markSharedDataUpdated } from "../utils/realtime";
 
+const CURRENCY_LABEL = "LE";
+const PAYMENT_METHOD_LABELS = {
+  shopify: "Shopify",
+  instapay: "InstaPay",
+  wallet: "Wallet",
+  none: "None",
+};
+
 export default function OrderDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -26,6 +34,7 @@ export default function OrderDetails() {
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [updatingPaymentMethod, setUpdatingPaymentMethod] = useState(false);
   const [profitData, setProfitData] = useState(null);
   const canEditOrders = hasPermission("can_edit_orders");
 
@@ -46,7 +55,7 @@ export default function OrderDetails() {
       setOrder(response.data);
     } catch (error) {
       console.error("Error fetching order details:", error);
-      showNotification("فشل تحميل تفاصيل الطلب", "error");
+      showNotification("ÙØ´Ù„ ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ø·Ù„Ø¨", "error");
     } finally {
       setLoading(false);
     }
@@ -64,19 +73,90 @@ export default function OrderDetails() {
 
 
   const handleStatusChange = async (newStatus) => {
+    if (newStatus === order?.status) return;
+
+    let voidReason = "";
+    if (newStatus === "voided") {
+      const promptValue = window.prompt("Please enter the reason for voiding this order:");
+      if (promptValue === null) return;
+      voidReason = promptValue.trim();
+      if (!voidReason) {
+        showNotification("Void reason is required", "error");
+        return;
+      }
+    }
+
     setUpdatingStatus(true);
     try {
       await api.post(`/shopify/orders/${id}/update-status`, {
         status: newStatus,
+        void_reason: voidReason,
       });
       markSharedDataUpdated();
-      showNotification("تم تحديث حالة الطلب بنجاح", "success");
+      showNotification("Order status updated successfully", "success");
       fetchOrderDetails();
     } catch (error) {
       console.error("Error updating status:", error);
-      showNotification("فشل تحديث حالة الطلب", "error");
+      showNotification(
+        error?.response?.data?.error || "Failed to update order status",
+        "error",
+      );
     } finally {
       setUpdatingStatus(false);
+    }
+  };
+
+  const isShopifyPaidOrder = (orderValue) => {
+    const status = String(
+      orderValue?.financial_status || orderValue?.status || "",
+    )
+      .toLowerCase()
+      .trim();
+    return status === "paid" || status === "partially_paid";
+  };
+
+  const getEffectivePaymentMethod = (orderValue) => {
+    if (!orderValue) return "none";
+    if (isShopifyPaidOrder(orderValue)) return "shopify";
+    const normalized = String(orderValue.payment_method || "").toLowerCase().trim();
+    if (normalized === "instapay" || normalized === "wallet") {
+      return normalized;
+    }
+    return "none";
+  };
+
+  const handlePaymentMethodChange = async (paymentMethod) => {
+    if (!order || !canEditOrders) return;
+
+    const currentMethod = getEffectivePaymentMethod(order);
+    if (paymentMethod === currentMethod) return;
+
+    setUpdatingPaymentMethod(true);
+    try {
+      const response = await api.post(`/shopify/orders/${id}/payment-method`, {
+        payment_method: paymentMethod,
+      });
+      const nextMethod = String(response?.data?.payment_method || paymentMethod)
+        .toLowerCase()
+        .trim();
+      setOrder((prev) =>
+        prev
+          ? {
+              ...prev,
+              payment_method: nextMethod,
+            }
+          : prev,
+      );
+      markSharedDataUpdated();
+      showNotification("Payment method updated successfully", "success");
+    } catch (error) {
+      console.error("Error updating payment method:", error);
+      showNotification(
+        error?.response?.data?.error || "Failed to update payment method",
+        "error",
+      );
+    } finally {
+      setUpdatingPaymentMethod(false);
     }
   };
 
@@ -106,6 +186,14 @@ export default function OrderDetails() {
     }
   };
 
+  const getPaymentMethodColor = (method) => {
+    const normalized = String(method || "").toLowerCase();
+    if (normalized === "shopify") return "bg-emerald-100 text-emerald-800";
+    if (normalized === "instapay") return "bg-blue-100 text-blue-800";
+    if (normalized === "wallet") return "bg-violet-100 text-violet-800";
+    return "bg-slate-100 text-slate-700";
+  };
+
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     const date = new Date(dateString);
@@ -124,7 +212,7 @@ export default function OrderDetails() {
         <Clock
           size={16}
           className="text-yellow-500"
-          title="في انتظار المزامنة"
+          title="ÙÙŠ Ø§Ù†ØªØ¸Ø§Ø± Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©"
         />
       );
     }
@@ -142,7 +230,7 @@ export default function OrderDetails() {
         <CheckCircle
           size={16}
           className="text-green-500"
-          title="تمت المزامنة"
+          title="ØªÙ…Øª Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©"
         />
       );
     }
@@ -156,7 +244,7 @@ export default function OrderDetails() {
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">جاري تحميل تفاصيل الطلب...</p>
+            <p className="text-gray-600">Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ø·Ù„Ø¨...</p>
           </div>
         </main>
       </div>
@@ -170,12 +258,12 @@ export default function OrderDetails() {
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <Package size={64} className="mx-auto text-gray-400 mb-4" />
-            <p className="text-gray-600 text-lg">لم يتم العثور على الطلب</p>
+            <p className="text-gray-600 text-lg">Ù„Ù… ÙŠØªÙ… Ø§Ù„Ø¹Ø«ÙˆØ± Ø¹Ù„Ù‰ Ø§Ù„Ø·Ù„Ø¨</p>
             <button
               onClick={() => navigate("/orders")}
               className="mt-4 text-blue-600 hover:text-blue-700"
             >
-              العودة إلى الطلبات
+              Ø§Ù„Ø¹ÙˆØ¯Ø© Ø¥Ù„Ù‰ Ø§Ù„Ø·Ù„Ø¨Ø§Øª
             </button>
           </div>
         </main>
@@ -207,7 +295,7 @@ export default function OrderDetails() {
           )}
 
           {/* Header */}
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8">
             <div className="flex items-center gap-4">
               <button
                 onClick={() => navigate("/orders")}
@@ -218,30 +306,70 @@ export default function OrderDetails() {
               <div>
                 <div className="flex items-center gap-3">
                   <h1 className="text-3xl font-bold text-gray-800">
-                    طلب #{order.order_number || order.shopify_id}
+                    Ø·Ù„Ø¨ #{order.order_number || order.shopify_id}
                   </h1>
                   {getSyncStatusIcon()}
                 </div>
                 <p className="text-gray-600">
-                  تم الإنشاء في {formatDate(order.created_at)}
+                  ØªÙ… Ø§Ù„Ø¥Ù†Ø´Ø§Ø¡ ÙÙŠ {formatDate(order.created_at)}
                 </p>
               </div>
             </div>
-            <div className="flex gap-2">
-              <select
-                value={order.status}
-                onChange={(e) => handleStatusChange(e.target.value)}
-                disabled={!canEditOrders || updatingStatus}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-              >
-                <option value="pending">Pending</option>
-                <option value="authorized">Authorized</option>
-                <option value="paid">Paid</option>
-                <option value="partially_paid">Partially Paid</option>
-                <option value="refunded">Refunded</option>
-                <option value="voided">Voided</option>
-                <option value="partially_refunded">Partially Refunded</option>
-              </select>
+
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+              <div className="min-w-[210px]">
+                <label className="block text-xs text-gray-500 mb-1">
+                  Payment Method
+                </label>
+                <select
+                  value={getEffectivePaymentMethod(order)}
+                  onChange={(e) => handlePaymentMethodChange(e.target.value)}
+                  disabled={!canEditOrders || updatingPaymentMethod || isShopifyPaidOrder(order)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                >
+                  {isShopifyPaidOrder(order) && (
+                    <option value="shopify">{PAYMENT_METHOD_LABELS.shopify}</option>
+                  )}
+                  <option value="none">{PAYMENT_METHOD_LABELS.none}</option>
+                  <option value="instapay">{PAYMENT_METHOD_LABELS.instapay}</option>
+                  <option value="wallet">{PAYMENT_METHOD_LABELS.wallet}</option>
+                </select>
+                <div className="mt-1 flex items-center gap-2">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getPaymentMethodColor(
+                      getEffectivePaymentMethod(order),
+                    )}`}
+                  >
+                    {PAYMENT_METHOD_LABELS[getEffectivePaymentMethod(order)] ||
+                      PAYMENT_METHOD_LABELS.none}
+                  </span>
+                  {isShopifyPaidOrder(order) && (
+                    <span className="text-[11px] text-gray-500">
+                      Locked: paid on Shopify
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="min-w-[210px]">
+                <label className="block text-xs text-gray-500 mb-1">
+                  Payment Status
+                </label>
+                <select
+                  value={order.status}
+                  onChange={(e) => handleStatusChange(e.target.value)}
+                  disabled={!canEditOrders || updatingStatus}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="authorized">Authorized</option>
+                  <option value="paid">Paid</option>
+                  <option value="partially_paid">Partially Paid</option>
+                  <option value="refunded">Refunded</option>
+                  <option value="voided">Voided</option>
+                  <option value="partially_refunded">Partially Refunded</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -252,7 +380,7 @@ export default function OrderDetails() {
               <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Package size={20} />
-                  المنتجات ({order.line_items?.length || 0})
+                  Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª ({order.line_items?.length || 0})
                 </h2>
                 <div className="space-y-4">
                   {order.line_items?.map((item, index) => (
@@ -287,17 +415,17 @@ export default function OrderDetails() {
                         )}
                         <div className="flex items-center gap-4 mt-2">
                           <span className="text-sm text-gray-600">
-                            الكمية: {item.quantity}
+                            Ø§Ù„ÙƒÙ…ÙŠØ©: {item.quantity}
                           </span>
                           <span className="text-sm font-semibold text-gray-800">
-                            {item.price} {order.currency}
+                            {item.price} {CURRENCY_LABEL}
                           </span>
                         </div>
                       </div>
                       <div className="text-left">
                         <p className="text-lg font-bold text-gray-800">
                           {(item.quantity * parseFloat(item.price)).toFixed(2)}{" "}
-                          {order.currency}
+                          {CURRENCY_LABEL}
                         </p>
                       </div>
                     </div>
@@ -307,39 +435,39 @@ export default function OrderDetails() {
                 {/* Order Totals */}
                 <div className="mt-6 pt-6 border-t space-y-2">
                   <div className="flex justify-between text-gray-600">
-                    <span>المجموع الفرعي:</span>
+                    <span>Ø§Ù„Ù…Ø¬Ù…ÙˆØ¹ Ø§Ù„ÙØ±Ø¹ÙŠ:</span>
                     <span>
-                      {order.subtotal_price} {order.currency}
+                      {order.subtotal_price} {CURRENCY_LABEL}
                     </span>
                   </div>
                   {order.total_tax > 0 && (
                     <div className="flex justify-between text-gray-600">
-                      <span>الضرائب:</span>
+                      <span>Ø§Ù„Ø¶Ø±Ø§Ø¦Ø¨:</span>
                       <span>
-                        {order.total_tax} {order.currency}
+                        {order.total_tax} {CURRENCY_LABEL}
                       </span>
                     </div>
                   )}
                   {order.total_shipping > 0 && (
                     <div className="flex justify-between text-gray-600">
-                      <span>الشحن:</span>
+                      <span>Ø§Ù„Ø´Ø­Ù†:</span>
                       <span>
-                        {order.total_shipping} {order.currency}
+                        {order.total_shipping} {CURRENCY_LABEL}
                       </span>
                     </div>
                   )}
                   {order.total_discounts > 0 && (
                     <div className="flex justify-between text-green-600">
-                      <span>الخصم:</span>
+                      <span>Ø§Ù„Ø®ØµÙ…:</span>
                       <span>
-                        -{order.total_discounts} {order.currency}
+                        -{order.total_discounts} {CURRENCY_LABEL}
                       </span>
                     </div>
                   )}
                   <div className="flex justify-between text-xl font-bold text-gray-800 pt-2 border-t">
-                    <span>الإجمالي:</span>
+                    <span>Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠ:</span>
                     <span>
-                      {order.total_price} {order.currency}
+                      {order.total_price} {CURRENCY_LABEL}
                     </span>
                   </div>
 
@@ -348,7 +476,7 @@ export default function OrderDetails() {
                     <div className="mt-4 pt-4 border-t border-red-200 bg-red-50 rounded-lg p-4">
                       <h3 className="font-bold text-red-800 mb-3 flex items-center gap-2">
                         <AlertCircle size={18} />
-                        المرتجعات ({order.refunds.length})
+                        Ø§Ù„Ù…Ø±ØªØ¬Ø¹Ø§Øª ({order.refunds.length})
                       </h3>
                       <div className="space-y-3">
                         {order.refunds.map((refund, idx) => (
@@ -368,7 +496,7 @@ export default function OrderDetails() {
                                     0,
                                   )
                                   .toFixed(2)}{" "}
-                                {order.currency}
+                                {CURRENCY_LABEL}
                               </span>
                             </div>
                             {refund.note && (
@@ -379,10 +507,10 @@ export default function OrderDetails() {
                             {refund.refund_line_items &&
                               refund.refund_line_items.length > 0 && (
                                 <div className="mt-2 text-xs text-gray-600">
-                                  <p className="font-medium">المنتجات:</p>
+                                  <p className="font-medium">Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª:</p>
                                   {refund.refund_line_items.map((item, i) => (
                                     <p key={i}>
-                                      • {item.line_item?.title} (الكمية:{" "}
+                                      â€¢ {item.line_item?.title} (Ø§Ù„ÙƒÙ…ÙŠØ©:{" "}
                                       {item.quantity})
                                     </p>
                                   ))}
@@ -391,9 +519,9 @@ export default function OrderDetails() {
                           </div>
                         ))}
                         <div className="flex justify-between text-red-800 font-bold pt-2 border-t border-red-200">
-                          <span>إجمالي المرتجعات:</span>
+                          <span>Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù…Ø±ØªØ¬Ø¹Ø§Øª:</span>
                           <span>
-                            -{order.total_refunded?.toFixed(2)} {order.currency}
+                            -{order.total_refunded?.toFixed(2)} {CURRENCY_LABEL}
                           </span>
                         </div>
                       </div>
@@ -405,16 +533,16 @@ export default function OrderDetails() {
                     <div className="mt-4 pt-4 border-t border-red-200 bg-red-50 rounded-lg p-4">
                       <h3 className="font-bold text-red-800 mb-2 flex items-center gap-2">
                         <AlertCircle size={18} />
-                        طلب ملغي
+                        Ø·Ù„Ø¨ Ù…Ù„ØºÙŠ
                       </h3>
                       <div className="space-y-1 text-sm">
                         <p className="text-gray-700">
-                          <span className="font-medium">تاريخ الإلغاء:</span>{" "}
+                          <span className="font-medium">ØªØ§Ø±ÙŠØ® Ø§Ù„Ø¥Ù„ØºØ§Ø¡:</span>{" "}
                           {formatDate(order.cancelled_at)}
                         </p>
                         {order.cancel_reason && (
                           <p className="text-gray-700">
-                            <span className="font-medium">السبب:</span>{" "}
+                            <span className="font-medium">Ø§Ù„Ø³Ø¨Ø¨:</span>{" "}
                             {order.cancel_reason}
                           </p>
                         )}
@@ -427,33 +555,33 @@ export default function OrderDetails() {
                     <div className="mt-4 pt-4 border-t border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 space-y-3">
                       <h3 className="font-bold text-green-800 mb-2 flex items-center gap-2">
                         <TrendingUp size={18} />
-                        تحليل الربحية
+                        ØªØ­Ù„ÙŠÙ„ Ø§Ù„Ø±Ø¨Ø­ÙŠØ©
                       </h3>
 
                       {/* Revenue */}
                       <div className="flex justify-between text-gray-700">
-                        <span className="font-medium">إجمالي الإيرادات:</span>
+                        <span className="font-medium">Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ø¥ÙŠØ±Ø§Ø¯Ø§Øª:</span>
                         <span className="font-semibold">
                           {parseFloat(profitData.total_revenue || 0).toFixed(2)}{" "}
-                          {order.currency}
+                          {CURRENCY_LABEL}
                         </span>
                       </div>
 
                       {/* Cost */}
                       <div className="flex justify-between text-orange-700">
-                        <span className="font-medium">تكلفة المنتجات:</span>
+                        <span className="font-medium">ØªÙƒÙ„ÙØ© Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª:</span>
                         <span className="font-semibold">
                           -{parseFloat(profitData.total_cost || 0).toFixed(2)}{" "}
-                          {order.currency}
+                          {CURRENCY_LABEL}
                         </span>
                       </div>
 
                       {/* Gross Profit */}
                       <div className="flex justify-between text-blue-700 pb-2 border-b border-green-200">
-                        <span className="font-medium">الربح الإجمالي:</span>
+                        <span className="font-medium">Ø§Ù„Ø±Ø¨Ø­ Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠ:</span>
                         <span className="font-semibold">
                           {parseFloat(profitData.gross_profit || 0).toFixed(2)}{" "}
-                          {order.currency}
+                          {CURRENCY_LABEL}
                         </span>
                       </div>
 
@@ -461,30 +589,30 @@ export default function OrderDetails() {
                       {profitData.total_operational_costs > 0 && (
                         <div className="flex justify-between text-red-700">
                           <span className="font-medium">
-                            التكاليف التشغيلية:
+                            Ø§Ù„ØªÙƒØ§Ù„ÙŠÙ Ø§Ù„ØªØ´ØºÙŠÙ„ÙŠØ©:
                           </span>
                           <span className="font-semibold">
                             -
                             {parseFloat(
                               profitData.total_operational_costs || 0,
                             ).toFixed(2)}{" "}
-                            {order.currency}
+                            {CURRENCY_LABEL}
                           </span>
                         </div>
                       )}
 
                       {/* Net Profit */}
                       <div className="flex justify-between text-green-900 pt-2 border-t-2 border-green-300">
-                        <span className="font-bold text-lg">صافي الربح:</span>
+                        <span className="font-bold text-lg">ØµØ§ÙÙŠ Ø§Ù„Ø±Ø¨Ø­:</span>
                         <span className="font-bold text-xl">
                           {parseFloat(profitData.net_profit || 0).toFixed(2)}{" "}
-                          {order.currency}
+                          {CURRENCY_LABEL}
                         </span>
                       </div>
 
                       {/* Profit Margin */}
                       <div className="flex justify-between text-green-800">
-                        <span className="font-medium">هامش الربح الصافي:</span>
+                        <span className="font-medium">Ù‡Ø§Ù…Ø´ Ø§Ù„Ø±Ø¨Ø­ Ø§Ù„ØµØ§ÙÙŠ:</span>
                         <span className="font-bold text-lg">
                           {parseFloat(profitData.profit_margin || 0).toFixed(2)}
                           %
@@ -496,16 +624,16 @@ export default function OrderDetails() {
                         {profitData.net_profit > 0 ? (
                           <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded-full text-sm font-semibold">
                             <CheckCircle size={14} />
-                            طلب مربح
+                            Ø·Ù„Ø¨ Ù…Ø±Ø¨Ø­
                           </span>
                         ) : profitData.net_profit < 0 ? (
                           <span className="inline-flex items-center gap-1 px-3 py-1 bg-red-600 text-white rounded-full text-sm font-semibold">
                             <AlertCircle size={14} />
-                            طلب خاسر
+                            Ø·Ù„Ø¨ Ø®Ø§Ø³Ø±
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-3 py-1 bg-gray-600 text-white rounded-full text-sm font-semibold">
-                            بدون ربح
+                            Ø¨Ø¯ÙˆÙ† Ø±Ø¨Ø­
                           </span>
                         )}
                       </div>
@@ -528,24 +656,24 @@ export default function OrderDetails() {
               <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <User size={18} />
-                  معلومات العميل
+                  Ù…Ø¹Ù„ÙˆÙ…Ø§Øª Ø§Ù„Ø¹Ù…ÙŠÙ„
                 </h2>
                 <div className="space-y-3">
                   <div>
-                    <p className="text-sm text-gray-600">الاسم</p>
+                    <p className="text-sm text-gray-600">Ø§Ù„Ø§Ø³Ù…</p>
                     <p className="font-semibold text-gray-800">
-                      {order.customer_name || "غير معروف"}
+                      {order.customer_name || "ØºÙŠØ± Ù…Ø¹Ø±ÙˆÙ"}
                     </p>
                   </div>
                   {order.customer_email && (
                     <div>
-                      <p className="text-sm text-gray-600">البريد الإلكتروني</p>
+                      <p className="text-sm text-gray-600">Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ</p>
                       <p className="text-gray-800">{order.customer_email}</p>
                     </div>
                   )}
                   {order.customer_phone && (
                     <div>
-                      <p className="text-sm text-gray-600">الهاتف</p>
+                      <p className="text-sm text-gray-600">Ø§Ù„Ù‡Ø§ØªÙ</p>
                       <p className="text-gray-800">{order.customer_phone}</p>
                     </div>
                   )}
@@ -553,7 +681,7 @@ export default function OrderDetails() {
                     <>
                       {order.customer_info.orders_count > 0 && (
                         <div>
-                          <p className="text-sm text-gray-600">عدد الطلبات</p>
+                          <p className="text-sm text-gray-600">Ø¹Ø¯Ø¯ Ø§Ù„Ø·Ù„Ø¨Ø§Øª</p>
                           <p className="text-gray-800">
                             {order.customer_info.orders_count}
                           </p>
@@ -562,16 +690,16 @@ export default function OrderDetails() {
                       {order.customer_info.total_spent && (
                         <div>
                           <p className="text-sm text-gray-600">
-                            إجمالي المشتريات
+                            Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù…Ø´ØªØ±ÙŠØ§Øª
                           </p>
                           <p className="text-gray-800">
-                            {order.customer_info.total_spent} {order.currency}
+                            {order.customer_info.total_spent} {CURRENCY_LABEL}
                           </p>
                         </div>
                       )}
                       {order.customer_info.tags && (
                         <div>
-                          <p className="text-sm text-gray-600">التصنيفات</p>
+                          <p className="text-sm text-gray-600">Ø§Ù„ØªØµÙ†ÙŠÙØ§Øª</p>
                           <p className="text-gray-800">
                             {order.customer_info.tags}
                           </p>
@@ -579,7 +707,7 @@ export default function OrderDetails() {
                       )}
                       {order.customer_info.note && (
                         <div>
-                          <p className="text-sm text-gray-600">ملاحظة</p>
+                          <p className="text-sm text-gray-600">Ù…Ù„Ø§Ø­Ø¸Ø©</p>
                           <p className="text-gray-800 text-sm">
                             {order.customer_info.note}
                           </p>
@@ -595,7 +723,7 @@ export default function OrderDetails() {
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <MapPin size={18} />
-                    عنوان الشحن
+                    Ø¹Ù†ÙˆØ§Ù† Ø§Ù„Ø´Ø­Ù†
                   </h2>
                   <div className="text-gray-700 space-y-1">
                     {(order.shipping_address.first_name ||
@@ -631,7 +759,7 @@ export default function OrderDetails() {
                     )}
                     {order.shipping_address.phone && (
                       <p className="mt-2 text-sm">
-                        📞 {order.shipping_address.phone}
+                        ðŸ“ž {order.shipping_address.phone}
                       </p>
                     )}
                   </div>
@@ -643,7 +771,7 @@ export default function OrderDetails() {
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <CreditCard size={18} />
-                    عنوان الفواتير
+                    Ø¹Ù†ÙˆØ§Ù† Ø§Ù„ÙÙˆØ§ØªÙŠØ±
                   </h2>
                   <div className="text-gray-700 space-y-1">
                     {(order.billing_address.first_name ||
@@ -679,7 +807,7 @@ export default function OrderDetails() {
                     )}
                     {order.billing_address.phone && (
                       <p className="mt-2 text-sm">
-                        📞 {order.billing_address.phone}
+                        ðŸ“ž {order.billing_address.phone}
                       </p>
                     )}
                   </div>
@@ -690,7 +818,7 @@ export default function OrderDetails() {
               <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <CreditCard size={18} />
-                  حالة الدفع
+                  Ø­Ø§Ù„Ø© Ø§Ù„Ø¯ÙØ¹
                 </h2>
                 <div className="space-y-3">
                   <span
@@ -701,7 +829,7 @@ export default function OrderDetails() {
                   {order.payment_gateway_names &&
                     order.payment_gateway_names.length > 0 && (
                       <div>
-                        <p className="text-sm text-gray-600">طريقة الدفع</p>
+                        <p className="text-sm text-gray-600">Ø·Ø±ÙŠÙ‚Ø© Ø§Ù„Ø¯ÙØ¹</p>
                         <p className="text-gray-800">
                           {order.payment_gateway_names.join(", ")}
                         </p>
@@ -709,7 +837,7 @@ export default function OrderDetails() {
                     )}
                   {order.processing_method && (
                     <div>
-                      <p className="text-sm text-gray-600">طريقة المعالجة</p>
+                      <p className="text-sm text-gray-600">Ø·Ø±ÙŠÙ‚Ø© Ø§Ù„Ù…Ø¹Ø§Ù„Ø¬Ø©</p>
                       <p className="text-gray-800">{order.processing_method}</p>
                     </div>
                   )}
@@ -720,7 +848,7 @@ export default function OrderDetails() {
               <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Truck size={18} />
-                  حالة التوصيل
+                  Ø­Ø§Ù„Ø© Ø§Ù„ØªÙˆØµÙŠÙ„
                 </h2>
                 <div className="space-y-3">
                   <span
@@ -737,7 +865,7 @@ export default function OrderDetails() {
                   {order.fulfillments && order.fulfillments.length > 0 && (
                     <div className="mt-3 space-y-2">
                       <p className="text-sm text-gray-600 font-medium">
-                        معلومات الشحن:
+                        Ù…Ø¹Ù„ÙˆÙ…Ø§Øª Ø§Ù„Ø´Ø­Ù†:
                       </p>
                       {order.fulfillments.map((fulfillment, idx) => (
                         <div
@@ -745,10 +873,10 @@ export default function OrderDetails() {
                           className="text-sm bg-gray-50 p-2 rounded"
                         >
                           {fulfillment.tracking_company && (
-                            <p>الشركة: {fulfillment.tracking_company}</p>
+                            <p>Ø§Ù„Ø´Ø±ÙƒØ©: {fulfillment.tracking_company}</p>
                           )}
                           {fulfillment.tracking_number && (
-                            <p>رقم التتبع: {fulfillment.tracking_number}</p>
+                            <p>Ø±Ù‚Ù… Ø§Ù„ØªØªØ¨Ø¹: {fulfillment.tracking_number}</p>
                           )}
                           {fulfillment.tracking_url && (
                             <a
@@ -757,7 +885,7 @@ export default function OrderDetails() {
                               rel="noopener noreferrer"
                               className="text-blue-600 hover:underline"
                             >
-                              تتبع الشحنة
+                              ØªØªØ¨Ø¹ Ø§Ù„Ø´Ø­Ù†Ø©
                             </a>
                           )}
                         </div>
@@ -771,7 +899,7 @@ export default function OrderDetails() {
               {order.shipping_lines && order.shipping_lines.length > 0 && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    طريقة الشحن
+                    Ø·Ø±ÙŠÙ‚Ø© Ø§Ù„Ø´Ø­Ù†
                   </h2>
                   {order.shipping_lines.map((line, idx) => (
                     <div key={idx} className="space-y-1">
@@ -779,11 +907,11 @@ export default function OrderDetails() {
                         {line.title}
                       </p>
                       <p className="text-sm text-gray-600">
-                        {line.price} {order.currency}
+                        {line.price} {CURRENCY_LABEL}
                       </p>
                       {line.code && (
                         <p className="text-xs text-gray-500">
-                          الكود: {line.code}
+                          Ø§Ù„ÙƒÙˆØ¯: {line.code}
                         </p>
                       )}
                     </div>
@@ -795,7 +923,7 @@ export default function OrderDetails() {
               {order.discount_codes && order.discount_codes.length > 0 && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    أكواد الخصم
+                    Ø£ÙƒÙˆØ§Ø¯ Ø§Ù„Ø®ØµÙ…
                   </h2>
                   {order.discount_codes.map((discount, idx) => (
                     <div
@@ -806,11 +934,11 @@ export default function OrderDetails() {
                         {discount.code}
                       </p>
                       <p className="text-sm text-green-700">
-                        {discount.amount} {order.currency}
+                        {discount.amount} {CURRENCY_LABEL}
                       </p>
                       {discount.type && (
                         <p className="text-xs text-green-600">
-                          النوع: {discount.type}
+                          Ø§Ù„Ù†ÙˆØ¹: {discount.type}
                         </p>
                       )}
                     </div>
@@ -822,7 +950,7 @@ export default function OrderDetails() {
               {order.tags && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    التصنيفات
+                    Ø§Ù„ØªØµÙ†ÙŠÙØ§Øª
                   </h2>
                   <div className="flex flex-wrap gap-2">
                     {order.tags.split(",").map((tag, idx) => (
@@ -841,7 +969,7 @@ export default function OrderDetails() {
               {order.customer_note && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    ملاحظة العميل
+                    Ù…Ù„Ø§Ø­Ø¸Ø© Ø§Ù„Ø¹Ù…ÙŠÙ„
                   </h2>
                   <p className="text-gray-700 text-sm whitespace-pre-wrap">
                     {order.customer_note}
@@ -853,22 +981,22 @@ export default function OrderDetails() {
               {order.source_name && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    مصدر الطلب
+                    Ù…ØµØ¯Ø± Ø§Ù„Ø·Ù„Ø¨
                   </h2>
                   <div className="space-y-2 text-sm">
                     <p className="text-gray-700">
-                      <span className="font-medium">المصدر:</span>{" "}
+                      <span className="font-medium">Ø§Ù„Ù…ØµØ¯Ø±:</span>{" "}
                       {order.source_name}
                     </p>
                     {order.referring_site && (
                       <p className="text-gray-700">
-                        <span className="font-medium">الموقع المُحيل:</span>{" "}
+                        <span className="font-medium">Ø§Ù„Ù…ÙˆÙ‚Ø¹ Ø§Ù„Ù…ÙØ­ÙŠÙ„:</span>{" "}
                         {order.referring_site}
                       </p>
                     )}
                     {order.landing_site && (
                       <p className="text-gray-700">
-                        <span className="font-medium">صفحة الهبوط:</span>{" "}
+                        <span className="font-medium">ØµÙØ­Ø© Ø§Ù„Ù‡Ø¨ÙˆØ·:</span>{" "}
                         {order.landing_site}
                       </p>
                     )}
@@ -880,22 +1008,22 @@ export default function OrderDetails() {
               {order.last_synced_at && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    حالة المزامنة
+                    Ø­Ø§Ù„Ø© Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©
                   </h2>
                   <div className="space-y-2 text-sm">
                     <div className="flex items-center gap-2">
                       {getSyncStatusIcon()}
                       <span className="text-gray-600">
                         {order.pending_sync
-                          ? "في انتظار المزامنة"
+                          ? "ÙÙŠ Ø§Ù†ØªØ¸Ø§Ø± Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©"
                           : order.sync_error
-                            ? "فشلت المزامنة"
-                            : "تمت المزامنة"}
+                            ? "ÙØ´Ù„Øª Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©"
+                            : "ØªÙ…Øª Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©"}
                       </span>
                     </div>
                     {order.last_synced_at && (
                       <p className="text-gray-600">
-                        آخر مزامنة: {formatDate(order.last_synced_at)}
+                        Ø¢Ø®Ø± Ù…Ø²Ø§Ù…Ù†Ø©: {formatDate(order.last_synced_at)}
                       </p>
                     )}
                     {order.sync_error && (

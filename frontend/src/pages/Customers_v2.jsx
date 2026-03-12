@@ -133,7 +133,7 @@ export default function Customers() {
                         {customer.orders_count || 0}
                       </td>
                       <td className="px-6 py-4 text-sm font-bold text-green-600">
-                        ${parseFloat(customer.total_spent || 0).toFixed(2)}
+                        {parseFloat(customer.total_spent || 0).toFixed(2)} LE
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">
                         {new Date(customer.created_at).toLocaleDateString()}

@@ -15,19 +15,25 @@ import {
 import api, { getErrorMessage } from "../utils/api";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
+import { extractArray, extractObject } from "../utils/response";
 import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
 
 const POLLING_INTERVAL_MS = 30000;
+const CURRENCY_LABEL = "LE";
 
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const formatCurrency = (value) => `$${toNumber(value).toLocaleString()}`;
+const formatCurrency = (value) =>
+  `${toNumber(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} ${CURRENCY_LABEL}`;
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -40,18 +46,11 @@ const formatDate = (value) => {
   });
 };
 
-const formatOrderTotal = (amount, currency = "USD") => {
-  const normalizedCurrency = String(currency || "USD").toUpperCase();
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: normalizedCurrency,
-      maximumFractionDigits: 2,
-    }).format(toNumber(amount));
-  } catch {
-    return `${toNumber(amount).toFixed(2)} ${normalizedCurrency}`;
-  }
-};
+const formatOrderTotal = (amount) =>
+  `${toNumber(amount).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} ${CURRENCY_LABEL}`;
 
 const PAYMENT_STATUS_STYLE = {
   paid: "bg-emerald-100 text-emerald-700 border border-emerald-200",
@@ -118,39 +117,61 @@ export default function Dashboard() {
             ? api.get("/daily-reports/all")
             : Promise.resolve({ data: [] });
 
-        const [statsResponse, ordersResponse, requestsResponse, reportsResponse] =
-          await Promise.all([
+        const [statsResult, ordersResult, requestsResult, reportsResult] =
+          await Promise.allSettled([
             statsPromise,
             ordersPromise,
             requestsPromise,
             reportsPromise,
           ]);
 
-        setStats(statsResponse.data || {});
+        if (statsResult.status === "fulfilled") {
+          setStats(extractObject(statsResult.value.data));
+        } else {
+          setStats({
+            total_sales: 0,
+            total_orders: 0,
+            total_products: 0,
+            total_customers: 0,
+            avg_order_value: 0,
+          });
+        }
 
-        const ordersData = Array.isArray(ordersResponse.data)
-          ? ordersResponse.data
-          : [];
+        const ordersData =
+          ordersResult.status === "fulfilled"
+            ? extractArray(ordersResult.value.data)
+            : [];
         const sortedOrders = [...ordersData].sort(
           (a, b) => new Date(b.created_at) - new Date(a.created_at),
         );
         setRecentOrders(sortedOrders.slice(0, 6));
 
-        const requestsData = Array.isArray(requestsResponse.data)
-          ? requestsResponse.data
-          : [];
+        const requestsData =
+          requestsResult.status === "fulfilled"
+            ? extractArray(requestsResult.value.data)
+            : [];
         setPendingRequests(
           requestsData.filter((item) => String(item.status) === "pending"),
         );
 
-        const reportsData = Array.isArray(reportsResponse.data)
-          ? reportsResponse.data
-          : [];
+        const reportsData =
+          reportsResult.status === "fulfilled"
+            ? extractArray(reportsResult.value.data)
+            : [];
         setRecentReports(
           reportsData
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
             .slice(0, 5),
         );
+
+        if (!silent) {
+          const firstFailure = [statsResult, ordersResult, requestsResult, reportsResult]
+            .filter((result) => result.status === "rejected")
+            .map((result) => result.reason)[0];
+          if (firstFailure) {
+            setError(getErrorMessage(firstFailure));
+          }
+        }
 
         setLastUpdatedAt(new Date());
       } catch (requestError) {
@@ -422,7 +443,7 @@ export default function Dashboard() {
                             {order.customer_name || "Unknown customer"}
                           </td>
                           <td className="px-5 py-3.5 text-sm font-medium text-slate-800">
-                            {formatOrderTotal(order.total_price, order.currency)}
+                            {formatOrderTotal(order.total_price)}
                           </td>
                           <td className="px-5 py-3.5 text-sm">
                             <span

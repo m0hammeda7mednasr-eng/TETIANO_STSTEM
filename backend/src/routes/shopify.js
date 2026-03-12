@@ -169,6 +169,22 @@ const resolveSyncToken = async ({ userId, requestedStoreId, isAdmin }) => {
   return null;
 };
 
+const resolveUpdateErrorStatusCode = (errorMessage) => {
+  const message = String(errorMessage || "").toLowerCase();
+  if (
+    message.includes("required") ||
+    message.includes("invalid") ||
+    message.includes("cannot") ||
+    message.includes("no updates")
+  ) {
+    return 400;
+  }
+  if (message.includes("shopify")) {
+    return 502;
+  }
+  return 500;
+};
+
 const sanitizeVariantForRole = (variant, isAdmin) => {
   if (!variant || isAdmin) {
     return variant;
@@ -209,6 +225,37 @@ const parseJsonField = (value) => {
     }
   }
   return value;
+};
+
+const getOrderFinancialStatus = (order) => {
+  const data = parseJsonField(order?.data);
+  return String(order?.financial_status || order?.status || data?.financial_status || "")
+    .toLowerCase()
+    .trim();
+};
+
+const isShopifyPaidOrder = (order) => {
+  const status = getOrderFinancialStatus(order);
+  return status === "paid" || status === "partially_paid";
+};
+
+const resolveOrderPaymentMethod = (order) => {
+  if (isShopifyPaidOrder(order)) {
+    return "shopify";
+  }
+
+  const data = parseJsonField(order?.data);
+  const manualMethod = String(
+    order?.manual_payment_method || data?.tetiano_payment_method || "",
+  )
+    .toLowerCase()
+    .trim();
+
+  if (manualMethod === "instapay" || manualMethod === "wallet") {
+    return manualMethod;
+  }
+
+  return "none";
 };
 
 const applyOrdersQueryFilters = (rows, query = {}) => {
@@ -280,6 +327,13 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
       }
       return status === paymentStatus;
     });
+  }
+
+  if (query.payment_method && query.payment_method !== "all") {
+    const paymentMethod = String(query.payment_method).toLowerCase().trim();
+    filtered = filtered.filter(
+      (order) => resolveOrderPaymentMethod(order) === paymentMethod,
+    );
   }
 
   if (query.fulfillment_status && query.fulfillment_status !== "all") {
@@ -754,7 +808,11 @@ router.get(
     console.log(
       `Returning ${data?.length || 0} orders for user ${req.user.id}`,
     );
-    const filteredOrders = applyOrdersQueryFilters(data || [], req.query);
+    const normalizedOrders = (data || []).map((order) => ({
+      ...order,
+      payment_method: resolveOrderPaymentMethod(order),
+    }));
+    const filteredOrders = applyOrdersQueryFilters(normalizedOrders, req.query);
     res.json(filteredOrders);
   } catch (e) {
     console.error("Exception fetching orders:", e);
@@ -872,7 +930,7 @@ router.post(
     res.json(result);
   } catch (error) {
     console.error("Update price error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(resolveUpdateErrorStatusCode(error.message)).json({ error: error.message });
   }
   },
 );
@@ -899,7 +957,7 @@ router.post(
     res.json(result);
   } catch (error) {
     console.error("Update inventory error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(resolveUpdateErrorStatusCode(error.message)).json({ error: error.message });
   }
   },
 );
@@ -944,7 +1002,7 @@ router.post(
     res.json(result);
   } catch (error) {
     console.error("Update product error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(resolveUpdateErrorStatusCode(error.message)).json({ error: error.message });
   }
   },
 );
@@ -1009,28 +1067,112 @@ router.post(
 );
 
 router.post(
+  "/orders/:id/payment-method",
+  verifyToken,
+  requirePermission("can_edit_orders"),
+  async (req, res) => {
+  try {
+    const allowedMethods = new Set(["none", "shopify", "instapay", "wallet"]);
+    const requestedMethod = String(req.body?.payment_method || "")
+      .toLowerCase()
+      .trim();
+    const orderId = req.params.id;
+    const userId = req.user.id;
+
+    if (!allowedMethods.has(requestedMethod)) {
+      return res.status(400).json({
+        error: "payment_method must be one of: none, shopify, instapay, wallet",
+      });
+    }
+
+    const { data: order, error } = await Order.findByIdForUser(userId, orderId);
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const isShopifyPaid = isShopifyPaidOrder(order);
+    if (isShopifyPaid && requestedMethod !== "shopify") {
+      return res.status(400).json({
+        error: "This order is already paid on Shopify and must stay on Shopify payment method",
+      });
+    }
+    if (!isShopifyPaid && requestedMethod === "shopify") {
+      return res.status(400).json({
+        error: "Shopify payment method can only be selected for paid Shopify orders",
+      });
+    }
+
+    const currentData = parseJsonField(order.data);
+    const updatedData = { ...currentData };
+    if (requestedMethod === "none") {
+      delete updatedData.tetiano_payment_method;
+    } else {
+      updatedData.tetiano_payment_method = requestedMethod;
+    }
+
+    const { supabase } = await import("../supabaseClient.js");
+    const { data: updatedOrder, error: updateError } = await supabase
+      .from("orders")
+      .update({
+        data: updatedData,
+        local_updated_at: new Date().toISOString(),
+      })
+      .eq("id", orderId)
+      .select()
+      .single();
+
+    if (updateError) {
+      return res.status(500).json({ error: updateError.message });
+    }
+
+    const paymentMethod = resolveOrderPaymentMethod(updatedOrder);
+    res.json({
+      success: true,
+      payment_method: paymentMethod,
+      order: {
+        ...updatedOrder,
+        payment_method: paymentMethod,
+      },
+    });
+  } catch (error) {
+    console.error("Update order payment method error:", error);
+    res.status(resolveUpdateErrorStatusCode(error.message)).json({ error: error.message });
+  }
+  },
+);
+
+router.post(
   "/orders/:id/update-status",
   verifyToken,
   requirePermission("can_edit_orders"),
   async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, void_reason } = req.body;
     const orderId = req.params.id;
     const userId = req.user.id;
 
     if (!status) {
       return res.status(400).json({ error: "Status is required" });
     }
+    if (status === "voided" && !String(void_reason || "").trim()) {
+      return res.status(400).json({ error: "Void reason is required" });
+    }
 
     const result = await OrderManagementService.updateOrderStatus(
       userId,
       orderId,
       status,
+      {
+        voidReason: void_reason,
+      },
     );
-      res.json(result);
+    res.json(result);
   } catch (error) {
     console.error("Update order status error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(resolveUpdateErrorStatusCode(error.message)).json({ error: error.message });
   }
   },
 );

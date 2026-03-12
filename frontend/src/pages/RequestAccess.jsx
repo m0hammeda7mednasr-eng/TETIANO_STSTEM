@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api, { getErrorMessage } from "../utils/api";
+import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
 const REQUESTABLE_PERMISSIONS = [
@@ -42,7 +43,7 @@ export default function RequestAccess() {
       }
 
       const response = await api.get("/access-requests/my-requests");
-      setRequests(Array.isArray(response.data) ? response.data : []);
+      setRequests(extractArray(response.data));
     } catch (error) {
       if (!silent) {
         setMessage({ type: "error", text: getErrorMessage(error) });

@@ -15,6 +15,8 @@ import {
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 
+const CURRENCY_LABEL = "LE";
+
 export default function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -339,13 +341,13 @@ export default function ProductDetails() {
                           </div>
                           <div className="text-left">
                             <p className="text-lg font-bold text-gray-800">
-                              {variant.price} {product.currency}
+                              {variant.price} {CURRENCY_LABEL}
                             </p>
                             {variant.compare_at_price &&
                               parseFloat(variant.compare_at_price) >
                                 parseFloat(variant.price) && (
                                 <p className="text-sm text-gray-500 line-through">
-                                  {variant.compare_at_price} {product.currency}
+                                  {variant.compare_at_price} {CURRENCY_LABEL}
                                 </p>
                               )}
                             <p
@@ -476,7 +478,7 @@ export default function ProductDetails() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      السعر ({product.currency || "USD"})
+                      السعر ({CURRENCY_LABEL})
                     </label>
                     {editing ? (
                       <input
@@ -494,7 +496,7 @@ export default function ProductDetails() {
                       />
                     ) : (
                       <p className="text-2xl font-bold text-gray-800">
-                        {product.price} {product.currency || "USD"}
+                        {product.price} {CURRENCY_LABEL}
                       </p>
                     )}
                   </div>
@@ -502,7 +504,7 @@ export default function ProductDetails() {
                   {isAdmin && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        سعر التكلفة ({product.currency || "USD"})
+                        سعر التكلفة ({CURRENCY_LABEL})
                       </label>
                       {editing ? (
                         <input
@@ -520,7 +522,7 @@ export default function ProductDetails() {
                         />
                       ) : (
                         <p className="text-2xl font-bold text-gray-800">
-                          {product.cost_price || 0} {product.currency || "USD"}
+                          {product.cost_price || 0} {CURRENCY_LABEL}
                         </p>
                       )}
                     </div>
@@ -539,7 +541,7 @@ export default function ProductDetails() {
                               parseFloat(product.price) -
                               parseFloat(product.cost_price)
                             ).toFixed(2)}{" "}
-                            {product.currency || "USD"}
+                            {CURRENCY_LABEL}
                           </span>
                         </div>
                         <div className="flex justify-between items-center">
@@ -567,7 +569,7 @@ export default function ProductDetails() {
                                   parseFloat(product.cost_price)) *
                                 product.inventory_quantity
                               ).toFixed(2)}{" "}
-                              {product.currency || "USD"}
+                              {CURRENCY_LABEL}
                             </span>
                           </div>
                         )}
@@ -710,13 +712,13 @@ export default function ProductDetails() {
                     <div>
                       <p className="text-sm text-gray-600">أقل سعر</p>
                       <p className="text-xl font-bold text-gray-800">
-                        {product.price_min} {product.currency || "USD"}
+                        {product.price_min} {CURRENCY_LABEL}
                       </p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-600">أعلى سعر</p>
                       <p className="text-xl font-bold text-gray-800">
-                        {product.price_max} {product.currency || "USD"}
+                        {product.price_max} {CURRENCY_LABEL}
                       </p>
                     </div>
                   </div>
@@ -739,13 +741,13 @@ export default function ProductDetails() {
                       <p className="text-sm text-gray-600">السعر الأصلي</p>
                       <p className="text-lg font-bold text-gray-500 line-through">
                         {product.compare_at_price_min}{" "}
-                        {product.currency || "USD"}
+                        {CURRENCY_LABEL}
                       </p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-600">السعر بعد التخفيض</p>
                       <p className="text-xl font-bold text-red-600">
-                        {product.price_min} {product.currency || "USD"}
+                        {product.price_min} {CURRENCY_LABEL}
                       </p>
                     </div>
                     <div>

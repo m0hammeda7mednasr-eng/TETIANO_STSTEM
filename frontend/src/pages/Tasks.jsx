@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api, { getErrorMessage } from "../utils/api";
+import { extractArray } from "../utils/response";
 import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
@@ -73,16 +74,14 @@ export default function Tasks() {
       ]);
 
       if (tasksResult.status === "fulfilled") {
-        setTasks(Array.isArray(tasksResult.value.data) ? tasksResult.value.data : []);
+        setTasks(extractArray(tasksResult.value.data));
       } else if (!silent) {
         setTasks([]);
         setMessage({ type: "error", text: getErrorMessage(tasksResult.reason) });
       }
 
       if (assigneesResult.status === "fulfilled") {
-        setUsers(
-          Array.isArray(assigneesResult.value.data) ? assigneesResult.value.data : [],
-        );
+        setUsers(extractArray(assigneesResult.value.data));
       } else {
         const status = assigneesResult.reason?.response?.status;
 
@@ -92,9 +91,7 @@ export default function Tasks() {
           setAssigneesEndpointAvailable(false);
           try {
             const fallbackUsersResponse = await api.get("/users");
-            setUsers(
-              Array.isArray(fallbackUsersResponse.data) ? fallbackUsersResponse.data : [],
-            );
+            setUsers(extractArray(fallbackUsersResponse.data));
           } catch {
             setUsers([]);
           }

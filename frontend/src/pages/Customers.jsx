@@ -13,14 +13,18 @@ import {
 import api from "../utils/api";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
+import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
 const POLLING_INTERVAL_MS = 30000;
+const CURRENCY_LABEL = "LE";
 
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+const formatAmount = (value) => `${toNumber(value).toFixed(2)} ${CURRENCY_LABEL}`;
 
 const parseJson = (value) => {
   if (!value) return {};
@@ -68,21 +72,27 @@ export default function Customers() {
           ? api.get("/shopify/orders?limit=250&sort_by=created_at&sort_dir=desc")
           : Promise.resolve({ data: [] });
 
-        const [customersResponse, ordersResponse] = await Promise.all([
+        const [customersResult, ordersResult] = await Promise.allSettled([
           customersPromise,
           ordersPromise,
         ]);
 
-        const customersData = Array.isArray(customersResponse.data)
-          ? customersResponse.data
-          : [];
-        const ordersData = Array.isArray(ordersResponse.data)
-          ? ordersResponse.data
-          : [];
+        const customersData =
+          customersResult.status === "fulfilled"
+            ? extractArray(customersResult.value.data)
+            : [];
+        const ordersData =
+          ordersResult.status === "fulfilled"
+            ? extractArray(ordersResult.value.data)
+            : [];
 
         setCustomers(customersData);
         setOrders(ordersData);
         setLastUpdatedAt(new Date());
+
+        if (!silent && customersResult.status === "rejected") {
+          setError("Failed to load customers");
+        }
       } catch (requestError) {
         console.error("Failed to fetch customers:", requestError);
         if (!silent) {
@@ -280,12 +290,12 @@ export default function Customers() {
             <SummaryCard
               icon={ShoppingCart}
               label="Total Spent"
-              value={`$${summary.totalSpent.toFixed(2)}`}
+              value={formatAmount(summary.totalSpent)}
             />
             <SummaryCard
               icon={User}
               label="Avg Spend"
-              value={`$${summary.avgSpent.toFixed(2)}`}
+              value={formatAmount(summary.avgSpent)}
             />
           </div>
 
@@ -399,7 +409,7 @@ export default function Customers() {
                           {toNumber(customer.orders_count).toLocaleString()}
                         </td>
                         <td className="px-4 py-3 text-sm font-semibold text-slate-800">
-                          ${toNumber(customer.total_spent).toFixed(2)}
+                          {formatAmount(customer.total_spent)}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-600">
                           {customer.created_at
@@ -453,9 +463,9 @@ export default function Customers() {
                 <InfoItem
                   icon={ShoppingCart}
                   label="Orders / Spent"
-                  value={`${toNumber(selectedCustomer.orders_count)} / $${toNumber(
+                  value={`${toNumber(selectedCustomer.orders_count)} / ${formatAmount(
                     selectedCustomer.total_spent,
-                  ).toFixed(2)}`}
+                  )}`}
                 />
               </div>
 
@@ -523,7 +533,7 @@ export default function Customers() {
                                   : "-"}
                               </td>
                               <td className="py-2 text-sm text-slate-700">
-                                {toNumber(order.total_price).toFixed(2)} {order.currency || "USD"}
+                                {formatAmount(order.total_price)}
                               </td>
                               <td className="py-2 text-sm text-slate-600">
                                 {order.financial_status || order.status || "-"}

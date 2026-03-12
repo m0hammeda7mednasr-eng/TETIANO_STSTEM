@@ -1,4 +1,5 @@
 import { Order } from "../models/index.js";
+import axios from "axios";
 
 const getShopifyTokenForStore = async (storeId, fallbackUserId) => {
   const { supabase } = await import("../supabaseClient.js");
@@ -183,6 +184,21 @@ export class OrderManagementService {
 
       // Extract financial status
       order.financial_status = orderData?.financial_status || order.status;
+      const normalizedFinancialStatus = String(order.financial_status || "")
+        .toLowerCase()
+        .trim();
+      const manualPaymentMethod = String(
+        orderData?.tetiano_payment_method || "",
+      )
+        .toLowerCase()
+        .trim();
+      order.payment_method =
+        normalizedFinancialStatus === "paid" ||
+        normalizedFinancialStatus === "partially_paid"
+          ? "shopify"
+          : manualPaymentMethod === "instapay" || manualPaymentMethod === "wallet"
+            ? manualPaymentMethod
+            : "none";
 
       // Extract tags
       order.tags = orderData?.tags || "";
@@ -374,7 +390,7 @@ export class OrderManagementService {
   /**
    * Update order status
    */
-  static async updateOrderStatus(userId, orderId, newStatus) {
+  static async updateOrderStatus(userId, orderId, newStatus, options = {}) {
     // Validate status
     const validStatuses = [
       "pending",
@@ -388,6 +404,16 @@ export class OrderManagementService {
 
     if (!validStatuses.includes(newStatus)) {
       throw new Error("Invalid status");
+    }
+
+    const voidReason = String(options?.voidReason || "").trim();
+    if (newStatus === "voided") {
+      if (!voidReason) {
+        throw new Error("Void reason is required");
+      }
+      if (voidReason.length < 3) {
+        throw new Error("Void reason must be at least 3 characters long");
+      }
     }
 
     try {
@@ -405,6 +431,13 @@ export class OrderManagementService {
 
       // Save old status
       const oldStatus = order.status;
+      if (String(oldStatus || "") === String(newStatus || "")) {
+        return {
+          success: true,
+          localUpdate: false,
+          shopifySync: "not_needed",
+        };
+      }
 
       // Update order
       const { supabase } = await import("../supabaseClient.js");
@@ -425,17 +458,33 @@ export class OrderManagementService {
       await this.logSyncOperation(userId, orderId, "order_status_update", {
         old_status: oldStatus,
         new_status: newStatus,
+        void_reason: newStatus === "voided" ? voidReason : null,
       });
 
-      // Sync to Shopify asynchronously
-      this.syncStatusToShopify(userId, orderId, newStatus).catch((err) => {
-        console.error("Shopify status sync failed:", err);
-      });
+      try {
+        await this.syncStatusToShopify(userId, orderId, newStatus, {
+          voidReason,
+        });
+      } catch (syncError) {
+        await supabase
+          .from("orders")
+          .update({
+            status: oldStatus,
+            pending_sync: false,
+            sync_error: syncError.message,
+            local_updated_at: new Date().toISOString(),
+          })
+          .eq("id", orderId);
+
+        throw new Error(
+          `Shopify sync failed. Status rolled back: ${syncError.message}`,
+        );
+      }
 
       return {
         success: true,
         localUpdate: true,
-        shopifySync: "pending",
+        shopifySync: "synced",
       };
     } catch (error) {
       console.error("Update order status error:", error);
@@ -481,6 +530,7 @@ export class OrderManagementService {
         notes[noteIndex].synced_to_shopify = true;
       }
 
+      const { supabase } = await import("../supabaseClient.js");
       await supabase
         .from("orders")
         .update({
@@ -508,7 +558,7 @@ export class OrderManagementService {
   /**
    * Sync status to Shopify
    */
-  static async syncStatusToShopify(userId, orderId, newStatus) {
+  static async syncStatusToShopify(userId, orderId, newStatus, options = {}) {
     try {
       const { data: order } = await Order.findByIdForUser(userId, orderId);
       if (!order || !order.shopify_id) {
@@ -521,24 +571,59 @@ export class OrderManagementService {
         throw new Error("Shopify not connected");
       }
 
-      // Note: Shopify API for updating order status
-      // This is a simplified version - actual implementation may vary
-      console.log(
-        `Status synced to Shopify for order ${orderId}: ${newStatus}`,
-      );
+      const headers = {
+        "X-Shopify-Access-Token": tokenData.access_token,
+        "Content-Type": "application/json",
+      };
 
-      // Update sync status
+      const statusLogLine = `[Tetiano] Status changed to "${newStatus}" at ${new Date().toISOString()}${options?.voidReason ? ` (Reason: ${options.voidReason})` : ""}`;
+      const parsedOrderData =
+        typeof order.data === "string"
+          ? JSON.parse(order.data || "{}")
+          : order.data || {};
+      const existingNote = String(parsedOrderData?.note || order.note || "").trim();
+      const nextNote = existingNote ? `${existingNote}\n${statusLogLine}` : statusLogLine;
+
+      let responseData = null;
+      if (String(newStatus).toLowerCase() === "voided") {
+        const cancelResponse = await axios.post(
+          `https://${tokenData.shop}/admin/api/2024-01/orders/${order.shopify_id}/cancel.json`,
+          {
+            reason: "other",
+            email: false,
+          },
+          { headers },
+        );
+        responseData = cancelResponse.data;
+      } else {
+        const updateResponse = await axios.put(
+          `https://${tokenData.shop}/admin/api/2024-01/orders/${order.shopify_id}.json`,
+          {
+            order: {
+              id: parseInt(order.shopify_id, 10),
+              note: nextNote,
+            },
+          },
+          { headers },
+        );
+        responseData = updateResponse.data;
+      }
+
+      const { supabase } = await import("../supabaseClient.js");
       await supabase
         .from("orders")
         .update({
           pending_sync: false,
           last_synced_at: new Date().toISOString(),
-          shopify_updated_at: new Date().toISOString(),
+          shopify_updated_at:
+            responseData?.order?.updated_at ||
+            responseData?.updated_at ||
+            new Date().toISOString(),
           sync_error: null,
         })
         .eq("id", orderId);
 
-      await this.updateSyncOperationStatus(userId, orderId, "success");
+      await this.updateSyncOperationStatus(userId, orderId, "success", responseData);
 
       return { success: true };
     } catch (error) {
@@ -548,7 +633,7 @@ export class OrderManagementService {
       await supabase
         .from("orders")
         .update({
-          pending_sync: true,
+          pending_sync: false,
           sync_error: error.message,
         })
         .eq("id", orderId);

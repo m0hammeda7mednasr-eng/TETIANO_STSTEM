@@ -16,12 +16,14 @@ import Sidebar from "../components/Sidebar";
 import ProductEditModal from "../components/ProductEditModal";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
+import { extractArray } from "../utils/response";
 import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
 
 const POLLING_INTERVAL_MS = 30000;
+const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
   searchTerm: "",
@@ -43,6 +45,8 @@ const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+const formatAmount = (value) => `${toNumber(value).toFixed(2)} ${CURRENCY_LABEL}`;
 
 const normalizeDate = (value) => {
   if (!value) return null;
@@ -115,7 +119,7 @@ export default function Products() {
       }
       try {
         const response = await api.get("/shopify/products");
-        setProducts(Array.isArray(response.data) ? response.data : []);
+        setProducts(extractArray(response.data));
         setLastUpdatedAt(new Date());
       } catch (requestError) {
         console.error("Error fetching products:", requestError);
@@ -736,7 +740,7 @@ export default function Products() {
                       <div>
                         <p className="text-xs text-slate-500">Price</p>
                         <p className="font-bold text-slate-900">
-                          {toNumber(product.price).toFixed(2)} {product.currency || "USD"}
+                          {formatAmount(product.price)}
                         </p>
                       </div>
                       <div className="text-right">
@@ -762,8 +766,9 @@ export default function Products() {
                           <div className="flex justify-between">
                             <span>Unit profit</span>
                             <span className="font-bold">
-                              {(toNumber(product.price) - toNumber(product.cost_price)).toFixed(2)}{" "}
-                              {product.currency || "USD"}
+                              {formatAmount(
+                                toNumber(product.price) - toNumber(product.cost_price),
+                              )}
                             </span>
                           </div>
                         </div>

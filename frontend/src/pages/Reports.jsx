@@ -18,6 +18,7 @@ import {
 } from "recharts";
 import Sidebar from "../components/Sidebar";
 import api, { getErrorMessage } from "../utils/api";
+import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
 const RANGE_OPTIONS = [
@@ -89,7 +90,7 @@ export default function Reports() {
       const analyticsResult = results[1];
 
       if (reportsResult.status === "fulfilled") {
-        setReports(Array.isArray(reportsResult.value.data) ? reportsResult.value.data : []);
+        setReports(extractArray(reportsResult.value.data));
       } else {
         setReports([]);
       }

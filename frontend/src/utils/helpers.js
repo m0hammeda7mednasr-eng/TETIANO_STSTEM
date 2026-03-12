@@ -10,11 +10,15 @@ export const isAuthenticated = () => {
 };
 
 // Format utilities
-export const formatCurrency = (amount, currency = "USD") => {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency,
-  }).format(amount);
+export const CURRENCY_LABEL = "LE";
+
+export const formatCurrency = (amount) => {
+  const numericAmount = Number(amount);
+  const safeAmount = Number.isFinite(numericAmount) ? numericAmount : 0;
+  return `${new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(safeAmount)} ${CURRENCY_LABEL}`;
 };
 
 export const formatDate = (date) => {

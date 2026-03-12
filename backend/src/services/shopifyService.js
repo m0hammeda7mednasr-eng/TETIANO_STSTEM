@@ -93,9 +93,17 @@ export class ShopifyService {
     }
   }
 
-  static async getOrdersFromShopify(accessToken, shop) {
+  static async getOrdersFromShopify(accessToken, shop, options = {}) {
     try {
-      const url = `https://${shop}/admin/api/2024-01/orders.json?limit=250&status=any`;
+      const query = new URLSearchParams({
+        limit: "250",
+        status: "any",
+      });
+      const updatedAtMin = String(options?.updatedAtMin || "").trim();
+      if (updatedAtMin) {
+        query.set("updated_at_min", updatedAtMin);
+      }
+      const url = `https://${shop}/admin/api/2024-01/orders.json?${query.toString()}`;
       const allOrders = await this.#fetchAllPages(url, accessToken);
 
       return allOrders.map((order) => ({
@@ -118,6 +126,37 @@ export class ShopifyService {
       }));
     } catch (error) {
       console.error("Error processing orders from Shopify:", error.message);
+      throw error;
+    }
+  }
+
+  static async syncRecentOrders(
+    userId,
+    shop,
+    accessToken,
+    storeId,
+    options = {},
+  ) {
+    try {
+      const orders = await this.getOrdersFromShopify(accessToken, shop, {
+        updatedAtMin: options?.updatedAtMin,
+      });
+      const ordersWithUser = orders.map((order) => ({
+        ...order,
+        user_id: userId,
+        store_id: storeId,
+      }));
+
+      if (ordersWithUser.length > 0) {
+        await Order.updateMultiple(ordersWithUser);
+      }
+
+      return {
+        orders,
+        synced_count: ordersWithUser.length,
+      };
+    } catch (error) {
+      console.error("Error syncing recent Shopify orders:", error.message);
       throw error;
     }
   }

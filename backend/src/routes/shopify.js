@@ -28,6 +28,9 @@ const router = express.Router();
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
+const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
+const orderBackgroundSyncState = new Map();
 
 // Helper to get user-specific shopify credentials
 const getShopifyCredentials = async (userId) => {
@@ -563,6 +566,91 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
   return filtered.slice(offset, offset + limit);
 };
 
+const parseTimestampValue = (value) => {
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getLatestOrderTimestamp = (orders = []) => {
+  const latest = (orders || []).reduce((maxValue, order) => {
+    const candidate = Math.max(
+      parseTimestampValue(order?.shopify_updated_at),
+      parseTimestampValue(order?.updated_at),
+      parseTimestampValue(order?.created_at),
+    );
+    return candidate > maxValue ? candidate : maxValue;
+  }, 0);
+
+  return latest > 0 ? new Date(latest) : null;
+};
+
+const buildBackgroundSyncKey = ({ userId, storeId, shop }) =>
+  `${String(userId || "").trim()}::${String(storeId || "all").trim()}::${String(
+    shop || "",
+  ).trim()}`;
+
+const maybeSyncRecentOrdersInBackground = async ({
+  userId,
+  requestedStoreId,
+  isAdmin,
+  latestKnownOrderAt,
+}) => {
+  try {
+    const tokenData = await resolveSyncToken({
+      userId,
+      requestedStoreId,
+      isAdmin,
+    });
+
+    if (!tokenData?.access_token || !tokenData?.shop) {
+      return;
+    }
+
+    const syncOwnerUserId = tokenData.user_id || userId;
+    const syncStoreId = requestedStoreId || tokenData.store_id || null;
+    const key = buildBackgroundSyncKey({
+      userId: syncOwnerUserId,
+      storeId: syncStoreId,
+      shop: tokenData.shop,
+    });
+    const nowMs = Date.now();
+    const state = orderBackgroundSyncState.get(key);
+    if (state?.inFlight) {
+      return;
+    }
+    if (state?.lastRunMs && nowMs - state.lastRunMs < ORDER_BACKGROUND_SYNC_COOLDOWN_MS) {
+      return;
+    }
+
+    const latestKnownMs = parseTimestampValue(latestKnownOrderAt);
+    const fallbackStart = nowMs - ORDER_BACKGROUND_SYNC_LOOKBACK_MS;
+    const updatedAtMin = new Date(
+      latestKnownMs > 0 ? Math.max(fallbackStart, latestKnownMs - 60 * 60 * 1000) : fallbackStart,
+    ).toISOString();
+
+    orderBackgroundSyncState.set(key, {
+      inFlight: true,
+      lastRunMs: state?.lastRunMs || 0,
+    });
+
+    await ShopifyService.syncRecentOrders(
+      syncOwnerUserId,
+      tokenData.shop,
+      tokenData.access_token,
+      syncStoreId,
+      { updatedAtMin },
+    );
+
+    orderBackgroundSyncState.set(key, {
+      inFlight: false,
+      lastRunMs: Date.now(),
+    });
+  } catch (error) {
+    console.error("Background recent orders sync failed:", error);
+  }
+};
+
 const applyProductsQueryFilters = (rows, query = {}) => {
   let filtered = [...(rows || [])];
 
@@ -1054,7 +1142,18 @@ router.get(
       payment_method: resolveOrderPaymentMethod(order),
     }));
     const filteredOrders = applyOrdersQueryFilters(normalizedOrders, req.query);
+    const latestKnownOrderAt = getLatestOrderTimestamp(data || []);
     res.json(filteredOrders);
+
+    // Keep orders fresh even if webhooks are delayed/missed.
+    maybeSyncRecentOrdersInBackground({
+      userId: req.user.id,
+      requestedStoreId: getRequestedStoreId(req),
+      isAdmin: req.user?.role === "admin",
+      latestKnownOrderAt,
+    }).catch((backgroundSyncError) => {
+      console.error("Recent orders background sync trigger failed:", backgroundSyncError);
+    });
   } catch (e) {
     console.error("Exception fetching orders:", e);
     res.status(500).json({ error: e.message });

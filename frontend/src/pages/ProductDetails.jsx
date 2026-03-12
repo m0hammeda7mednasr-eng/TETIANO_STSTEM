@@ -29,10 +29,6 @@ export default function ProductDetails() {
   // Editable fields
   const [editedProduct, setEditedProduct] = useState({});
 
-  useEffect(() => {
-    fetchProductDetails();
-  }, [id, fetchProductDetails]);
-
   const fetchProductDetails = useCallback(async () => {
     setLoading(true);
     try {
@@ -46,6 +42,10 @@ export default function ProductDetails() {
       setLoading(false);
     }
   }, [id]);
+
+  useEffect(() => {
+    fetchProductDetails();
+  }, [id, fetchProductDetails]);
 
   const handleSave = async () => {
     if (!canEditProducts) return;

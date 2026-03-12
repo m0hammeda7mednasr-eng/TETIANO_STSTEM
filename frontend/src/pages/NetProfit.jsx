@@ -49,10 +49,6 @@ export default function NetProfit() {
     other: "",
   });
 
-  useEffect(() => {
-    loadAll();
-  }, [loadAll]);
-
   const loadAll = useCallback(async () => {
     try {
       setLoading(true);
@@ -88,6 +84,10 @@ export default function NetProfit() {
       setOperationalCosts([]);
     }
   };
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
 
   const filteredProducts = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();

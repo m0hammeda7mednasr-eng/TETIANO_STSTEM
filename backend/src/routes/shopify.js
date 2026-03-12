@@ -35,6 +35,41 @@ const normalizeBaseUrl = (value) =>
   String(value || "")
     .trim()
     .replace(/\/+$/, "");
+const SHOP_DOMAIN_REGEX = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
+
+const normalizeShopDomain = (value) => {
+  let raw = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (!raw) {
+    return "";
+  }
+
+  raw = raw.replace(/^https?:\/\//, "").replace(/^www\./, "");
+
+  if (raw.startsWith("admin.shopify.com/store/")) {
+    const parts = raw.split("/");
+    const storeSlug = String(parts[2] || "")
+      .trim()
+      .toLowerCase();
+    if (storeSlug) {
+      return `${storeSlug}.myshopify.com`;
+    }
+  }
+
+  raw = raw.split(/[/?#]/)[0];
+  if (raw.endsWith(".myshopify.com")) {
+    return raw;
+  }
+
+  const normalizedSlug = raw.replace(/[^a-z0-9-]/g, "");
+  if (!normalizedSlug) {
+    return "";
+  }
+
+  return `${normalizedSlug}.myshopify.com`;
+};
 
 // Helper to get user-specific shopify credentials
 const getShopifyCredentials = async (userId) => {
@@ -803,11 +838,14 @@ const applyProductsQueryFilters = (rows, query = {}) => {
 // 1. Get Shopify Authorization URL
 router.post("/auth-url", verifyToken, async (req, res) => {
   try {
-    const inputShop = String(req.body?.shop || "").trim().toLowerCase();
+    const inputShop = normalizeShopDomain(req.body?.shop);
     const userId = req.user.id; // Changed from req.user.userId
 
-    if (!inputShop) {
-      return res.status(400).json({ error: "Shop parameter is required" });
+    if (!inputShop || !SHOP_DOMAIN_REGEX.test(inputShop)) {
+      return res.status(400).json({
+        error:
+          "Invalid shop domain. Use format: your-store.myshopify.com",
+      });
     }
 
     const { apiKey } = await getShopifyCredentials(userId);

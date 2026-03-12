@@ -11,6 +11,32 @@ import {
 } from "lucide-react";
 import { markSharedDataUpdated } from "../utils/realtime";
 
+const normalizeShopDomain = (value) => {
+  let raw = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (!raw) return "";
+
+  raw = raw.replace(/^https?:\/\//, "").replace(/^www\./, "");
+
+  if (raw.startsWith("admin.shopify.com/store/")) {
+    const parts = raw.split("/");
+    const storeSlug = String(parts[2] || "")
+      .trim()
+      .toLowerCase();
+    return storeSlug ? `${storeSlug}.myshopify.com` : "";
+  }
+
+  raw = raw.split(/[/?#]/)[0];
+  if (raw.endsWith(".myshopify.com")) {
+    return raw;
+  }
+
+  const slug = raw.replace(/[^a-z0-9-]/g, "");
+  return slug ? `${slug}.myshopify.com` : "";
+};
+
 export default function Settings() {
   const [shopifyConfig, setShopifyConfig] = useState({
     shop: "",
@@ -119,12 +145,10 @@ export default function Settings() {
         throw new Error("Store domain is required");
       }
 
-      const normalizedShopInput = String(shopifyConfig.shop || "")
-        .trim()
-        .toLowerCase();
-      const shop = normalizedShopInput.includes(".myshopify.com")
-        ? normalizedShopInput
-        : `${normalizedShopInput}.myshopify.com`;
+      const shop = normalizeShopDomain(shopifyConfig.shop);
+      if (!shop) {
+        throw new Error("Invalid store domain");
+      }
 
       const { data } = await api.post("/shopify/auth-url", { shop });
       if (data.authUrl) {

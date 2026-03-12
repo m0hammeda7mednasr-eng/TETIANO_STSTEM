@@ -31,6 +31,10 @@ const UUID_REGEX =
 const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const orderBackgroundSyncState = new Map();
+const normalizeBaseUrl = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/\/+$/, "");
 
 // Helper to get user-specific shopify credentials
 const getShopifyCredentials = async (userId) => {
@@ -50,7 +54,7 @@ const getShopifyCredentials = async (userId) => {
 // Helper to construct the redirect URI
 const getRedirectUri = (req) => {
   if (process.env.BACKEND_URL) {
-    return `${process.env.BACKEND_URL}/api/shopify/callback`;
+    return `${normalizeBaseUrl(process.env.BACKEND_URL)}/api/shopify/callback`;
   }
   // Fallback for local development
   const protocol = req.protocol;
@@ -811,7 +815,13 @@ router.post("/auth-url", verifyToken, async (req, res) => {
       "read_products,write_products,read_orders,read_customers,write_orders";
     const redirectUri = getRedirectUri(req);
 
-    const authUrl = `https://${inputShop}/admin/oauth/authorize?client_id=${apiKey}&scope=${scopes}&redirect_uri=${redirectUri}&state=${userId}`;
+    const authParams = new URLSearchParams({
+      client_id: apiKey,
+      scope: scopes,
+      redirect_uri: redirectUri,
+      state: String(userId || ""),
+    });
+    const authUrl = `https://${inputShop}/admin/oauth/authorize?${authParams.toString()}`;
 
     res.json({ authUrl });
   } catch (error) {
@@ -827,7 +837,9 @@ router.get("/callback", async (req, res) => {
   const { code, state } = req.query;
   const shop = String(req.query?.shop || "").trim().toLowerCase();
   const userId = state;
-  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+  const frontendUrl = normalizeBaseUrl(
+    process.env.FRONTEND_URL || "http://localhost:3000",
+  );
 
   if (!code || !shop || !userId) {
     return res.redirect(`${frontendUrl}/settings?error=invalid_callback`);

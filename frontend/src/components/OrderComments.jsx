@@ -79,23 +79,26 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
     { value: "internal", label: "داخلي", icon: Shield, color: "red" },
   ];
 
-  const fetchComments = useCallback(async ({ silent = false } = {}) => {
-    if (!orderId) return;
-    try {
-      if (!silent) setLoading(true);
-      const response = await api.get(`/order-comments/order/${orderId}`);
-      setComments(response.data.data || []);
-      setMode(response.data.mode || "table");
-    } catch (error) {
-      console.error("Error fetching comments:", error);
-      if (!silent) {
-        setComments([]);
-        setMode("legacy");
+  const fetchComments = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!orderId) return;
+      try {
+        if (!silent) setLoading(true);
+        const response = await api.get(`/order-comments/order/${orderId}`);
+        setComments(response.data.data || []);
+        setMode(response.data.mode || "table");
+      } catch (error) {
+        console.error("Error fetching comments:", error);
+        if (!silent) {
+          setComments([]);
+          setMode("legacy");
+        }
+      } finally {
+        if (!silent) setLoading(false);
       }
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [orderId]);
+    },
+    [orderId],
+  );
 
   useEffect(() => {
     if (!orderId) {
@@ -150,7 +153,7 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
       setIsInternal(false);
     } catch (error) {
       console.error("Error adding comment:", error);
-      alert("فشل في إضافة التعليق");
+      window.alert("فشل في إضافة التعليق");
     } finally {
       setSubmitting(false);
     }
@@ -173,20 +176,20 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
       setEditText("");
     } catch (error) {
       console.error("Error updating comment:", error);
-      alert("فشل في تحديث التعليق");
+      window.alert("فشل في تحديث التعليق");
     }
   };
 
   const handleDelete = async (commentId) => {
     if (mode !== "table") return;
-    if (!confirm("هل أنت متأكد من حذف هذا التعليق؟")) return;
+    if (!window.confirm("هل أنت متأكد من حذف هذا التعليق؟")) return;
 
     try {
       await api.delete(`/order-comments/${commentId}`);
       setComments((prev) => prev.filter((comment) => comment.id !== commentId));
     } catch (error) {
       console.error("Error deleting comment:", error);
-      alert("فشل في حذف التعليق");
+      window.alert("فشل في حذف التعليق");
     }
   };
 
@@ -206,7 +209,7 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
       );
     } catch (error) {
       console.error("Error pinning comment:", error);
-      alert("فشل في تثبيت التعليق");
+      window.alert("فشل في تثبيت التعليق");
     }
   };
 
@@ -226,8 +229,12 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
     (comment) => showInternal || !comment.is_internal,
   );
 
-  const pinnedComments = filteredComments.filter((comment) => comment.is_pinned);
-  const regularComments = filteredComments.filter((comment) => !comment.is_pinned);
+  const pinnedComments = filteredComments.filter(
+    (comment) => comment.is_pinned,
+  );
+  const regularComments = filteredComments.filter(
+    (comment) => !comment.is_pinned,
+  );
   const canUseAdvancedFeatures = mode === "table";
 
   if (loading) {
@@ -254,7 +261,9 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
               <h3 className="text-lg font-semibold text-gray-800">
                 تعليقات الطلب #{orderNumber}
               </h3>
-              <p className="text-sm text-gray-600">{filteredComments.length} تعليق</p>
+              <p className="text-sm text-gray-600">
+                {filteredComments.length} تعليق
+              </p>
             </div>
           </div>
 
@@ -450,7 +459,9 @@ const CommentItem = ({
               {comment.user_role === "admin" && (
                 <Shield size={14} className="text-purple-600" />
               )}
-              <span className={`px-2 py-1 rounded-full text-xs font-medium ${style.pill}`}>
+              <span
+                className={`px-2 py-1 rounded-full text-xs font-medium ${style.pill}`}
+              >
                 {typeConfig.label}
               </span>
               {comment.is_internal && (
@@ -458,7 +469,9 @@ const CommentItem = ({
                   داخلي
                 </span>
               )}
-              {comment.is_pinned && <Pin size={14} className="text-amber-600" />}
+              {comment.is_pinned && (
+                <Pin size={14} className="text-amber-600" />
+              )}
             </div>
             <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
               <Clock size={12} />

@@ -55,7 +55,7 @@ export default function OrderDetails() {
       setOrder(response.data);
     } catch (error) {
       console.error("Error fetching order details:", error);
-      showNotification("ÙØ´Ù„ ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ø·Ù„Ø¨", "error");
+      showNotification("فشل تحميل تفاصيل الطلب", "error");
     } finally {
       setLoading(false);
     }
@@ -212,7 +212,7 @@ export default function OrderDetails() {
         <Clock
           size={16}
           className="text-yellow-500"
-          title="ÙÙŠ Ø§Ù†ØªØ¸Ø§Ø± Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©"
+          title="في انتظار المزامنة"
         />
       );
     }
@@ -230,7 +230,7 @@ export default function OrderDetails() {
         <CheckCircle
           size={16}
           className="text-green-500"
-          title="ØªÙ…Øª Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©"
+          title="تمت المزامنة"
         />
       );
     }
@@ -244,7 +244,7 @@ export default function OrderDetails() {
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ø·Ù„Ø¨...</p>
+            <p className="text-gray-600">جاري تحميل تفاصيل الطلب...</p>
           </div>
         </main>
       </div>
@@ -258,12 +258,12 @@ export default function OrderDetails() {
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <Package size={64} className="mx-auto text-gray-400 mb-4" />
-            <p className="text-gray-600 text-lg">Ù„Ù… ÙŠØªÙ… Ø§Ù„Ø¹Ø«ÙˆØ± Ø¹Ù„Ù‰ Ø§Ù„Ø·Ù„Ø¨</p>
+            <p className="text-gray-600 text-lg">لم يتم العثور على الطلب</p>
             <button
               onClick={() => navigate("/orders")}
               className="mt-4 text-blue-600 hover:text-blue-700"
             >
-              Ø§Ù„Ø¹ÙˆØ¯Ø© Ø¥Ù„Ù‰ Ø§Ù„Ø·Ù„Ø¨Ø§Øª
+              العودة إلى الطلبات
             </button>
           </div>
         </main>
@@ -306,12 +306,12 @@ export default function OrderDetails() {
               <div>
                 <div className="flex items-center gap-3">
                   <h1 className="text-3xl font-bold text-gray-800">
-                    Ø·Ù„Ø¨ #{order.order_number || order.shopify_id}
+                    طلب #{order.order_number || order.shopify_id}
                   </h1>
                   {getSyncStatusIcon()}
                 </div>
                 <p className="text-gray-600">
-                  ØªÙ… Ø§Ù„Ø¥Ù†Ø´Ø§Ø¡ ÙÙŠ {formatDate(order.created_at)}
+                  تم الإنشاء في {formatDate(order.created_at)}
                 </p>
               </div>
             </div>
@@ -380,7 +380,7 @@ export default function OrderDetails() {
               <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Package size={20} />
-                  Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª ({order.line_items?.length || 0})
+                  المنتجات ({order.line_items?.length || 0})
                 </h2>
                 <div className="space-y-4">
                   {order.line_items?.map((item, index) => (
@@ -415,7 +415,7 @@ export default function OrderDetails() {
                         )}
                         <div className="flex items-center gap-4 mt-2">
                           <span className="text-sm text-gray-600">
-                            Ø§Ù„ÙƒÙ…ÙŠØ©: {item.quantity}
+                            الكمية: {item.quantity}
                           </span>
                           <span className="text-sm font-semibold text-gray-800">
                             {item.price} {CURRENCY_LABEL}
@@ -435,14 +435,14 @@ export default function OrderDetails() {
                 {/* Order Totals */}
                 <div className="mt-6 pt-6 border-t space-y-2">
                   <div className="flex justify-between text-gray-600">
-                    <span>Ø§Ù„Ù…Ø¬Ù…ÙˆØ¹ Ø§Ù„ÙØ±Ø¹ÙŠ:</span>
+                    <span>المجموع الفرعي:</span>
                     <span>
                       {order.subtotal_price} {CURRENCY_LABEL}
                     </span>
                   </div>
                   {order.total_tax > 0 && (
                     <div className="flex justify-between text-gray-600">
-                      <span>Ø§Ù„Ø¶Ø±Ø§Ø¦Ø¨:</span>
+                      <span>الضرائب:</span>
                       <span>
                         {order.total_tax} {CURRENCY_LABEL}
                       </span>
@@ -450,7 +450,7 @@ export default function OrderDetails() {
                   )}
                   {order.total_shipping > 0 && (
                     <div className="flex justify-between text-gray-600">
-                      <span>Ø§Ù„Ø´Ø­Ù†:</span>
+                      <span>الشحن:</span>
                       <span>
                         {order.total_shipping} {CURRENCY_LABEL}
                       </span>
@@ -458,14 +458,14 @@ export default function OrderDetails() {
                   )}
                   {order.total_discounts > 0 && (
                     <div className="flex justify-between text-green-600">
-                      <span>Ø§Ù„Ø®ØµÙ…:</span>
+                      <span>الخصم:</span>
                       <span>
                         -{order.total_discounts} {CURRENCY_LABEL}
                       </span>
                     </div>
                   )}
                   <div className="flex justify-between text-xl font-bold text-gray-800 pt-2 border-t">
-                    <span>Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠ:</span>
+                    <span>الإجمالي:</span>
                     <span>
                       {order.total_price} {CURRENCY_LABEL}
                     </span>
@@ -476,7 +476,7 @@ export default function OrderDetails() {
                     <div className="mt-4 pt-4 border-t border-red-200 bg-red-50 rounded-lg p-4">
                       <h3 className="font-bold text-red-800 mb-3 flex items-center gap-2">
                         <AlertCircle size={18} />
-                        Ø§Ù„Ù…Ø±ØªØ¬Ø¹Ø§Øª ({order.refunds.length})
+                        المرتجعات ({order.refunds.length})
                       </h3>
                       <div className="space-y-3">
                         {order.refunds.map((refund, idx) => (
@@ -507,10 +507,10 @@ export default function OrderDetails() {
                             {refund.refund_line_items &&
                               refund.refund_line_items.length > 0 && (
                                 <div className="mt-2 text-xs text-gray-600">
-                                  <p className="font-medium">Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª:</p>
+                                  <p className="font-medium">المنتجات:</p>
                                   {refund.refund_line_items.map((item, i) => (
                                     <p key={i}>
-                                      â€¢ {item.line_item?.title} (Ø§Ù„ÙƒÙ…ÙŠØ©:{" "}
+                                      • {item.line_item?.title} (الكمية:{" "}
                                       {item.quantity})
                                     </p>
                                   ))}
@@ -519,7 +519,7 @@ export default function OrderDetails() {
                           </div>
                         ))}
                         <div className="flex justify-between text-red-800 font-bold pt-2 border-t border-red-200">
-                          <span>Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù…Ø±ØªØ¬Ø¹Ø§Øª:</span>
+                          <span>إجمالي المرتجعات:</span>
                           <span>
                             -{order.total_refunded?.toFixed(2)} {CURRENCY_LABEL}
                           </span>
@@ -533,16 +533,16 @@ export default function OrderDetails() {
                     <div className="mt-4 pt-4 border-t border-red-200 bg-red-50 rounded-lg p-4">
                       <h3 className="font-bold text-red-800 mb-2 flex items-center gap-2">
                         <AlertCircle size={18} />
-                        Ø·Ù„Ø¨ Ù…Ù„ØºÙŠ
+                        طلب ملغي
                       </h3>
                       <div className="space-y-1 text-sm">
                         <p className="text-gray-700">
-                          <span className="font-medium">ØªØ§Ø±ÙŠØ® Ø§Ù„Ø¥Ù„ØºØ§Ø¡:</span>{" "}
+                          <span className="font-medium">تاريخ الإلغاء:</span>{" "}
                           {formatDate(order.cancelled_at)}
                         </p>
                         {order.cancel_reason && (
                           <p className="text-gray-700">
-                            <span className="font-medium">Ø§Ù„Ø³Ø¨Ø¨:</span>{" "}
+                            <span className="font-medium">السبب:</span>{" "}
                             {order.cancel_reason}
                           </p>
                         )}
@@ -555,12 +555,12 @@ export default function OrderDetails() {
                     <div className="mt-4 pt-4 border-t border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 space-y-3">
                       <h3 className="font-bold text-green-800 mb-2 flex items-center gap-2">
                         <TrendingUp size={18} />
-                        ØªØ­Ù„ÙŠÙ„ Ø§Ù„Ø±Ø¨Ø­ÙŠØ©
+                        تحليل الربحية
                       </h3>
 
                       {/* Revenue */}
                       <div className="flex justify-between text-gray-700">
-                        <span className="font-medium">Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ø¥ÙŠØ±Ø§Ø¯Ø§Øª:</span>
+                        <span className="font-medium">إجمالي الإيرادات:</span>
                         <span className="font-semibold">
                           {parseFloat(profitData.total_revenue || 0).toFixed(2)}{" "}
                           {CURRENCY_LABEL}
@@ -569,7 +569,7 @@ export default function OrderDetails() {
 
                       {/* Cost */}
                       <div className="flex justify-between text-orange-700">
-                        <span className="font-medium">ØªÙƒÙ„ÙØ© Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª:</span>
+                        <span className="font-medium">تكلفة المنتجات:</span>
                         <span className="font-semibold">
                           -{parseFloat(profitData.total_cost || 0).toFixed(2)}{" "}
                           {CURRENCY_LABEL}
@@ -578,7 +578,7 @@ export default function OrderDetails() {
 
                       {/* Gross Profit */}
                       <div className="flex justify-between text-blue-700 pb-2 border-b border-green-200">
-                        <span className="font-medium">Ø§Ù„Ø±Ø¨Ø­ Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠ:</span>
+                        <span className="font-medium">الربح الإجمالي:</span>
                         <span className="font-semibold">
                           {parseFloat(profitData.gross_profit || 0).toFixed(2)}{" "}
                           {CURRENCY_LABEL}
@@ -589,7 +589,7 @@ export default function OrderDetails() {
                       {profitData.total_operational_costs > 0 && (
                         <div className="flex justify-between text-red-700">
                           <span className="font-medium">
-                            Ø§Ù„ØªÙƒØ§Ù„ÙŠÙ Ø§Ù„ØªØ´ØºÙŠÙ„ÙŠØ©:
+                            التكاليف التشغيلية:
                           </span>
                           <span className="font-semibold">
                             -
@@ -603,7 +603,7 @@ export default function OrderDetails() {
 
                       {/* Net Profit */}
                       <div className="flex justify-between text-green-900 pt-2 border-t-2 border-green-300">
-                        <span className="font-bold text-lg">ØµØ§ÙÙŠ Ø§Ù„Ø±Ø¨Ø­:</span>
+                        <span className="font-bold text-lg">صافي الربح:</span>
                         <span className="font-bold text-xl">
                           {parseFloat(profitData.net_profit || 0).toFixed(2)}{" "}
                           {CURRENCY_LABEL}
@@ -612,7 +612,7 @@ export default function OrderDetails() {
 
                       {/* Profit Margin */}
                       <div className="flex justify-between text-green-800">
-                        <span className="font-medium">Ù‡Ø§Ù…Ø´ Ø§Ù„Ø±Ø¨Ø­ Ø§Ù„ØµØ§ÙÙŠ:</span>
+                        <span className="font-medium">هامش الربح الصافي:</span>
                         <span className="font-bold text-lg">
                           {parseFloat(profitData.profit_margin || 0).toFixed(2)}
                           %
@@ -624,16 +624,16 @@ export default function OrderDetails() {
                         {profitData.net_profit > 0 ? (
                           <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded-full text-sm font-semibold">
                             <CheckCircle size={14} />
-                            Ø·Ù„Ø¨ Ù…Ø±Ø¨Ø­
+                            طلب مربح
                           </span>
                         ) : profitData.net_profit < 0 ? (
                           <span className="inline-flex items-center gap-1 px-3 py-1 bg-red-600 text-white rounded-full text-sm font-semibold">
                             <AlertCircle size={14} />
-                            Ø·Ù„Ø¨ Ø®Ø§Ø³Ø±
+                            طلب خاسر
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-3 py-1 bg-gray-600 text-white rounded-full text-sm font-semibold">
-                            Ø¨Ø¯ÙˆÙ† Ø±Ø¨Ø­
+                            بدون ربح
                           </span>
                         )}
                       </div>
@@ -656,24 +656,24 @@ export default function OrderDetails() {
               <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <User size={18} />
-                  Ù…Ø¹Ù„ÙˆÙ…Ø§Øª Ø§Ù„Ø¹Ù…ÙŠÙ„
+                  معلومات العميل
                 </h2>
                 <div className="space-y-3">
                   <div>
-                    <p className="text-sm text-gray-600">Ø§Ù„Ø§Ø³Ù…</p>
+                    <p className="text-sm text-gray-600">الاسم</p>
                     <p className="font-semibold text-gray-800">
-                      {order.customer_name || "ØºÙŠØ± Ù…Ø¹Ø±ÙˆÙ"}
+                      {order.customer_name || "غير معروف"}
                     </p>
                   </div>
                   {order.customer_email && (
                     <div>
-                      <p className="text-sm text-gray-600">Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ</p>
+                      <p className="text-sm text-gray-600">البريد الإلكتروني</p>
                       <p className="text-gray-800">{order.customer_email}</p>
                     </div>
                   )}
                   {order.customer_phone && (
                     <div>
-                      <p className="text-sm text-gray-600">Ø§Ù„Ù‡Ø§ØªÙ</p>
+                      <p className="text-sm text-gray-600">الهاتف</p>
                       <p className="text-gray-800">{order.customer_phone}</p>
                     </div>
                   )}
@@ -681,7 +681,7 @@ export default function OrderDetails() {
                     <>
                       {order.customer_info.orders_count > 0 && (
                         <div>
-                          <p className="text-sm text-gray-600">Ø¹Ø¯Ø¯ Ø§Ù„Ø·Ù„Ø¨Ø§Øª</p>
+                          <p className="text-sm text-gray-600">عدد الطلبات</p>
                           <p className="text-gray-800">
                             {order.customer_info.orders_count}
                           </p>
@@ -690,7 +690,7 @@ export default function OrderDetails() {
                       {order.customer_info.total_spent && (
                         <div>
                           <p className="text-sm text-gray-600">
-                            Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù…Ø´ØªØ±ÙŠØ§Øª
+                            إجمالي المشتريات
                           </p>
                           <p className="text-gray-800">
                             {order.customer_info.total_spent} {CURRENCY_LABEL}
@@ -699,7 +699,7 @@ export default function OrderDetails() {
                       )}
                       {order.customer_info.tags && (
                         <div>
-                          <p className="text-sm text-gray-600">Ø§Ù„ØªØµÙ†ÙŠÙØ§Øª</p>
+                          <p className="text-sm text-gray-600">التصنيفات</p>
                           <p className="text-gray-800">
                             {order.customer_info.tags}
                           </p>
@@ -707,7 +707,7 @@ export default function OrderDetails() {
                       )}
                       {order.customer_info.note && (
                         <div>
-                          <p className="text-sm text-gray-600">Ù…Ù„Ø§Ø­Ø¸Ø©</p>
+                          <p className="text-sm text-gray-600">ملاحظة</p>
                           <p className="text-gray-800 text-sm">
                             {order.customer_info.note}
                           </p>
@@ -723,7 +723,7 @@ export default function OrderDetails() {
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <MapPin size={18} />
-                    Ø¹Ù†ÙˆØ§Ù† Ø§Ù„Ø´Ø­Ù†
+                    عنوان الشحن
                   </h2>
                   <div className="text-gray-700 space-y-1">
                     {(order.shipping_address.first_name ||
@@ -759,7 +759,7 @@ export default function OrderDetails() {
                     )}
                     {order.shipping_address.phone && (
                       <p className="mt-2 text-sm">
-                        ðŸ“ž {order.shipping_address.phone}
+                        📞 {order.shipping_address.phone}
                       </p>
                     )}
                   </div>
@@ -771,7 +771,7 @@ export default function OrderDetails() {
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <CreditCard size={18} />
-                    Ø¹Ù†ÙˆØ§Ù† Ø§Ù„ÙÙˆØ§ØªÙŠØ±
+                    عنوان الفواتير
                   </h2>
                   <div className="text-gray-700 space-y-1">
                     {(order.billing_address.first_name ||
@@ -807,7 +807,7 @@ export default function OrderDetails() {
                     )}
                     {order.billing_address.phone && (
                       <p className="mt-2 text-sm">
-                        ðŸ“ž {order.billing_address.phone}
+                        📞 {order.billing_address.phone}
                       </p>
                     )}
                   </div>
@@ -818,7 +818,7 @@ export default function OrderDetails() {
               <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <CreditCard size={18} />
-                  Ø­Ø§Ù„Ø© Ø§Ù„Ø¯ÙØ¹
+                  حالة الدفع
                 </h2>
                 <div className="space-y-3">
                   <span
@@ -829,7 +829,7 @@ export default function OrderDetails() {
                   {order.payment_gateway_names &&
                     order.payment_gateway_names.length > 0 && (
                       <div>
-                        <p className="text-sm text-gray-600">Ø·Ø±ÙŠÙ‚Ø© Ø§Ù„Ø¯ÙØ¹</p>
+                        <p className="text-sm text-gray-600">طريقة الدفع</p>
                         <p className="text-gray-800">
                           {order.payment_gateway_names.join(", ")}
                         </p>
@@ -837,7 +837,7 @@ export default function OrderDetails() {
                     )}
                   {order.processing_method && (
                     <div>
-                      <p className="text-sm text-gray-600">Ø·Ø±ÙŠÙ‚Ø© Ø§Ù„Ù…Ø¹Ø§Ù„Ø¬Ø©</p>
+                      <p className="text-sm text-gray-600">طريقة المعالجة</p>
                       <p className="text-gray-800">{order.processing_method}</p>
                     </div>
                   )}
@@ -848,7 +848,7 @@ export default function OrderDetails() {
               <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Truck size={18} />
-                  Ø­Ø§Ù„Ø© Ø§Ù„ØªÙˆØµÙŠÙ„
+                  حالة التوصيل
                 </h2>
                 <div className="space-y-3">
                   <span
@@ -865,7 +865,7 @@ export default function OrderDetails() {
                   {order.fulfillments && order.fulfillments.length > 0 && (
                     <div className="mt-3 space-y-2">
                       <p className="text-sm text-gray-600 font-medium">
-                        Ù…Ø¹Ù„ÙˆÙ…Ø§Øª Ø§Ù„Ø´Ø­Ù†:
+                        معلومات الشحن:
                       </p>
                       {order.fulfillments.map((fulfillment, idx) => (
                         <div
@@ -873,10 +873,10 @@ export default function OrderDetails() {
                           className="text-sm bg-gray-50 p-2 rounded"
                         >
                           {fulfillment.tracking_company && (
-                            <p>Ø§Ù„Ø´Ø±ÙƒØ©: {fulfillment.tracking_company}</p>
+                            <p>الشركة: {fulfillment.tracking_company}</p>
                           )}
                           {fulfillment.tracking_number && (
-                            <p>Ø±Ù‚Ù… Ø§Ù„ØªØªØ¨Ø¹: {fulfillment.tracking_number}</p>
+                            <p>رقم التتبع: {fulfillment.tracking_number}</p>
                           )}
                           {fulfillment.tracking_url && (
                             <a
@@ -885,7 +885,7 @@ export default function OrderDetails() {
                               rel="noopener noreferrer"
                               className="text-blue-600 hover:underline"
                             >
-                              ØªØªØ¨Ø¹ Ø§Ù„Ø´Ø­Ù†Ø©
+                              تتبع الشحنة
                             </a>
                           )}
                         </div>
@@ -899,7 +899,7 @@ export default function OrderDetails() {
               {order.shipping_lines && order.shipping_lines.length > 0 && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    Ø·Ø±ÙŠÙ‚Ø© Ø§Ù„Ø´Ø­Ù†
+                    طريقة الشحن
                   </h2>
                   {order.shipping_lines.map((line, idx) => (
                     <div key={idx} className="space-y-1">
@@ -911,7 +911,7 @@ export default function OrderDetails() {
                       </p>
                       {line.code && (
                         <p className="text-xs text-gray-500">
-                          Ø§Ù„ÙƒÙˆØ¯: {line.code}
+                          الكود: {line.code}
                         </p>
                       )}
                     </div>
@@ -923,7 +923,7 @@ export default function OrderDetails() {
               {order.discount_codes && order.discount_codes.length > 0 && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    Ø£ÙƒÙˆØ§Ø¯ Ø§Ù„Ø®ØµÙ…
+                    أكواد الخصم
                   </h2>
                   {order.discount_codes.map((discount, idx) => (
                     <div
@@ -938,7 +938,7 @@ export default function OrderDetails() {
                       </p>
                       {discount.type && (
                         <p className="text-xs text-green-600">
-                          Ø§Ù„Ù†ÙˆØ¹: {discount.type}
+                          النوع: {discount.type}
                         </p>
                       )}
                     </div>
@@ -950,7 +950,7 @@ export default function OrderDetails() {
               {order.tags && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    Ø§Ù„ØªØµÙ†ÙŠÙØ§Øª
+                    التصنيفات
                   </h2>
                   <div className="flex flex-wrap gap-2">
                     {order.tags.split(",").map((tag, idx) => (
@@ -969,7 +969,7 @@ export default function OrderDetails() {
               {order.customer_note && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    Ù…Ù„Ø§Ø­Ø¸Ø© Ø§Ù„Ø¹Ù…ÙŠÙ„
+                    ملاحظة العميل
                   </h2>
                   <p className="text-gray-700 text-sm whitespace-pre-wrap">
                     {order.customer_note}
@@ -981,22 +981,22 @@ export default function OrderDetails() {
               {order.source_name && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    Ù…ØµØ¯Ø± Ø§Ù„Ø·Ù„Ø¨
+                    مصدر الطلب
                   </h2>
                   <div className="space-y-2 text-sm">
                     <p className="text-gray-700">
-                      <span className="font-medium">Ø§Ù„Ù…ØµØ¯Ø±:</span>{" "}
+                      <span className="font-medium">المصدر:</span>{" "}
                       {order.source_name}
                     </p>
                     {order.referring_site && (
                       <p className="text-gray-700">
-                        <span className="font-medium">Ø§Ù„Ù…ÙˆÙ‚Ø¹ Ø§Ù„Ù…ÙØ­ÙŠÙ„:</span>{" "}
+                        <span className="font-medium">الموقع المُحيل:</span>{" "}
                         {order.referring_site}
                       </p>
                     )}
                     {order.landing_site && (
                       <p className="text-gray-700">
-                        <span className="font-medium">ØµÙØ­Ø© Ø§Ù„Ù‡Ø¨ÙˆØ·:</span>{" "}
+                        <span className="font-medium">صفحة الهبوط:</span>{" "}
                         {order.landing_site}
                       </p>
                     )}
@@ -1008,22 +1008,22 @@ export default function OrderDetails() {
               {order.last_synced_at && (
                 <div className="bg-white rounded-lg shadow p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
-                    Ø­Ø§Ù„Ø© Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©
+                    حالة المزامنة
                   </h2>
                   <div className="space-y-2 text-sm">
                     <div className="flex items-center gap-2">
                       {getSyncStatusIcon()}
                       <span className="text-gray-600">
                         {order.pending_sync
-                          ? "ÙÙŠ Ø§Ù†ØªØ¸Ø§Ø± Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©"
+                          ? "في انتظار المزامنة"
                           : order.sync_error
-                            ? "ÙØ´Ù„Øª Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©"
-                            : "ØªÙ…Øª Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø©"}
+                            ? "فشلت المزامنة"
+                            : "تمت المزامنة"}
                       </span>
                     </div>
                     {order.last_synced_at && (
                       <p className="text-gray-600">
-                        Ø¢Ø®Ø± Ù…Ø²Ø§Ù…Ù†Ø©: {formatDate(order.last_synced_at)}
+                        آخر مزامنة: {formatDate(order.last_synced_at)}
                       </p>
                     )}
                     {order.sync_error && (

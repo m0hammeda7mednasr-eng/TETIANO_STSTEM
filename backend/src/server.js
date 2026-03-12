@@ -16,6 +16,7 @@ import operationalCostsRoutes from "./routes/operationalCosts.js";
 import adminRoutes from "./routes/admin.js";
 import orderCommentsRoutes from "./routes/orderComments.js";
 import notificationsRoutes from "./routes/notifications.js";
+import shopifyWebhooksRoutes from "./routes/shopifyWebhooks.js";
 import { supabase } from "./supabaseClient.js";
 import { setRlsContext } from "./middleware/rls.js";
 
@@ -41,6 +42,7 @@ app.use(
     credentials: true,
   }),
 );
+app.use("/api/shopify/webhooks", express.raw({ type: "application/json" }), shopifyWebhooksRoutes);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

@@ -11,6 +11,11 @@ import { ShopifyService } from "../services/shopifyService.js";
 import { ProductUpdateService } from "../services/productUpdateService.js";
 import { OrderManagementService } from "../services/orderManagementService.js";
 import { ProductManagementService } from "../services/productManagementService.js";
+import {
+  ensureWebhooksRegistered,
+  getWebhookAddress,
+  removeManagedWebhooks,
+} from "../services/shopifyWebhookService.js";
 import jwt from "jsonwebtoken";
 import {
   getUserRole,
@@ -225,6 +230,39 @@ const parseJsonField = (value) => {
     }
   }
   return value;
+};
+
+const normalizeOrderReference = (value) => String(value || "").trim().toLowerCase();
+
+const findOrderByReferenceForUser = async (userId, orderReference) => {
+  const normalizedReference = String(orderReference || "").trim();
+  if (!normalizedReference) {
+    return { data: null, error: null };
+  }
+
+  const directLookup = await Order.findByIdForUser(userId, normalizedReference);
+  if (directLookup?.error || directLookup?.data) {
+    return directLookup;
+  }
+
+  const { data: orders, error } = await Order.findByUser(userId);
+  if (error) {
+    return { data: null, error };
+  }
+
+  const referenceLower = normalizeOrderReference(normalizedReference);
+  const matchedOrder = (orders || []).find((order) => {
+    const orderId = normalizeOrderReference(order?.id);
+    const shopifyId = normalizeOrderReference(order?.shopify_id);
+    const orderNumber = normalizeOrderReference(order?.order_number);
+    return (
+      orderId === referenceLower ||
+      shopifyId === referenceLower ||
+      orderNumber === referenceLower
+    );
+  });
+
+  return { data: matchedOrder || null, error: null };
 };
 
 const getOrderFinancialStatus = (order) => {
@@ -543,18 +581,19 @@ const applyProductsQueryFilters = (rows, query = {}) => {
 // 1. Get Shopify Authorization URL
 router.post("/auth-url", verifyToken, async (req, res) => {
   try {
-    const { shop } = req.body;
+    const inputShop = String(req.body?.shop || "").trim().toLowerCase();
     const userId = req.user.id; // Changed from req.user.userId
 
-    if (!shop) {
+    if (!inputShop) {
       return res.status(400).json({ error: "Shop parameter is required" });
     }
 
     const { apiKey } = await getShopifyCredentials(userId);
-    const scopes = "read_products,read_orders,read_customers,write_orders";
+    const scopes =
+      "read_products,write_products,read_orders,read_customers,write_orders";
     const redirectUri = getRedirectUri(req);
 
-    const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${apiKey}&scope=${scopes}&redirect_uri=${redirectUri}&state=${userId}`;
+    const authUrl = `https://${inputShop}/admin/oauth/authorize?client_id=${apiKey}&scope=${scopes}&redirect_uri=${redirectUri}&state=${userId}`;
 
     res.json({ authUrl });
   } catch (error) {
@@ -567,7 +606,8 @@ router.post("/auth-url", verifyToken, async (req, res) => {
 
 // 2. OAuth Callback
 router.get("/callback", async (req, res) => {
-  const { code, shop, state } = req.query;
+  const { code, state } = req.query;
+  const shop = String(req.query?.shop || "").trim().toLowerCase();
   const userId = state;
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
 
@@ -621,6 +661,13 @@ router.get("/callback", async (req, res) => {
     ShopifyService.syncAllData(userId, shop, accessToken, storeId).catch((syncError) => {
       console.error("Background sync error after callback:", syncError);
     });
+    ensureWebhooksRegistered({
+      shop,
+      accessToken,
+      webhookAddress: getWebhookAddress(req),
+    }).catch((webhookError) => {
+      console.error("Webhook registration error after callback:", webhookError);
+    });
 
     res.redirect(`${frontendUrl}/settings?connected=true`);
   } catch (error) {
@@ -667,11 +714,25 @@ router.post(
       tokenData.access_token,
       syncStoreId,
     );
+    let webhookSync = null;
+    try {
+      webhookSync = await ensureWebhooksRegistered({
+        shop: tokenData.shop,
+        accessToken: tokenData.access_token,
+        webhookAddress: getWebhookAddress(req),
+      });
+    } catch (webhookError) {
+      console.error("Webhook registration error during sync:", webhookError);
+      webhookSync = {
+        error: "Webhook registration failed",
+      };
+    }
 
     res.json({
       success: true,
       message: "Data synced successfully",
       store_id: syncStoreId,
+      webhook_sync: webhookSync,
       counts: {
         products: products.length,
         orders: orders.length,
@@ -703,15 +764,96 @@ router.get("/status", verifyToken, async (req, res) => {
       shop: tokenData?.shop || null,
       store_id: tokenData?.store_id || requestedStoreId || null,
       redirectUri: redirectUri,
+      webhookAddress: getWebhookAddress(req),
     });
   } catch (error) {
     res.json({
       connected: false,
       shop: null,
       redirectUri: getRedirectUri(req),
+      webhookAddress: getWebhookAddress(req),
     });
   }
 });
+
+router.post(
+  "/disconnect",
+  verifyToken,
+  requirePermission("can_manage_settings"),
+  async (req, res) => {
+  try {
+    const requestedStoreId = getRequestedStoreId(req);
+    const isAdmin = await resolveIsAdmin(req);
+    const userId = req.user.id;
+
+    const tokenData = await resolveSyncToken({
+      userId,
+      requestedStoreId,
+      isAdmin,
+    });
+
+    if (!tokenData) {
+      return res.status(400).json({
+        error: "Shopify is not connected for this account/store.",
+        code: "SHOPIFY_NOT_CONNECTED",
+      });
+    }
+
+    const isConnectionOwner = String(tokenData.user_id || "") === String(userId || "");
+    const webhookAddress = getWebhookAddress(req);
+    if (isConnectionOwner && webhookAddress) {
+      try {
+        await removeManagedWebhooks({
+          shop: tokenData.shop,
+          accessToken: tokenData.access_token,
+          webhookAddress,
+        });
+      } catch (webhookError) {
+        console.error("Failed to remove Shopify webhooks during disconnect:", webhookError);
+      }
+    }
+
+    const { supabase } = await import("../supabaseClient.js");
+    const storeId = requestedStoreId || tokenData.store_id || null;
+
+    if (isConnectionOwner) {
+      let deleteTokensQuery = supabase
+        .from("shopify_tokens")
+        .delete()
+        .eq("user_id", userId)
+        .eq("shop", tokenData.shop);
+      if (storeId) {
+        deleteTokensQuery = deleteTokensQuery.eq("store_id", storeId);
+      }
+      const { error: deleteTokensError } = await deleteTokensQuery;
+      if (deleteTokensError) {
+        return res.status(500).json({ error: deleteTokensError.message });
+      }
+    }
+
+    if (storeId) {
+      await supabase
+        .from("user_stores")
+        .delete()
+        .eq("user_id", userId)
+        .eq("store_id", storeId);
+    }
+
+    res.json({
+      success: true,
+      message: isConnectionOwner
+        ? "Shopify disconnected successfully."
+        : "Your access to this Shopify store has been removed.",
+      shop: tokenData.shop,
+      store_id: storeId,
+      disconnected_scope: isConnectionOwner ? "store_connection" : "user_access",
+    });
+  } catch (error) {
+    console.error("Disconnect Shopify error:", error);
+    res.status(500).json({ error: "Failed to disconnect Shopify." });
+  }
+  },
+);
 
 // 5. Save Shopify API credentials
 router.post("/save-credentials", verifyToken, async (req, res) => {
@@ -1085,7 +1227,10 @@ router.post(
       });
     }
 
-    const { data: order, error } = await Order.findByIdForUser(userId, orderId);
+    const { data: order, error } = await findOrderByReferenceForUser(
+      userId,
+      orderId,
+    );
     if (error) {
       return res.status(500).json({ error: error.message });
     }
@@ -1120,7 +1265,7 @@ router.post(
         data: updatedData,
         local_updated_at: new Date().toISOString(),
       })
-      .eq("id", orderId)
+      .eq("id", order.id)
       .select()
       .single();
 

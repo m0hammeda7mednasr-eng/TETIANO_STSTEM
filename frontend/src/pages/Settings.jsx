@@ -17,10 +17,12 @@ export default function Settings() {
     apiKey: "",
     apiSecret: "",
     redirectUri: "Loading...",
+    webhookAddress: "",
   });
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [message, setMessage] = useState({ type: "", text: "" });
 
   useEffect(() => {
@@ -60,6 +62,7 @@ export default function Settings() {
         ...prev,
         shop: data.shop || prev.shop,
         redirectUri: data.redirectUri || prev.redirectUri,
+        webhookAddress: data.webhookAddress || prev.webhookAddress,
       }));
     } catch (error) {
       console.error("Connection check failed:", error);
@@ -116,9 +119,12 @@ export default function Settings() {
         throw new Error("Store domain is required");
       }
 
-      const shop = shopifyConfig.shop.includes(".myshopify.com")
-        ? shopifyConfig.shop
-        : `${shopifyConfig.shop}.myshopify.com`;
+      const normalizedShopInput = String(shopifyConfig.shop || "")
+        .trim()
+        .toLowerCase();
+      const shop = normalizedShopInput.includes(".myshopify.com")
+        ? normalizedShopInput
+        : `${normalizedShopInput}.myshopify.com`;
 
       const { data } = await api.post("/shopify/auth-url", { shop });
       if (data.authUrl) {
@@ -166,6 +172,38 @@ export default function Settings() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    const confirmed = window.confirm(
+      "Disconnect Shopify from this store? Webhooks and token access will be removed.",
+    );
+    if (!confirmed) return;
+
+    setDisconnecting(true);
+    setMessage({ type: "", text: "" });
+
+    try {
+      const response = await api.post("/shopify/disconnect", {});
+      markSharedDataUpdated();
+      setConnected(false);
+      setShopifyConfig((prev) => ({
+        ...prev,
+        shop: "",
+      }));
+      setMessage({
+        type: "success",
+        text: response?.data?.message || "Shopify disconnected successfully.",
+      });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error.response?.data?.error || "Failed to disconnect Shopify.",
+      });
+    } finally {
+      setDisconnecting(false);
+      await loadShopifyStatus();
     }
   };
 
@@ -231,19 +269,31 @@ export default function Settings() {
               <p className="text-green-700 text-sm">
                 Store is ready for data synchronization.
               </p>
+              {shopifyConfig.webhookAddress && (
+                <p className="text-green-700 text-xs mt-1">
+                  Webhook endpoint: {shopifyConfig.webhookAddress}
+                </p>
+              )}
             </div>
           </div>
         )}
 
         {connected && (
-          <div className="mb-6 text-center">
+          <div className="mb-6 flex flex-wrap items-center justify-center gap-3">
             <button
               onClick={handleSync}
-              disabled={loading}
-              className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-6 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 mx-auto"
+              disabled={loading || disconnecting}
+              className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-6 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <RefreshIcon spinning={loading} />
               {loading ? "Syncing..." : "Sync Data"}
+            </button>
+            <button
+              onClick={handleDisconnect}
+              disabled={disconnecting || loading}
+              className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-6 rounded-lg disabled:opacity-50"
+            >
+              {disconnecting ? "Disconnecting..." : "Disconnect Shopify"}
             </button>
           </div>
         )}

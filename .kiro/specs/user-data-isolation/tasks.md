@@ -1517,20 +1517,20 @@ Each task builds incrementally on previous work, with checkpoints to validate fu
     - Test: Admin calculates profit → all users' operational costs included
     - _Requirements: All (end-to-end validation)_
 
-  - [~] 10.2 Verify Shopify data sharing works correctly
+  - [ ] 10.2 Verify Shopify data sharing works correctly
     - Test: Update product via Shopify webhook → all users see updated data
     - Test: Create order via Shopify webhook → all users see new order
     - Test: Employee and admin query products simultaneously → both see same data
     - _Requirements: 3.5, 11.1, 11.2, 11.3, 11.4_
 
-  - [~] 10.3 Add comprehensive error logging
+  - [ ] 10.3 Add comprehensive error logging
     - Log all authentication failures with timestamp and IP
     - Log all authorization failures with user ID and requested resource
     - Log all 403 errors with details for security monitoring
     - Implement log format: timestamp, level, type, userId, requestedResource, errorMessage
     - _Requirements: 12.2_
 
-- [~] 11. Final checkpoint - Ensure all tests pass and system is production-ready
+- [ ] 11. Final checkpoint - Ensure all tests pass and system is production-ready
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes

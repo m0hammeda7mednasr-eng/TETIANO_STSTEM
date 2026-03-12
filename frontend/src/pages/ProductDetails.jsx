@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import {
@@ -31,9 +31,9 @@ export default function ProductDetails() {
 
   useEffect(() => {
     fetchProductDetails();
-  }, [id]);
+  }, [id, fetchProductDetails]);
 
-  const fetchProductDetails = async () => {
+  const fetchProductDetails = useCallback(async () => {
     setLoading(true);
     try {
       const response = await api.get(`/shopify/products/${id}/details`);
@@ -45,7 +45,7 @@ export default function ProductDetails() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
   const handleSave = async () => {
     if (!canEditProducts) return;
@@ -501,28 +501,28 @@ export default function ProductDetails() {
 
                   {isAdmin && (
                     <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      سعر التكلفة ({product.currency || "USD"})
-                    </label>
-                    {editing ? (
-                      <input
-                        type="number"
-                        value={editedProduct.cost_price || 0}
-                        onChange={(e) =>
-                          setEditedProduct({
-                            ...editedProduct,
-                            cost_price: e.target.value,
-                          })
-                        }
-                        min="0"
-                        step="0.01"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    ) : (
-                      <p className="text-2xl font-bold text-gray-800">
-                        {product.cost_price || 0} {product.currency || "USD"}
-                      </p>
-                    )}
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        سعر التكلفة ({product.currency || "USD"})
+                      </label>
+                      {editing ? (
+                        <input
+                          type="number"
+                          value={editedProduct.cost_price || 0}
+                          onChange={(e) =>
+                            setEditedProduct({
+                              ...editedProduct,
+                              cost_price: e.target.value,
+                            })
+                          }
+                          min="0"
+                          step="0.01"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      ) : (
+                        <p className="text-2xl font-bold text-gray-800">
+                          {product.cost_price || 0} {product.currency || "USD"}
+                        </p>
+                      )}
                     </div>
                   )}
 

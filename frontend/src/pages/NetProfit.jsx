@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
 import {
@@ -51,9 +51,9 @@ export default function NetProfit() {
 
   useEffect(() => {
     loadAll();
-  }, []);
+  }, [loadAll]);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     try {
       setLoading(true);
       await Promise.all([fetchProfitability(), fetchOperationalCosts()]);
@@ -62,7 +62,7 @@ export default function NetProfit() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const fetchProfitability = async () => {
     try {
@@ -98,8 +98,12 @@ export default function NetProfit() {
         String(product?.title || "")
           .toLowerCase()
           .includes(keyword) ||
-        String(product?.id || "").toLowerCase().includes(keyword) ||
-        String(product?.shopify_id || "").toLowerCase().includes(keyword),
+        String(product?.id || "")
+          .toLowerCase()
+          .includes(keyword) ||
+        String(product?.shopify_id || "")
+          .toLowerCase()
+          .includes(keyword),
     );
   }, [products, searchTerm]);
 
@@ -213,7 +217,8 @@ export default function NetProfit() {
     } catch (error) {
       setMessage({
         type: "error",
-        text: error.response?.data?.error || "Failed to delete operational cost",
+        text:
+          error.response?.data?.error || "Failed to delete operational cost",
       });
     }
   };
@@ -308,7 +313,10 @@ export default function NetProfit() {
                 placeholder="Marketing"
                 value={fixedCosts.marketing}
                 onChange={(e) =>
-                  setFixedCosts((prev) => ({ ...prev, marketing: e.target.value }))
+                  setFixedCosts((prev) => ({
+                    ...prev,
+                    marketing: e.target.value,
+                  }))
                 }
                 className="px-3 py-2 border rounded-lg"
               />
@@ -318,7 +326,10 @@ export default function NetProfit() {
                 placeholder="Shipping"
                 value={fixedCosts.shipping}
                 onChange={(e) =>
-                  setFixedCosts((prev) => ({ ...prev, shipping: e.target.value }))
+                  setFixedCosts((prev) => ({
+                    ...prev,
+                    shipping: e.target.value,
+                  }))
                 }
                 className="px-3 py-2 border rounded-lg"
               />
@@ -359,17 +370,39 @@ export default function NetProfit() {
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Product</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Sold</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Orders</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Avg Sell</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Cost</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Unit Profit</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Revenue</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Op. Costs</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Net Profit</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Margin</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">Actions</th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Product
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Sold
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Orders
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Avg Sell
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Cost
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Unit Profit
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Revenue
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Op. Costs
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Net Profit
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Margin
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -391,12 +424,18 @@ export default function NetProfit() {
                             )}
                             <div>
                               <p className="font-medium">{product.title}</p>
-                              <p className="text-xs text-gray-500">{product.id}</p>
+                              <p className="text-xs text-gray-500">
+                                {product.id}
+                              </p>
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-sm">{product.sold_quantity || 0}</td>
-                        <td className="px-4 py-3 text-sm">{product.orders_count || 0}</td>
+                        <td className="px-4 py-3 text-sm">
+                          {product.sold_quantity || 0}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {product.orders_count || 0}
+                        </td>
                         <td className="px-4 py-3 text-sm">
                           ${Number(product.avg_selling_price || 0).toFixed(2)}
                         </td>
@@ -406,7 +445,9 @@ export default function NetProfit() {
                               type="number"
                               step="0.01"
                               value={editingCostPrice}
-                              onChange={(e) => setEditingCostPrice(e.target.value)}
+                              onChange={(e) =>
+                                setEditingCostPrice(e.target.value)
+                              }
                               className="w-24 px-2 py-1 border rounded"
                             />
                           ) : (
@@ -420,17 +461,23 @@ export default function NetProfit() {
                           ${Number(product.total_revenue || 0).toFixed(2)}
                         </td>
                         <td className="px-4 py-3 text-sm text-yellow-700">
-                          ${(
+                          $
+                          {(
                             Number(product.operational_costs_total || 0) +
                             Number(product.fixed_cost_share || 0)
                           ).toFixed(2)}
                           {opCosts.length > 0 && (
                             <div className="mt-1 text-xs text-gray-500 space-y-1">
                               {opCosts.slice(0, 2).map((cost) => (
-                                <div key={cost.id} className="flex items-center gap-1">
+                                <div
+                                  key={cost.id}
+                                  className="flex items-center gap-1"
+                                >
                                   <span>{cost.cost_name}</span>
                                   <button
-                                    onClick={() => deleteOperationalCost(cost.id)}
+                                    onClick={() =>
+                                      deleteOperationalCost(cost.id)
+                                    }
                                     className="text-red-500 hover:text-red-700"
                                     title="Delete cost"
                                   >
@@ -562,7 +609,10 @@ export default function NetProfit() {
                 placeholder="Description"
                 value={newCost.description}
                 onChange={(e) =>
-                  setNewCost((prev) => ({ ...prev, description: e.target.value }))
+                  setNewCost((prev) => ({
+                    ...prev,
+                    description: e.target.value,
+                  }))
                 }
                 className="w-full px-3 py-2 border rounded-lg"
               />
@@ -590,7 +640,9 @@ export default function NetProfit() {
 
 function SummaryCard({ label, value, icon: Icon, color }) {
   return (
-    <div className={`bg-gradient-to-br ${color} rounded-lg p-4 text-white shadow`}>
+    <div
+      className={`bg-gradient-to-br ${color} rounded-lg p-4 text-white shadow`}
+    >
       <div className="flex items-center justify-between">
         <div>
           <p className="text-white/85 text-xs">{label}</p>

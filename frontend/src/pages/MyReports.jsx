@@ -1,15 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  Calendar,
-  Edit,
-  FileText,
-  Paperclip,
-  Plus,
-  Save,
-  Trash2,
-  Upload,
-  X,
-} from "lucide-react";
+import { Calendar, Edit, Paperclip, Plus, Save, Trash2, X } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api, { getErrorMessage } from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
@@ -130,7 +120,9 @@ export default function MyReports() {
       description: report.description || "",
       tasks_completed: report.tasks_completed || "",
       notes: report.notes || "",
-      report_date: report.report_date ? report.report_date.split("T")[0] : DEFAULT_FORM.report_date,
+      report_date: report.report_date
+        ? report.report_date.split("T")[0]
+        : DEFAULT_FORM.report_date,
     });
     setExistingAttachments(normalizeAttachments(report.attachments));
     setNewFiles([]);
@@ -207,8 +199,12 @@ export default function MyReports() {
       <main className="flex-1 overflow-auto p-8 space-y-6">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">تقاريري اليومية</h1>
-            <p className="text-slate-600 mt-1">سجّل إنجازاتك وأرفق الملفات المطلوبة</p>
+            <h1 className="text-3xl font-bold text-slate-900">
+              تقاريري اليومية
+            </h1>
+            <p className="text-slate-600 mt-1">
+              سجّل إنجازاتك وأرفق الملفات المطلوبة
+            </p>
           </div>
           <button
             onClick={openCreateModal}
@@ -238,11 +234,16 @@ export default function MyReports() {
             </div>
           ) : (
             reports.map((report) => (
-              <div key={report.id} className="bg-white rounded-xl shadow p-4 space-y-3">
+              <div
+                key={report.id}
+                className="bg-white rounded-xl shadow p-4 space-y-3"
+              >
                 <div className="flex items-center justify-between text-sm text-slate-500">
                   <span className="inline-flex items-center gap-1">
                     <Calendar size={14} />
-                    {new Date(report.report_date || report.created_at).toLocaleDateString("ar-EG")}
+                    {new Date(
+                      report.report_date || report.created_at,
+                    ).toLocaleDateString("ar-EG")}
                   </span>
                   <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">
                     {report.status || "submitted"}
@@ -251,32 +252,35 @@ export default function MyReports() {
 
                 <h3 className="font-bold text-slate-900">{report.title}</h3>
                 {report.description && (
-                  <p className="text-sm text-slate-600 line-clamp-2">{report.description}</p>
+                  <p className="text-sm text-slate-600 line-clamp-2">
+                    {report.description}
+                  </p>
                 )}
 
-                {Array.isArray(report.attachments) && report.attachments.length > 0 && (
-                  <div className="border-t pt-2">
-                    <p className="text-xs font-medium text-slate-700 flex items-center gap-1">
-                      <Paperclip size={12} />
-                      المرفقات ({report.attachments.length})
-                    </p>
-                    <div className="mt-1 space-y-1">
-                      {normalizeAttachments(report.attachments)
-                        .slice(0, 3)
-                        .map((file, index) => (
-                        <a
-                          key={`${report.id}-${index}`}
-                          href={getAttachmentUrl(file)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-sky-700 hover:text-sky-900 block"
-                        >
-                          {getAttachmentName(file)}
-                        </a>
-                      ))}
+                {Array.isArray(report.attachments) &&
+                  report.attachments.length > 0 && (
+                    <div className="border-t pt-2">
+                      <p className="text-xs font-medium text-slate-700 flex items-center gap-1">
+                        <Paperclip size={12} />
+                        المرفقات ({report.attachments.length})
+                      </p>
+                      <div className="mt-1 space-y-1">
+                        {normalizeAttachments(report.attachments)
+                          .slice(0, 3)
+                          .map((file, index) => (
+                            <a
+                              key={`${report.id}-${index}`}
+                              href={getAttachmentUrl(file)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-sky-700 hover:text-sky-900 block"
+                            >
+                              {getAttachmentName(file)}
+                            </a>
+                          ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
                 <div className="flex gap-2 border-t pt-3">
                   <button
@@ -307,19 +311,27 @@ export default function MyReports() {
               <h2 className="text-xl font-bold">
                 {editingReport ? "تعديل التقرير" : "تقرير يومي جديد"}
               </h2>
-              <button onClick={() => setShowModal(false)} className="text-slate-600">
+              <button
+                onClick={() => setShowModal(false)}
+                className="text-slate-600"
+              >
                 <X size={20} />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">التاريخ</label>
+                <label className="block text-sm font-medium mb-1">
+                  التاريخ
+                </label>
                 <input
                   type="date"
                   value={formData.report_date}
                   onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, report_date: e.target.value }))
+                    setFormData((prev) => ({
+                      ...prev,
+                      report_date: e.target.value,
+                    }))
                   }
                   required
                   className="w-full border rounded-lg px-3 py-2"
@@ -327,7 +339,9 @@ export default function MyReports() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">العنوان</label>
+                <label className="block text-sm font-medium mb-1">
+                  العنوان
+                </label>
                 <input
                   value={formData.title}
                   onChange={(e) =>
@@ -343,7 +357,10 @@ export default function MyReports() {
                 <textarea
                   value={formData.description}
                   onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, description: e.target.value }))
+                    setFormData((prev) => ({
+                      ...prev,
+                      description: e.target.value,
+                    }))
                   }
                   rows={3}
                   className="w-full border rounded-lg px-3 py-2"
@@ -351,7 +368,9 @@ export default function MyReports() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">المهام المنجزة</label>
+                <label className="block text-sm font-medium mb-1">
+                  المهام المنجزة
+                </label>
                 <textarea
                   value={formData.tasks_completed}
                   onChange={(e) =>
@@ -366,7 +385,9 @@ export default function MyReports() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">ملاحظات</label>
+                <label className="block text-sm font-medium mb-1">
+                  ملاحظات
+                </label>
                 <textarea
                   value={formData.notes}
                   onChange={(e) =>
@@ -378,25 +399,33 @@ export default function MyReports() {
               </div>
 
               <div className="space-y-3">
-                <label className="block text-sm font-medium">مرفقات التقرير</label>
+                <label className="block text-sm font-medium">
+                  مرفقات التقرير
+                </label>
                 <input
                   type="file"
                   multiple
                   accept="image/*,.pdf,.xlsx,.xls,.doc,.docx"
-                  onChange={(e) => setNewFiles(Array.from(e.target.files || []))}
+                  onChange={(e) =>
+                    setNewFiles(Array.from(e.target.files || []))
+                  }
                   className="w-full border rounded-lg px-3 py-2"
                 />
 
                 {existingAttachments.length > 0 && (
                   <div>
-                    <p className="text-xs font-medium text-slate-600 mb-1">المرفقات الحالية</p>
+                    <p className="text-xs font-medium text-slate-600 mb-1">
+                      المرفقات الحالية
+                    </p>
                     <div className="space-y-1">
                       {existingAttachments.map((item, index) => (
                         <div
                           key={`existing-${index}`}
                           className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded"
                         >
-                          <span className="text-sm">{getAttachmentName(item)}</span>
+                          <span className="text-sm">
+                            {getAttachmentName(item)}
+                          </span>
                           <button
                             type="button"
                             onClick={() => removeExistingAttachment(index)}
@@ -412,7 +441,9 @@ export default function MyReports() {
 
                 {newFiles.length > 0 && (
                   <div>
-                    <p className="text-xs font-medium text-slate-600 mb-1">ملفات جديدة</p>
+                    <p className="text-xs font-medium text-slate-600 mb-1">
+                      ملفات جديدة
+                    </p>
                     <div className="space-y-1">
                       {newFiles.map((file, index) => (
                         <div

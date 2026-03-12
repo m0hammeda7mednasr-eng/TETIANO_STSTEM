@@ -145,9 +145,37 @@ const mapOrderFromShopify = (order = {}) => {
   };
 };
 
+const extractRealtimeScopesFromTokens = (tokenRows = []) => {
+  const userIds = Array.from(
+    new Set(
+      (tokenRows || [])
+        .map((token) => String(token?.user_id || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  const storeIds = Array.from(
+    new Set(
+      (tokenRows || [])
+        .map((token) => String(token?.store_id || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  return {
+    affectedUserIds: userIds,
+    affectedStoreIds: storeIds,
+  };
+};
+
 const upsertProductForTokens = async (shopDomain, productPayload) => {
   const tokenRows = await selectTokenRowsByShop(shopDomain);
-  if (tokenRows.length === 0) return { affectedRows: 0 };
+  if (tokenRows.length === 0) {
+    return {
+      affectedRows: 0,
+      affectedUserIds: [],
+      affectedStoreIds: [],
+    };
+  }
 
   const mapped = mapProductFromShopify(productPayload);
   const upserts = tokenRows.map((token) => ({
@@ -157,12 +185,21 @@ const upsertProductForTokens = async (shopDomain, productPayload) => {
   }));
 
   await Product.updateMultiple(upserts);
-  return { affectedRows: upserts.length };
+  return {
+    affectedRows: upserts.length,
+    ...extractRealtimeScopesFromTokens(tokenRows),
+  };
 };
 
 const upsertOrderForTokens = async (shopDomain, orderPayload) => {
   const tokenRows = await selectTokenRowsByShop(shopDomain);
-  if (tokenRows.length === 0) return { affectedRows: 0 };
+  if (tokenRows.length === 0) {
+    return {
+      affectedRows: 0,
+      affectedUserIds: [],
+      affectedStoreIds: [],
+    };
+  }
 
   const mapped = mapOrderFromShopify(orderPayload);
   const upserts = tokenRows.map((token) => ({
@@ -172,7 +209,10 @@ const upsertOrderForTokens = async (shopDomain, orderPayload) => {
   }));
 
   await Order.updateMultiple(upserts);
-  return { affectedRows: upserts.length };
+  return {
+    affectedRows: upserts.length,
+    ...extractRealtimeScopesFromTokens(tokenRows),
+  };
 };
 
 const safeDeleteEntity = async (tableName, shopifyId, tokenRows) => {
@@ -367,7 +407,12 @@ export const handleShopifyWebhook = async ({ topic, shopDomain, payload }) => {
     const shopifyId = toStringNumber(payload.id);
     const tokenRows = await selectTokenRowsByShop(normalizedShop);
     const result = await safeDeleteEntity("products", shopifyId, tokenRows);
-    return { handled: true, topic: normalizedTopic, ...result };
+    return {
+      handled: true,
+      topic: normalizedTopic,
+      ...result,
+      ...extractRealtimeScopesFromTokens(tokenRows),
+    };
   }
 
   if (

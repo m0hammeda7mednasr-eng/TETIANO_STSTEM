@@ -4,6 +4,7 @@ import {
   handleShopifyWebhook,
   verifyWebhookHmac,
 } from "../services/shopifyWebhookService.js";
+import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 
 const router = express.Router();
 
@@ -48,6 +49,23 @@ router.post("/", async (req, res) => {
         reason: result.reason || "ignored",
       });
     }
+
+    const topicText = String(result.topic || "").toLowerCase();
+    const eventType = topicText.startsWith("orders/")
+      ? "orders.updated"
+      : topicText.startsWith("products/")
+        ? "products.updated"
+        : "data.updated";
+    emitRealtimeEvent({
+      type: eventType,
+      source: "shopify.webhook",
+      userIds: result.affectedUserIds || [],
+      storeIds: result.affectedStoreIds || [],
+      payload: {
+        topic: result.topic,
+        webhookId: webhookId || null,
+      },
+    });
 
     return res.status(200).json({
       success: true,

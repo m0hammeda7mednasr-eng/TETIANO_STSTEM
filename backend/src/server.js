@@ -17,13 +17,16 @@ import adminRoutes from "./routes/admin.js";
 import orderCommentsRoutes from "./routes/orderComments.js";
 import notificationsRoutes from "./routes/notifications.js";
 import shopifyWebhooksRoutes from "./routes/shopifyWebhooks.js";
+import eventsRoutes from "./routes/events.js";
 import { supabase } from "./supabaseClient.js";
 import { setRlsContext } from "./middleware/rls.js";
+import { emitRealtimeEvent } from "./services/realtimeEventService.js";
 
 console.log("✅ operationalCostsRoutes loaded:", typeof operationalCostsRoutes);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 // Middleware
 app.use(
@@ -55,6 +58,47 @@ app.use("/api/auth", authRoutes);
 // Apply RLS middleware to all routes below this line
 app.use(setRlsContext);
 
+app.use((req, res, next) => {
+  const requestPath = String(req.originalUrl || "").split("?")[0];
+  const isTrackedMutation =
+    MUTATION_METHODS.has(String(req.method || "").toUpperCase()) &&
+    requestPath.startsWith("/api/") &&
+    !requestPath.startsWith("/api/auth");
+
+  if (!isTrackedMutation) {
+    next();
+    return;
+  }
+
+  res.on("finish", () => {
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      return;
+    }
+
+    const userId = String(req.user?.id || "").trim();
+    if (!userId) {
+      return;
+    }
+
+    const storeId =
+      typeof req.headers["x-store-id"] === "string"
+        ? req.headers["x-store-id"].trim()
+        : "";
+
+    emitRealtimeEvent({
+      type: "data.updated",
+      source: requestPath,
+      userIds: [userId],
+      storeIds: storeId ? [storeId] : [],
+      payload: {
+        method: String(req.method || "").toUpperCase(),
+      },
+    });
+  });
+
+  next();
+});
+
 // Add debugging middleware for dashboard routes
 app.use("/api/dashboard", (req, res, next) => {
   console.log(`🔍 Dashboard route accessed: ${req.method} ${req.path}`);
@@ -67,6 +111,7 @@ app.use("/api/dashboard", (req, res, next) => {
 });
 
 app.use("/api/shopify", shopifyRoutes);
+app.use("/api/events", eventsRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/reports", reportsRoutes);

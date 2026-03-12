@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -15,7 +15,8 @@ import api from "../utils/api";
 import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
-const POLLING_INTERVAL_MS = 30000;
+const POLLING_INTERVAL_MS = 10000;
+const LIVE_REFRESH_DEBOUNCE_MS = 450;
 const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
@@ -159,6 +160,8 @@ export default function Orders() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [lastLiveEventAt, setLastLiveEventAt] = useState(null);
+  const refreshTimeoutRef = useRef(null);
 
   const fetchOrders = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -182,6 +185,26 @@ export default function Orders() {
     }
   }, []);
 
+  const scheduleSilentRefresh = useCallback(() => {
+    if (refreshTimeoutRef.current) {
+      return;
+    }
+
+    refreshTimeoutRef.current = window.setTimeout(() => {
+      refreshTimeoutRef.current = null;
+      fetchOrders({ silent: true });
+    }, LIVE_REFRESH_DEBOUNCE_MS);
+  }, [fetchOrders]);
+
+  useEffect(
+    () => () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     fetchOrders();
 
@@ -190,10 +213,11 @@ export default function Orders() {
     }, POLLING_INTERVAL_MS);
 
     const unsubscribe = subscribeToSharedDataUpdates(() => {
-      fetchOrders({ silent: true });
+      setLastLiveEventAt(new Date());
+      scheduleSilentRefresh();
     });
 
-    const onFocus = () => fetchOrders({ silent: true });
+    const onFocus = () => scheduleSilentRefresh();
     window.addEventListener("focus", onFocus);
 
     return () => {
@@ -201,7 +225,7 @@ export default function Orders() {
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };
-  }, [fetchOrders]);
+  }, [fetchOrders, scheduleSilentRefresh]);
 
   const ordersWithMeta = useMemo(
     () =>
@@ -417,28 +441,41 @@ export default function Orders() {
       <Sidebar />
 
       <main className="flex-1 overflow-auto">
-        <div className="p-8 space-y-6">
-          <div className="flex flex-wrap justify-between items-center gap-3">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900">Orders</h1>
-              <p className="text-slate-600">
-                Full filtering by date, status, payment, fulfillment, and refund type.
-              </p>
-              {lastUpdatedAt && (
-                <p className="mt-2 text-xs text-slate-500 flex items-center gap-1">
-                  <Clock3 size={12} />
-                  Last refresh: {lastUpdatedAt.toLocaleTimeString("ar-EG")}
+        <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6">
+            <div className="flex flex-wrap justify-between items-center gap-3">
+              <div>
+                <h1 className="text-3xl font-bold text-slate-900">Orders</h1>
+                <p className="text-slate-600">
+                  Live order feed with advanced filtering by status, payment, fulfillment, and refunds.
                 </p>
-              )}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Live Sync Active
+                  </span>
+                  {lastUpdatedAt && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                      <Clock3 size={12} />
+                      Last refresh {lastUpdatedAt.toLocaleTimeString("ar-EG")}
+                    </span>
+                  )}
+                  {lastLiveEventAt && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-sky-50 text-sky-700 border border-sky-200">
+                      Event {lastLiveEventAt.toLocaleTimeString("ar-EG")}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => fetchOrders()}
+                disabled={loading}
+                className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-60"
+              >
+                <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+                {loading ? "Refreshing..." : "Refresh"}
+              </button>
             </div>
-            <button
-              onClick={() => fetchOrders()}
-              disabled={loading}
-              className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-60"
-            >
-              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-              {loading ? "Refreshing..." : "Refresh"}
-            </button>
           </div>
 
           {error && (
@@ -695,8 +732,8 @@ export default function Orders() {
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow overflow-hidden">
-            <div className="overflow-x-auto">
+          <div className="bg-white rounded-xl shadow overflow-hidden border border-slate-200">
+            <div className="hidden lg:block overflow-x-auto">
               <table className="w-full min-w-[1220px]">
                 <thead>
                   <tr className="bg-slate-50 border-b">
@@ -833,6 +870,90 @@ export default function Orders() {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="lg:hidden divide-y divide-slate-100">
+              {loading ? (
+                <div className="px-5 py-10 text-center text-slate-500">Loading orders...</div>
+              ) : filteredOrders.length > 0 ? (
+                filteredOrders.map((order) => (
+                  <article key={order.id} className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm text-slate-500">Order</p>
+                        <p className="text-base font-semibold text-slate-900">
+                          #{order.order_number || order.shopify_id}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => navigate(`/orders/${order.id}`)}
+                        className="text-sky-700 hover:text-sky-900 flex items-center gap-1 text-sm font-medium"
+                      >
+                        <Eye size={15} />
+                        View
+                      </button>
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">
+                        {order.customer_name || "Unknown"}
+                      </p>
+                      <p className="text-xs text-slate-500">{order.customer_email || "-"}</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <p className="text-slate-600">
+                        Items:{" "}
+                        <span className="font-medium text-slate-900">
+                          {toNumber(order.items_count).toLocaleString()}
+                        </span>
+                      </p>
+                      <p className="text-slate-600">
+                        Total:{" "}
+                        <span className="font-medium text-slate-900">
+                          {formatAmount(order._meta.totalPrice)}
+                        </span>
+                      </p>
+                      <p className="text-slate-600">
+                        Date:{" "}
+                        <span className="font-medium text-slate-900">
+                          {formatDate(order.created_at)}
+                        </span>
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(
+                          order._meta.paymentStatus,
+                        )}`}
+                      >
+                        {order._meta.paymentStatus || "n/a"}
+                      </span>
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-semibold ${getPaymentMethodColor(
+                          order._meta.paymentMethod,
+                        )}`}
+                      >
+                        {PAYMENT_METHOD_LABELS[order._meta.paymentMethod] || "None"}
+                      </span>
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-semibold ${getFulfillmentColor(
+                          order._meta.fulfillmentStatus,
+                        )}`}
+                      >
+                        {order._meta.fulfillmentStatus || "unfulfilled"}
+                      </span>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div className="px-5 py-12 text-center text-slate-500">
+                  <ShoppingCart size={44} className="mx-auto mb-3 text-slate-300" />
+                  <p className="font-semibold mb-1">No matching orders found</p>
+                  <p className="text-sm">Try adjusting or resetting filters.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>

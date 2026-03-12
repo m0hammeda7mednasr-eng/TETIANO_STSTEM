@@ -7,9 +7,31 @@ import { supabase } from "../supabaseClient.js";
 const router = express.Router();
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PAID_STATUSES = new Set(["paid", "partially_paid"]);
+const PAID_LIKE_STATUSES = new Set([
+  "paid",
+  "partially_paid",
+  "partially_refunded",
+  "refunded",
+]);
+const REFUNDED_STATUSES = new Set(["refunded", "partially_refunded"]);
+const PENDING_STATUSES = new Set(["pending", "authorized"]);
+const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
 
 const toNumber = (value) => {
-  const parsed = parseFloat(value);
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  const normalized = String(value)
+    .trim()
+    .replace(/,/g, "")
+    .replace(/[^\d.-]/g, "");
+  const parsed = parseFloat(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
@@ -47,20 +69,103 @@ const parseLineItems = (order) => {
   return [];
 };
 
-const isPaidOrder = (order) => {
-  const status = String(order?.financial_status || order?.status || "")
+const getOrderFinancialStatus = (order) => {
+  const data = parseOrderData(order);
+  return String(order?.financial_status || order?.status || data?.financial_status || "")
     .toLowerCase()
     .trim();
-
-  return status === "paid" || status === "partially_paid";
 };
+
+const getOrderGrossAmount = (order) => {
+  const data = parseOrderData(order);
+  return toNumber(order?.total_price ?? data?.total_price);
+};
+
+const getOrderCurrentAmount = (order) => {
+  const data = parseOrderData(order);
+  return toNumber(order?.current_total_price ?? data?.current_total_price);
+};
+
+const getRefundedAmountFromTransactions = (order) => {
+  const data = parseOrderData(order);
+  const refunds = Array.isArray(data?.refunds) ? data.refunds : [];
+  return refunds.reduce((sum, refund) => {
+    const transactions = Array.isArray(refund?.transactions)
+      ? refund.transactions
+      : [];
+    return (
+      sum +
+      transactions.reduce(
+        (transactionSum, transaction) => transactionSum + toNumber(transaction?.amount),
+        0,
+      )
+    );
+  }, 0);
+};
+
+const getOrderRefundedAmount = (order) => {
+  const status = getOrderFinancialStatus(order);
+  const grossAmount = getOrderGrossAmount(order);
+  const currentAmount = getOrderCurrentAmount(order);
+
+  const refundedFromColumn = toNumber(order?.total_refunded);
+  const refundedFromTransactions = getRefundedAmountFromTransactions(order);
+  const refundedFromCurrentAmount =
+    grossAmount > 0 && currentAmount > 0 && currentAmount <= grossAmount
+      ? grossAmount - currentAmount
+      : 0;
+
+  let refundedAmount = Math.max(
+    refundedFromColumn,
+    refundedFromTransactions,
+    refundedFromCurrentAmount,
+  );
+
+  // Full refund status without refund breakdown should still zero out revenue.
+  if (status === "refunded" && refundedAmount <= 0 && grossAmount > 0) {
+    refundedAmount = grossAmount;
+  }
+
+  return Math.min(grossAmount, Math.max(0, refundedAmount));
+};
+
+const isCancelledOrder = (order) => {
+  const data = parseOrderData(order);
+  const status = getOrderFinancialStatus(order);
+  return (
+    Boolean(order?.cancelled_at) ||
+    Boolean(data?.cancelled_at) ||
+    CANCELLED_STATUSES.has(status)
+  );
+};
+
+const isPaidOrder = (order) => PAID_STATUSES.has(getOrderFinancialStatus(order));
 
 const isRefundedOrder = (order) => {
-  const status = String(order?.financial_status || "").toLowerCase().trim();
-  return status === "refunded" || status === "partially_refunded";
+  const status = getOrderFinancialStatus(order);
+  return REFUNDED_STATUSES.has(status) || getOrderRefundedAmount(order) > 0;
 };
 
-const isCancelledOrder = (order) => Boolean(order?.cancelled_at);
+const isPendingOrder = (order) =>
+  PENDING_STATUSES.has(getOrderFinancialStatus(order));
+
+const getOrderGrossSalesAmount = (order) => {
+  const status = getOrderFinancialStatus(order);
+  if (isCancelledOrder(order) || !PAID_LIKE_STATUSES.has(status)) {
+    return 0;
+  }
+  return getOrderGrossAmount(order);
+};
+
+const getOrderNetSalesAmount = (order) => {
+  const grossAmount = getOrderGrossSalesAmount(order);
+  if (grossAmount <= 0) {
+    return 0;
+  }
+
+  const refundedAmount = getOrderRefundedAmount(order);
+  return Math.max(0, grossAmount - refundedAmount);
+};
 
 const getRequestedStoreId = (req) => {
   const value = req.headers["x-store-id"] || req.query.store_id;
@@ -155,12 +260,9 @@ router.get("/stats", authenticateToken, async (req, res) => {
       getScopedRows(req, Customer),
     ]);
 
-    const paidOrders = orders.filter(
-      (order) => isPaidOrder(order) && !isCancelledOrder(order),
-    );
-
-    const totalSales = paidOrders.reduce(
-      (sum, order) => sum + toNumber(order.total_price),
+    const saleOrders = orders.filter((order) => getOrderNetSalesAmount(order) > 0);
+    const totalSales = saleOrders.reduce(
+      (sum, order) => sum + getOrderNetSalesAmount(order),
       0,
     );
 
@@ -170,8 +272,8 @@ router.get("/stats", authenticateToken, async (req, res) => {
       total_products: products.length,
       total_customers: customers.length,
       avg_order_value:
-        paidOrders.length > 0
-          ? parseFloat((totalSales / paidOrders.length).toFixed(2))
+        saleOrders.length > 0
+          ? parseFloat((totalSales / saleOrders.length).toFixed(2))
           : 0,
     });
   } catch (error) {
@@ -189,19 +291,12 @@ router.get("/analytics", authenticateToken, requireAdminRole, async (req, res) =
     ]);
 
     const allOrders = orders || [];
-    const paidOrders = allOrders.filter(
-      (order) => isPaidOrder(order) && !isCancelledOrder(order),
-    );
+    const paidOrders = allOrders.filter((order) => isPaidOrder(order));
     const refundedOrders = allOrders.filter((order) => isRefundedOrder(order));
     const cancelledOrders = allOrders.filter((order) => isCancelledOrder(order));
 
     const ordersByStatus = {
-      pending: allOrders.filter((o) => {
-        const s = String(o.financial_status || o.status || "")
-          .toLowerCase()
-          .trim();
-        return s === "pending" || s === "authorized";
-      }).length,
+      pending: allOrders.filter((order) => isPendingOrder(order)).length,
       paid: paidOrders.length,
       refunded: refundedOrders.length,
       cancelled: cancelledOrders.length,
@@ -215,24 +310,24 @@ router.get("/analytics", authenticateToken, requireAdminRole, async (req, res) =
       }).length,
     };
 
-    const totalRevenue = paidOrders.reduce(
-      (sum, order) => sum + toNumber(order.total_price),
+    const totalRevenue = allOrders.reduce(
+      (sum, order) => sum + getOrderGrossSalesAmount(order),
       0,
     );
 
-    const refundedAmount = refundedOrders.reduce(
-      (sum, order) => sum + toNumber(order.total_price),
+    const refundedAmount = allOrders.reduce(
+      (sum, order) => sum + getOrderRefundedAmount(order),
       0,
+    );
+
+    const netRevenue = Math.max(0, totalRevenue - refundedAmount);
+    const revenueOrders = allOrders.filter(
+      (order) => getOrderGrossSalesAmount(order) > 0,
     );
 
     const pendingAmount = allOrders
-      .filter((o) => {
-        const s = String(o.financial_status || o.status || "")
-          .toLowerCase()
-          .trim();
-        return s === "pending" || s === "authorized";
-      })
-      .reduce((sum, order) => sum + toNumber(order.total_price), 0);
+      .filter((order) => isPendingOrder(order))
+      .reduce((sum, order) => sum + getOrderGrossAmount(order), 0);
 
     const now = new Date();
     const monthlyTrends = [];
@@ -245,9 +340,10 @@ router.get("/analytics", authenticateToken, requireAdminRole, async (req, res) =
         return created >= start && created <= end;
       });
 
-      const monthRevenue = monthOrders
-        .filter((o) => isPaidOrder(o) && !isCancelledOrder(o))
-        .reduce((sum, order) => sum + toNumber(order.total_price), 0);
+      const monthRevenue = monthOrders.reduce(
+        (sum, order) => sum + getOrderNetSalesAmount(order),
+        0,
+      );
 
       monthlyTrends.push({
         month: start.toLocaleDateString("ar-EG", {
@@ -262,14 +358,23 @@ router.get("/analytics", authenticateToken, requireAdminRole, async (req, res) =
     }
 
     const productRevenueMap = new Map();
-    paidOrders.forEach((order) => {
+    revenueOrders.forEach((order) => {
+      const grossOrderAmount = getOrderGrossSalesAmount(order);
+      const netOrderAmount = getOrderNetSalesAmount(order);
+      const netRatio =
+        grossOrderAmount > 0
+          ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
+          : 0;
+      if (netRatio <= 0) {
+        return;
+      }
       const lineItems = parseLineItems(order);
       lineItems.forEach((item) => {
         const productKey = String(item.product_id || item.id || item.sku || "");
         if (!productKey) return;
 
         const quantity = toNumber(item.quantity || 0);
-        const lineRevenue = toNumber(item.price || 0) * quantity;
+        const lineRevenue = toNumber(item.price || 0) * quantity * netRatio;
 
         const current = productRevenueMap.get(productKey) || {
           product_id: item.product_id || null,
@@ -313,9 +418,7 @@ router.get("/analytics", authenticateToken, requireAdminRole, async (req, res) =
       };
 
       current.orders_count += 1;
-      if (isPaidOrder(order) && !isCancelledOrder(order)) {
-        current.total_spent += toNumber(order.total_price);
-      }
+      current.total_spent += getOrderNetSalesAmount(order);
       customerSpendMap.set(key, current);
     });
 
@@ -339,7 +442,7 @@ router.get("/analytics", authenticateToken, requireAdminRole, async (req, res) =
         totalRevenue: parseFloat(totalRevenue.toFixed(2)),
         refundedAmount: parseFloat(refundedAmount.toFixed(2)),
         pendingAmount: parseFloat(pendingAmount.toFixed(2)),
-        netRevenue: parseFloat((totalRevenue - refundedAmount).toFixed(2)),
+        netRevenue: parseFloat(netRevenue.toFixed(2)),
       },
       monthlyTrends,
       topProducts,
@@ -408,19 +511,28 @@ router.get("/products", authenticateToken, requireAdminRole, async (req, res) =>
       getScopedRows(req, Order),
     ]);
 
-    const paidOrders = orders.filter(
-      (order) => isPaidOrder(order) && !isCancelledOrder(order),
+    const revenueOrders = orders.filter(
+      (order) => getOrderGrossSalesAmount(order) > 0,
     );
 
     const salesByProduct = new Map();
     const ordersByProduct = new Map();
 
-    paidOrders.forEach((order) => {
+    revenueOrders.forEach((order) => {
+      const grossOrderAmount = getOrderGrossSalesAmount(order);
+      const netOrderAmount = getOrderNetSalesAmount(order);
+      const netRatio =
+        grossOrderAmount > 0
+          ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
+          : 0;
+      if (netRatio <= 0) {
+        return;
+      }
       const lineItems = parseLineItems(order);
       const orderProductSet = new Set();
 
       lineItems.forEach((item) => {
-        const qty = toNumber(item.quantity || 0);
+        const qty = toNumber(item.quantity || 0) * netRatio;
         const unitPrice = toNumber(item.price || 0);
         const revenue = qty * unitPrice;
         const keys = [

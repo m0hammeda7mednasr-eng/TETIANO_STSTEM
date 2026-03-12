@@ -316,7 +316,7 @@ export default function OrderDetails() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full md:w-auto md:min-w-[440px]">
               <div className="min-w-[210px]">
                 <label className="block text-xs text-gray-500 mb-1">
                   Payment Method
@@ -369,6 +369,15 @@ export default function OrderDetails() {
                   <option value="voided">Voided</option>
                   <option value="partially_refunded">Partially Refunded</option>
                 </select>
+                <div className="mt-1 flex items-center gap-2">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusColor(
+                      order.financial_status || order.status,
+                    )}`}
+                  >
+                    {order.financial_status || order.status || "unknown"}
+                  </span>
+                </div>
               </div>
             </div>
           </div>

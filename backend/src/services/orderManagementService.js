@@ -27,6 +27,73 @@ const getShopifyTokenForStore = async (storeId, fallbackUserId) => {
   return tokenByUser || null;
 };
 
+const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
+
+const parseOrderData = (order) => {
+  const value = order?.data;
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === "object" ? value : {};
+};
+
+const appendLogLineToNote = (existingNote, line) => {
+  const base = String(existingNote || "").trim();
+  const nextLine = String(line || "").trim();
+  if (!nextLine) {
+    return base;
+  }
+  return base ? `${base}\n${nextLine}` : nextLine;
+};
+
+const buildShopifyHeaders = (accessToken) => ({
+  "X-Shopify-Access-Token": accessToken,
+  "Content-Type": "application/json",
+});
+
+const updateShopifyOrderNote = async ({
+  tokenData,
+  order,
+  logLine,
+  extraOrderFields = {},
+}) => {
+  if (!tokenData?.shop || !tokenData?.access_token) {
+    throw new Error("Shopify token is missing");
+  }
+  if (!order?.shopify_id) {
+    throw new Error("Order not found or missing Shopify ID");
+  }
+
+  const parsedOrderData = parseOrderData(order);
+  const existingNote = String(parsedOrderData?.note || order?.note || "").trim();
+  const nextNote = appendLogLineToNote(existingNote, logLine);
+  const numericShopifyId = Number.parseInt(String(order.shopify_id), 10);
+  if (!Number.isFinite(numericShopifyId)) {
+    throw new Error("Invalid Shopify order id");
+  }
+
+  const response = await axios.put(
+    `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/orders/${order.shopify_id}.json`,
+    {
+      order: {
+        id: numericShopifyId,
+        note: nextNote,
+        ...extraOrderFields,
+      },
+    },
+    {
+      headers: buildShopifyHeaders(tokenData.access_token),
+    },
+  );
+
+  return response?.data || null;
+};
+
 export class OrderManagementService {
   /**
    * Get complete order details with all related data
@@ -372,10 +439,31 @@ export class OrderManagementService {
         note: newNote,
       });
 
-      // Sync to Shopify asynchronously
-      this.syncNoteToShopify(userId, orderId, newNote).catch((err) => {
-        console.error("Shopify note sync failed:", err);
-      });
+      try {
+        await this.syncNoteToShopify(userId, orderId, newNote);
+      } catch (syncError) {
+        const rollbackNotes = notes.filter(
+          (item) =>
+            !(
+              item?.created_at === newNote.created_at &&
+              String(item?.content || "") === String(newNote.content || "")
+            ),
+        );
+
+        await supabase
+          .from("orders")
+          .update({
+            notes: JSON.stringify(rollbackNotes),
+            pending_sync: false,
+            sync_error: syncError.message,
+            local_updated_at: new Date().toISOString(),
+          })
+          .eq("id", orderId);
+
+        throw new Error(
+          `Shopify sync failed. Note was rolled back: ${syncError.message}`,
+        );
+      }
 
       return {
         success: true,
@@ -508,9 +596,15 @@ export class OrderManagementService {
         throw new Error("Shopify not connected");
       }
 
-      // Note: Shopify API for adding notes to orders
-      // This is a simplified version - actual implementation may vary
-      console.log(`Note synced to Shopify for order ${orderId}`);
+      const noteContent = String(note?.content || "").replace(/\s+/g, " ").trim();
+      const noteAuthor = String(note?.author || "User").replace(/\s+/g, " ").trim();
+      const noteLine = `[Tetiano] Note by "${noteAuthor}" at ${new Date().toISOString()}: ${noteContent}`;
+
+      const responseData = await updateShopifyOrderNote({
+        tokenData,
+        order,
+        logLine: noteLine,
+      });
 
       // Update note sync status
       let notes = [];
@@ -535,15 +629,98 @@ export class OrderManagementService {
         .from("orders")
         .update({
           notes: JSON.stringify(notes),
+          pending_sync: false,
           last_synced_at: new Date().toISOString(),
+          shopify_updated_at:
+            responseData?.order?.updated_at ||
+            responseData?.updated_at ||
+            new Date().toISOString(),
+          sync_error: null,
         })
         .eq("id", orderId);
 
-      await this.updateSyncOperationStatus(userId, orderId, "success");
+      await this.updateSyncOperationStatus(userId, orderId, "success", responseData);
 
       return { success: true };
     } catch (error) {
       console.error("Shopify note sync error:", error);
+      const { supabase } = await import("../supabaseClient.js");
+      await supabase
+        .from("orders")
+        .update({
+          pending_sync: false,
+          sync_error: error.message,
+        })
+        .eq("id", orderId);
+
+      await this.updateSyncOperationStatus(
+        userId,
+        orderId,
+        "failed",
+        null,
+        error.message,
+      );
+      throw error;
+    }
+  }
+
+  static async syncPaymentMethodToShopify(
+    userId,
+    orderId,
+    nextMethod,
+    options = {},
+  ) {
+    try {
+      const { data: order } = await Order.findByIdForUser(userId, orderId);
+      if (!order || !order.shopify_id) {
+        throw new Error("Order not found or missing Shopify ID");
+      }
+
+      const tokenData = await getShopifyTokenForStore(order.store_id, userId);
+      if (!tokenData) {
+        throw new Error("Shopify not connected");
+      }
+
+      const previousMethod = String(options?.previousMethod || "none")
+        .toLowerCase()
+        .trim();
+      const methodValue = String(nextMethod || "none").toLowerCase().trim();
+      const paymentMethodLine = `[Tetiano] Payment method changed from "${previousMethod}" to "${methodValue}" at ${new Date().toISOString()}`;
+
+      const responseData = await updateShopifyOrderNote({
+        tokenData,
+        order,
+        logLine: paymentMethodLine,
+      });
+
+      const { supabase } = await import("../supabaseClient.js");
+      await supabase
+        .from("orders")
+        .update({
+          pending_sync: false,
+          last_synced_at: new Date().toISOString(),
+          shopify_updated_at:
+            responseData?.order?.updated_at ||
+            responseData?.updated_at ||
+            new Date().toISOString(),
+          sync_error: null,
+        })
+        .eq("id", orderId);
+
+      await this.updateSyncOperationStatus(userId, orderId, "success", responseData);
+      return { success: true };
+    } catch (error) {
+      console.error("Shopify payment method sync error:", error);
+
+      const { supabase } = await import("../supabaseClient.js");
+      await supabase
+        .from("orders")
+        .update({
+          pending_sync: false,
+          sync_error: error.message,
+        })
+        .eq("id", orderId);
+
       await this.updateSyncOperationStatus(
         userId,
         orderId,
@@ -571,42 +748,25 @@ export class OrderManagementService {
         throw new Error("Shopify not connected");
       }
 
-      const headers = {
-        "X-Shopify-Access-Token": tokenData.access_token,
-        "Content-Type": "application/json",
-      };
-
       const statusLogLine = `[Tetiano] Status changed to "${newStatus}" at ${new Date().toISOString()}${options?.voidReason ? ` (Reason: ${options.voidReason})` : ""}`;
-      const parsedOrderData =
-        typeof order.data === "string"
-          ? JSON.parse(order.data || "{}")
-          : order.data || {};
-      const existingNote = String(parsedOrderData?.note || order.note || "").trim();
-      const nextNote = existingNote ? `${existingNote}\n${statusLogLine}` : statusLogLine;
 
       let responseData = null;
       if (String(newStatus).toLowerCase() === "voided") {
         const cancelResponse = await axios.post(
-          `https://${tokenData.shop}/admin/api/2024-01/orders/${order.shopify_id}/cancel.json`,
+          `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/orders/${order.shopify_id}/cancel.json`,
           {
             reason: "other",
             email: false,
           },
-          { headers },
+          { headers: buildShopifyHeaders(tokenData.access_token) },
         );
         responseData = cancelResponse.data;
       } else {
-        const updateResponse = await axios.put(
-          `https://${tokenData.shop}/admin/api/2024-01/orders/${order.shopify_id}.json`,
-          {
-            order: {
-              id: parseInt(order.shopify_id, 10),
-              note: nextNote,
-            },
-          },
-          { headers },
-        );
-        responseData = updateResponse.data;
+        responseData = await updateShopifyOrderNote({
+          tokenData,
+          order,
+          logLine: statusLogLine,
+        });
       }
 
       const { supabase } = await import("../supabaseClient.js");

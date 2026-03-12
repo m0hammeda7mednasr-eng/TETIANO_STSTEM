@@ -1259,10 +1259,13 @@ router.post(
     }
 
     const { supabase } = await import("../supabaseClient.js");
+    const previousPaymentMethod = resolveOrderPaymentMethod(order);
     const { data: updatedOrder, error: updateError } = await supabase
       .from("orders")
       .update({
         data: updatedData,
+        pending_sync: true,
+        sync_error: null,
         local_updated_at: new Date().toISOString(),
       })
       .eq("id", order.id)
@@ -1273,12 +1276,54 @@ router.post(
       return res.status(500).json({ error: updateError.message });
     }
 
-    const paymentMethod = resolveOrderPaymentMethod(updatedOrder);
+    await OrderManagementService.logSyncOperation(
+      userId,
+      order.id,
+      "order_payment_method_update",
+      {
+        old_payment_method: previousPaymentMethod,
+        new_payment_method: requestedMethod,
+      },
+    );
+
+    try {
+      await OrderManagementService.syncPaymentMethodToShopify(
+        userId,
+        order.id,
+        requestedMethod,
+        {
+          previousMethod: previousPaymentMethod,
+        },
+      );
+    } catch (syncError) {
+      await supabase
+        .from("orders")
+        .update({
+          data: currentData,
+          pending_sync: false,
+          sync_error: syncError.message,
+          local_updated_at: new Date().toISOString(),
+        })
+        .eq("id", order.id);
+
+      return res.status(502).json({
+        error: `Shopify sync failed. Payment method rolled back: ${syncError.message}`,
+      });
+    }
+
+    const { data: refreshedOrder } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", order.id)
+      .maybeSingle();
+
+    const finalOrder = refreshedOrder || updatedOrder;
+    const paymentMethod = resolveOrderPaymentMethod(finalOrder);
     res.json({
       success: true,
       payment_method: paymentMethod,
       order: {
-        ...updatedOrder,
+        ...finalOrder,
         payment_method: paymentMethod,
       },
     });

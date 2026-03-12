@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>اختبار Analytics - تسجيل دخول Admin</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 600px;
+        margin: 50px auto;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      .form-group {
+        margin-bottom: 20px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+      }
+      input,
+      select {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        font-size: 16px;
+      }
+      button {
+        background: #007bff;
+        color: white;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+        margin: 5px;
+      }
+      button:hover {
+        background: #0056b3;
+      }
+      .success {
+        background: #d4edda;
+        color: #155724;
+        padding: 10px;
+        border-radius: 5px;
+        margin: 10px 0;
+      }
+      .error {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 10px;
+        border-radius: 5px;
+        margin: 10px 0;
+      }
+      .info {
+        background: #d1ecf1;
+        color: #0c5460;
+        padding: 10px;
+        border-radius: 5px;
+        margin: 10px 0;
+      }
+      pre {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 5px;
+        overflow-x: auto;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🔧 اختبار Analytics - تسجيل دخول Admin</h1>
+
+      <div class="info">
+        <strong>📋 تعليمات الاختبار:</strong><br />
+        1. اختر مستخدم admin من القائمة<br />
+        2. اضغط "تسجيل دخول كـ Admin"<br />
+        3. اضغط "اختبار Analytics Endpoint"<br />
+        4. تحقق من النتائج
+      </div>
+
+      <div class="form-group">
+        <label>اختر مستخدم Admin:</label>
+        <select id="adminSelect">
+          <option value="">جاري التحميل...</option>
+        </select>
+      </div>
+
+      <button onclick="loadAdminUsers()">🔄 تحديث قائمة المستخدمين</button>
+      <button onclick="loginAsAdmin()">🔑 تسجيل دخول كـ Admin</button>
+      <button onclick="testAnalytics()">📊 اختبار Analytics Endpoint</button>
+      <button onclick="checkCurrentToken()">🔍 فحص Token الحالي</button>
+
+      <div id="results"></div>
+    </div>
+
+    <script>
+      const API_BASE = "http://localhost:5000/api";
+
+      // Load admin users
+      async function loadAdminUsers() {
+        try {
+          showResult("جاري تحميل المستخدمين...", "info");
+
+          const response = await fetch(`${API_BASE}/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: "admin@analytics.com",
+              password: "password",
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            localStorage.setItem("token", data.token);
+
+            // Now fetch all users
+            const usersResponse = await fetch(`${API_BASE}/users`, {
+              headers: { Authorization: `Bearer ${data.token}` },
+            });
+
+            if (usersResponse.ok) {
+              const users = await usersResponse.json();
+              const adminUsers = users.filter((u) => u.role === "admin");
+
+              const select = document.getElementById("adminSelect");
+              select.innerHTML = "";
+
+              adminUsers.forEach((user) => {
+                const option = document.createElement("option");
+                option.value = JSON.stringify({
+                  id: user.id,
+                  email: user.email,
+                  role: user.role,
+                });
+                option.textContent = `${user.email} (${user.name || "No Name"})`;
+                select.appendChild(option);
+              });
+
+              showResult(
+                `✅ تم تحميل ${adminUsers.length} مستخدم admin`,
+                "success",
+              );
+            }
+          }
+        } catch (error) {
+          showResult(`❌ خطأ في تحميل المستخدمين: ${error.message}`, "error");
+        }
+      }
+
+      // Login as selected admin
+      async function loginAsAdmin() {
+        try {
+          const select = document.getElementById("adminSelect");
+          if (!select.value) {
+            showResult("❌ يرجى اختيار مستخدم admin", "error");
+            return;
+          }
+
+          const userData = JSON.parse(select.value);
+
+          // Generate a token for this user
+          const response = await fetch(`${API_BASE}/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: userData.email,
+              password: "password", // Default password
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            localStorage.setItem("token", data.token);
+            showResult(`✅ تم تسجيل الدخول كـ: ${userData.email}`, "success");
+          } else {
+            const error = await response.text();
+            showResult(`❌ فشل تسجيل الدخول: ${error}`, "error");
+          }
+        } catch (error) {
+          showResult(`❌ خطأ في تسجيل الدخول: ${error.message}`, "error");
+        }
+      }
+
+      // Test analytics endpoint
+      async function testAnalytics() {
+        try {
+          const token = localStorage.getItem("token");
+          if (!token) {
+            showResult("❌ لا يوجد token. يرجى تسجيل الدخول أولاً", "error");
+            return;
+          }
+
+          showResult("جاري اختبار Analytics endpoint...", "info");
+
+          const response = await fetch(`${API_BASE}/dashboard/analytics`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            showResult(
+              `✅ Analytics يعمل بنجاح!
+                    
+📊 البيانات المستلمة:
+- إجمالي الطلبات: ${data.summary?.totalOrders || 0}
+- إجمالي الإيرادات: ${data.financial?.totalRevenue || 0}
+- معدل النجاح: ${data.summary?.successRate || 0}%
+- الطلبات المدفوعة: ${data.ordersByStatus?.paid || 0}
+- الطلبات المعلقة: ${data.ordersByStatus?.pending || 0}
+- الطلبات الملغية: ${data.ordersByStatus?.cancelled || 0}`,
+              "success",
+            );
+          } else {
+            const error = await response.text();
+            showResult(
+              `❌ Analytics فشل (${response.status}): ${error}`,
+              "error",
+            );
+          }
+        } catch (error) {
+          showResult(`❌ خطأ في اختبار Analytics: ${error.message}`, "error");
+        }
+      }
+
+      // Check current token
+      function checkCurrentToken() {
+        const token = localStorage.getItem("token");
+        if (!token) {
+          showResult("❌ لا يوجد token في localStorage", "error");
+          return;
+        }
+
+        try {
+          // Decode JWT token (simple base64 decode)
+          const payload = JSON.parse(atob(token.split(".")[1]));
+          showResult(
+            `🔍 Token الحالي:
+                
+📋 بيانات المستخدم:
+- ID: ${payload.id}
+- Email: ${payload.email}
+- Role: ${payload.role}
+- انتهاء الصلاحية: ${new Date(payload.exp * 1000).toLocaleString("ar-EG")}
+
+${payload.role === "admin" ? "✅ المستخدم admin - يجب أن يعمل Analytics" : "❌ المستخدم ليس admin - لن يعمل Analytics"}`,
+            "info",
+          );
+        } catch (error) {
+          showResult(`❌ خطأ في فك تشفير Token: ${error.message}`, "error");
+        }
+      }
+
+      // Show result
+      function showResult(message, type) {
+        const results = document.getElementById("results");
+        results.innerHTML = `<div class="${type}"><pre>${message}</pre></div>`;
+      }
+
+      // Load admin users on page load
+      window.onload = loadAdminUsers;
+    </script>
+  </body>
+</html>

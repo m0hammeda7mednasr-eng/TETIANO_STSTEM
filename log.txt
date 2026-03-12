@@ -1,0 +1,1677 @@
+2026-03-07 22:12:02.821 +02:00 [INF] This only goes file...
+2026-03-07 22:12:03.578 +02:00 [INF] Foo
+2026-03-07 22:12:03.666 +02:00 [DBG] Finding descriptors for initialize
+2026-03-07 22:12:03.910 +02:00 [DBG] Queueing "Serial":initialize:0 request for processing
+2026-03-07 22:12:03.933 +02:00 [DBG] Starting: Processing request initialize 0
+2026-03-07 22:12:03.934 +02:00 [DBG] Starting: Routing Request (0) initialize
+2026-03-07 22:12:03.937 +02:00 [VRB] Converting params for Request (0) initialize to OmniSharp.Extensions.LanguageServer.Protocol.Models.InternalInitializeParams
+2026-03-07 22:12:03.938 +02:00 [VRB] Converting params for Notification initialize to OmniSharp.Extensions.LanguageServer.Protocol.Models.InternalInitializeParams
+2026-03-07 22:12:04.613 +02:00 [VRB] Response value was OmniSharp.Extensions.LanguageServer.Protocol.Models.InitializeResult
+2026-03-07 22:12:04.628 +02:00 [DBG] Finished: Routing Request (0) initialize in 692ms
+2026-03-07 22:12:04.629 +02:00 [DBG] Finished: Processing request initialize 0 in 695ms
+2026-03-07 22:12:25.525 +02:00 [DBG] Finding descriptors for initialized
+2026-03-07 22:12:25.528 +02:00 [DBG] Queueing "Serial":initialized request for processing
+2026-03-07 22:12:25.536 +02:00 [DBG] Starting: Processing notification initialized
+2026-03-07 22:12:25.537 +02:00 [DBG] Starting: Routing Notification initialized
+2026-03-07 22:12:25.538 +02:00 [VRB] Converting params for Notification initialized to OmniSharp.Extensions.LanguageServer.Protocol.Models.InitializedParams
+2026-03-07 22:12:25.596 +02:00 [WRN] No ConfigurationItems have been defined, configuration won't surface any configuration from the client!
+2026-03-07 22:12:25.648 +02:00 [DBG] Finished: Routing Notification initialized in 110ms
+2026-03-07 22:12:25.649 +02:00 [DBG] Finished: Processing notification initialized in 112ms
+2026-03-07 22:12:28.070 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-07 22:12:28.076 +02:00 [DBG] Swapping from "Serial" to "Parallel"
+2026-03-07 22:12:28.076 +02:00 [DBG] Completing existing request process type "Serial"
+2026-03-07 22:12:28.077 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-07 22:12:28.077 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-07 22:12:28.078 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-07 22:12:28.078 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-07 22:12:28.083 +02:00 [DBG] Finished: Routing Notification $/setTrace in 4ms
+2026-03-07 22:12:28.083 +02:00 [DBG] Finished: Processing notification $/setTrace in 5ms
+2026-03-07 22:12:38.447 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-07 22:12:38.448 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-07 22:12:38.449 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-07 22:12:38.449 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-07 22:12:38.449 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-07 22:12:38.458 +02:00 [DBG] Finished: Routing Notification $/setTrace in 8ms
+2026-03-07 22:12:38.458 +02:00 [DBG] Finished: Processing notification $/setTrace in 9ms
+2026-03-07 22:12:39.649 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-07 22:12:39.650 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-07 22:12:39.651 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-07 22:12:39.651 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-07 22:12:39.651 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-07 22:12:39.653 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-07 22:12:39.653 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:19:22.721 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:19:22.829 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:19:22.848 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:19:22.848 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:19:22.851 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:19:22.892 +02:00 [DBG] Finished: Routing Notification $/setTrace in 39ms
+2026-03-08 05:19:22.893 +02:00 [DBG] Finished: Processing notification $/setTrace in 45ms
+2026-03-08 05:19:26.124 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:19:26.125 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:19:26.126 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:19:26.126 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:19:26.126 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:19:26.140 +02:00 [DBG] Finished: Routing Notification $/setTrace in 13ms
+2026-03-08 05:19:26.140 +02:00 [DBG] Finished: Processing notification $/setTrace in 14ms
+2026-03-08 05:22:50.146 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:22:50.148 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:22:50.150 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:22:50.151 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:22:50.151 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:22:50.154 +02:00 [DBG] Finished: Routing Notification $/setTrace in 3ms
+2026-03-08 05:22:50.154 +02:00 [DBG] Finished: Processing notification $/setTrace in 4ms
+2026-03-08 05:22:54.486 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:22:54.487 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:22:54.488 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:22:54.488 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:22:54.489 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:22:54.497 +02:00 [DBG] Finished: Routing Notification $/setTrace in 8ms
+2026-03-08 05:22:54.498 +02:00 [DBG] Finished: Processing notification $/setTrace in 10ms
+2026-03-08 05:22:55.289 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:22:55.290 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:22:55.293 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:22:55.293 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:22:55.293 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:22:55.295 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:22:55.296 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:22:58.825 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:22:58.825 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:22:58.826 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:22:58.826 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:22:58.828 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:22:58.830 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:22:58.830 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:23:01.702 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:23:01.702 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:23:01.703 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:23:01.703 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:23:01.703 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:23:01.705 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:23:01.705 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:23:05.460 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:23:05.461 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:23:05.461 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:23:05.461 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:23:05.461 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:23:05.464 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:23:05.464 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:23:09.021 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:23:09.023 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:23:09.023 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:23:09.023 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:23:09.023 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:23:09.026 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:23:09.026 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:23:11.351 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:23:11.351 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:23:11.351 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:23:11.352 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:23:11.352 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:23:11.353 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 05:23:11.353 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:23:12.231 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:23:12.231 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:23:12.232 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:23:12.232 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:23:12.232 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:23:12.236 +02:00 [DBG] Finished: Routing Notification $/setTrace in 3ms
+2026-03-08 05:23:12.236 +02:00 [DBG] Finished: Processing notification $/setTrace in 4ms
+2026-03-08 05:23:15.415 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:23:15.416 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:23:15.416 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:23:15.416 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:23:15.417 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:23:15.425 +02:00 [DBG] Finished: Routing Notification $/setTrace in 8ms
+2026-03-08 05:23:15.425 +02:00 [DBG] Finished: Processing notification $/setTrace in 8ms
+2026-03-08 05:23:16.420 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:23:16.421 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:23:16.421 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:23:16.424 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:23:16.425 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:23:16.427 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:23:16.428 +02:00 [DBG] Finished: Processing notification $/setTrace in 5ms
+2026-03-08 05:23:19.470 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:23:19.470 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:23:19.471 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:23:19.471 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:23:19.475 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:23:19.477 +02:00 [DBG] Finished: Routing Notification $/setTrace in 5ms
+2026-03-08 05:23:19.477 +02:00 [DBG] Finished: Processing notification $/setTrace in 5ms
+2026-03-08 05:23:26.575 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:23:26.576 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:23:26.576 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:23:26.577 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:23:26.577 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:23:26.579 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:23:26.579 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:23:54.170 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:23:54.171 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:23:54.171 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:23:54.172 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:23:54.172 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:23:54.175 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:23:54.175 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:24:06.517 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:06.518 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:06.518 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:06.519 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:06.519 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:06.520 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:24:06.520 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:24:13.311 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:13.312 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:13.313 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:13.313 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:13.313 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:13.315 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:24:13.316 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:24:13.802 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:13.803 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:13.803 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:13.803 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:13.803 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:13.805 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:24:13.808 +02:00 [DBG] Finished: Processing notification $/setTrace in 4ms
+2026-03-08 05:24:16.526 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:16.526 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:16.527 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:16.527 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:16.529 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:16.529 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:24:16.530 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:24:27.619 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:27.620 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:27.620 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:27.620 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:27.620 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:27.621 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 05:24:27.623 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:24:31.396 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:31.402 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:31.403 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:31.403 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:31.407 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:31.415 +02:00 [DBG] Finished: Routing Notification $/setTrace in 11ms
+2026-03-08 05:24:31.416 +02:00 [DBG] Finished: Processing notification $/setTrace in 12ms
+2026-03-08 05:24:35.999 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:36.000 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:36.001 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:36.001 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:36.001 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:36.001 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 05:24:36.002 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:24:37.510 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:37.511 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:37.530 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:37.530 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:37.531 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:37.531 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 05:24:37.532 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:24:40.685 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:40.685 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:40.686 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:40.686 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:40.686 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:40.688 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:24:40.688 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:24:41.857 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:41.858 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:41.859 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:41.859 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:41.859 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:41.861 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:24:41.861 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:24:42.829 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:42.830 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:42.831 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:42.831 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:42.831 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:42.837 +02:00 [DBG] Finished: Routing Notification $/setTrace in 5ms
+2026-03-08 05:24:42.837 +02:00 [DBG] Finished: Processing notification $/setTrace in 6ms
+2026-03-08 05:24:46.048 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:24:46.048 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:24:46.049 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:24:46.049 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:24:46.049 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:24:46.051 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:24:46.051 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:30:40.085 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:30:40.156 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:30:40.167 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:30:40.168 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:30:40.169 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:30:40.187 +02:00 [DBG] Finished: Routing Notification $/setTrace in 17ms
+2026-03-08 05:30:40.187 +02:00 [DBG] Finished: Processing notification $/setTrace in 18ms
+2026-03-08 05:30:43.284 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:30:43.284 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:30:43.288 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:30:43.289 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:30:43.289 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:30:43.296 +02:00 [DBG] Finished: Routing Notification $/setTrace in 6ms
+2026-03-08 05:30:43.296 +02:00 [DBG] Finished: Processing notification $/setTrace in 7ms
+2026-03-08 05:30:57.488 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:30:57.489 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:30:57.489 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:30:57.490 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:30:57.490 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:30:57.492 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:30:57.492 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:31:01.980 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:31:01.981 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:31:01.981 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:31:01.982 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:31:01.982 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:31:01.988 +02:00 [DBG] Finished: Routing Notification $/setTrace in 5ms
+2026-03-08 05:31:01.988 +02:00 [DBG] Finished: Processing notification $/setTrace in 6ms
+2026-03-08 05:31:17.116 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:31:17.117 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:31:17.117 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:31:17.118 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:31:17.118 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:31:17.121 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:31:17.121 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:31:21.749 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:31:21.749 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:31:21.749 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:31:21.750 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:31:21.750 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:31:21.753 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:31:21.753 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:31:31.183 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:31:31.184 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:31:31.185 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:31:31.186 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:31:31.186 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:31:31.188 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:31:31.188 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:31:34.157 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:31:34.157 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:31:34.158 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:31:34.158 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:31:34.158 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:31:34.159 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 05:31:34.160 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:31:43.654 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:31:43.663 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:31:43.663 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:31:43.663 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:31:43.664 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:31:43.682 +02:00 [DBG] Finished: Routing Notification $/setTrace in 18ms
+2026-03-08 05:31:43.683 +02:00 [DBG] Finished: Processing notification $/setTrace in 19ms
+2026-03-08 05:31:47.816 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:31:47.816 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:31:47.817 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:31:47.817 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:31:47.817 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:31:47.820 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:31:47.820 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:33:17.476 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:33:17.477 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:33:17.477 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:33:17.477 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:33:17.477 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:33:17.481 +02:00 [DBG] Finished: Routing Notification $/setTrace in 3ms
+2026-03-08 05:33:17.481 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:33:20.670 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:33:20.671 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:33:20.671 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:33:20.672 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:33:20.672 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:33:20.673 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:33:20.674 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:33:39.551 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:33:39.552 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:33:39.552 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:33:39.553 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:33:39.553 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:33:39.554 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:33:39.555 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:33:42.556 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:33:42.556 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:33:42.557 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:33:42.558 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:33:42.563 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:33:42.564 +02:00 [DBG] Finished: Routing Notification $/setTrace in 5ms
+2026-03-08 05:33:42.564 +02:00 [DBG] Finished: Processing notification $/setTrace in 6ms
+2026-03-08 05:35:10.055 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:35:10.056 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:35:10.057 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:35:10.057 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:35:10.057 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:35:10.060 +02:00 [DBG] Finished: Routing Notification $/setTrace in 3ms
+2026-03-08 05:35:10.061 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:35:15.366 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:35:15.366 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:35:15.366 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:35:15.366 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:35:15.367 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:35:15.368 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:35:15.368 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:35:18.617 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:35:18.617 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:35:18.618 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:35:18.618 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:35:18.618 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:35:18.625 +02:00 [DBG] Finished: Routing Notification $/setTrace in 6ms
+2026-03-08 05:35:18.625 +02:00 [DBG] Finished: Processing notification $/setTrace in 6ms
+2026-03-08 05:35:21.959 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:35:21.959 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:35:21.960 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:35:21.960 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:35:21.960 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:35:21.963 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:35:21.963 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:35:26.783 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:35:26.789 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:35:26.789 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:35:26.790 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:35:26.790 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:35:26.798 +02:00 [DBG] Finished: Routing Notification $/setTrace in 8ms
+2026-03-08 05:35:26.798 +02:00 [DBG] Finished: Processing notification $/setTrace in 8ms
+2026-03-08 05:35:32.343 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:35:32.349 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:35:32.351 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:35:32.351 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:35:32.352 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:35:32.363 +02:00 [DBG] Finished: Routing Notification $/setTrace in 11ms
+2026-03-08 05:35:32.363 +02:00 [DBG] Finished: Processing notification $/setTrace in 12ms
+2026-03-08 05:35:43.723 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:35:43.729 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:35:43.729 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:35:43.729 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:35:43.730 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:35:43.735 +02:00 [DBG] Finished: Routing Notification $/setTrace in 5ms
+2026-03-08 05:35:43.735 +02:00 [DBG] Finished: Processing notification $/setTrace in 5ms
+2026-03-08 05:35:46.950 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:35:46.951 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:35:46.952 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:35:46.952 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:35:46.953 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:35:46.955 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:35:46.955 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:35:48.280 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:35:48.281 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:35:48.283 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:35:48.283 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:35:48.283 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:35:48.285 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:35:48.286 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:35:50.493 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:35:50.493 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:35:50.493 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:35:50.494 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:35:50.494 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:35:50.494 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 05:35:50.495 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:36:16.410 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:36:16.411 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:36:16.424 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:36:16.424 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:36:16.424 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:36:16.434 +02:00 [DBG] Finished: Routing Notification $/setTrace in 9ms
+2026-03-08 05:36:16.434 +02:00 [DBG] Finished: Processing notification $/setTrace in 10ms
+2026-03-08 05:36:16.448 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:36:16.448 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:36:16.456 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:36:16.456 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:36:16.456 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:36:16.457 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 05:36:16.458 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:40:07.770 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:40:07.774 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:40:07.775 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:40:07.776 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:40:07.776 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:40:07.778 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:40:07.779 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:40:10.295 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:40:10.296 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:40:10.296 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:40:10.296 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:40:10.296 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:40:10.298 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:40:10.298 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:40:32.403 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:40:32.404 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:40:32.412 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:40:32.412 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:40:32.413 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:40:32.416 +02:00 [DBG] Finished: Routing Notification $/setTrace in 3ms
+2026-03-08 05:40:32.417 +02:00 [DBG] Finished: Processing notification $/setTrace in 4ms
+2026-03-08 05:40:35.777 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:40:35.777 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:40:35.778 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:40:35.778 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:40:35.778 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:40:35.781 +02:00 [DBG] Finished: Routing Notification $/setTrace in 3ms
+2026-03-08 05:40:35.781 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 05:42:54.487 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:42:54.488 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:42:54.489 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:42:54.489 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:42:54.489 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:42:54.492 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 05:42:54.493 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:42:57.290 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:42:57.291 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:42:57.291 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:42:57.292 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:42:57.292 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:42:57.292 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 05:42:57.298 +02:00 [DBG] Finished: Processing notification $/setTrace in 6ms
+2026-03-08 05:44:21.664 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:44:21.665 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:44:21.665 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:44:21.665 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:44:21.665 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:44:21.667 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:44:21.667 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:44:45.430 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:44:45.430 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:44:45.441 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:44:45.441 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:44:45.441 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:44:45.442 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:44:45.443 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 05:47:24.573 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:47:24.597 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:47:24.601 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:47:24.601 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:47:24.601 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:47:24.622 +02:00 [DBG] Finished: Routing Notification $/setTrace in 17ms
+2026-03-08 05:47:24.622 +02:00 [DBG] Finished: Processing notification $/setTrace in 21ms
+2026-03-08 05:47:58.847 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:47:58.848 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:47:58.848 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:47:58.848 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:47:58.849 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:47:58.849 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 05:47:58.849 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 05:54:04.941 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:54:04.946 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:54:04.951 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:54:04.951 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:54:04.952 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:54:04.964 +02:00 [DBG] Finished: Routing Notification $/setTrace in 12ms
+2026-03-08 05:54:04.964 +02:00 [DBG] Finished: Processing notification $/setTrace in 12ms
+2026-03-08 05:54:07.476 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 05:54:07.477 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 05:54:07.477 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 05:54:07.477 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 05:54:07.477 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 05:54:07.478 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 05:54:07.479 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 06:02:51.237 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:02:51.262 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:02:51.289 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:02:51.290 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:02:51.291 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:02:51.307 +02:00 [DBG] Finished: Routing Notification $/setTrace in 16ms
+2026-03-08 06:02:51.308 +02:00 [DBG] Finished: Processing notification $/setTrace in 17ms
+2026-03-08 06:02:53.518 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:02:53.518 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:02:53.518 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:02:53.518 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:02:53.518 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:02:53.519 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 06:02:53.520 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 06:05:14.642 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:05:14.643 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:05:14.645 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:05:14.645 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:05:14.645 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:05:14.647 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 06:05:14.647 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 06:05:17.054 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:05:17.054 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:05:17.055 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:05:17.055 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:05:17.055 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:05:17.056 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 06:05:17.056 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 06:14:27.069 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:14:27.096 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:14:27.103 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:14:27.104 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:14:27.104 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:14:27.124 +02:00 [DBG] Finished: Routing Notification $/setTrace in 19ms
+2026-03-08 06:14:27.124 +02:00 [DBG] Finished: Processing notification $/setTrace in 20ms
+2026-03-08 06:14:29.548 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:14:29.552 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:14:29.556 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:14:29.556 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:14:29.556 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:14:29.557 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 06:14:29.557 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 06:17:54.520 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:17:54.527 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:17:54.528 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:17:54.528 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:17:54.529 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:17:54.537 +02:00 [DBG] Finished: Routing Notification $/setTrace in 8ms
+2026-03-08 06:17:54.538 +02:00 [DBG] Finished: Processing notification $/setTrace in 9ms
+2026-03-08 06:18:00.211 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:18:00.214 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:18:00.214 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:18:00.214 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:18:00.214 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:18:00.231 +02:00 [DBG] Finished: Routing Notification $/setTrace in 16ms
+2026-03-08 06:18:00.231 +02:00 [DBG] Finished: Processing notification $/setTrace in 16ms
+2026-03-08 06:18:01.637 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:18:01.638 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:18:01.638 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:18:01.638 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:18:01.638 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:18:01.641 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 06:18:01.641 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 06:18:05.113 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:18:05.114 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:18:05.114 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:18:05.114 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:18:05.114 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:18:05.117 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 06:18:05.117 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 06:18:11.241 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:18:11.241 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:18:11.243 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:18:11.243 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:18:11.243 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:18:11.246 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 06:18:11.246 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 06:18:14.574 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:18:14.574 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:18:14.574 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:18:14.574 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:18:14.575 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:18:14.576 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 06:18:14.576 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 06:30:20.533 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:30:20.582 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:30:20.593 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:30:20.593 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:30:20.594 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:30:20.620 +02:00 [DBG] Finished: Routing Notification $/setTrace in 25ms
+2026-03-08 06:30:20.620 +02:00 [DBG] Finished: Processing notification $/setTrace in 27ms
+2026-03-08 06:30:23.716 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:30:23.716 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:30:23.718 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:30:23.718 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:30:23.719 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:30:23.722 +02:00 [DBG] Finished: Routing Notification $/setTrace in 3ms
+2026-03-08 06:30:23.723 +02:00 [DBG] Finished: Processing notification $/setTrace in 4ms
+2026-03-08 06:30:49.940 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:30:49.941 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:30:49.942 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:30:49.942 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:30:49.943 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:30:49.945 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 06:30:49.945 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 06:30:53.633 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:30:53.633 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:30:53.633 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:30:53.634 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:30:53.634 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:30:53.640 +02:00 [DBG] Finished: Routing Notification $/setTrace in 5ms
+2026-03-08 06:30:53.640 +02:00 [DBG] Finished: Processing notification $/setTrace in 6ms
+2026-03-08 06:31:06.354 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:31:06.354 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:31:06.354 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:31:06.354 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:31:06.355 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:31:06.356 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 06:31:06.356 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 06:31:13.000 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:31:13.001 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:31:13.001 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:31:13.001 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:31:13.001 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:31:13.004 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 06:31:13.004 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 06:42:55.586 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:42:55.618 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:42:55.626 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:42:55.627 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:42:55.627 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:42:55.645 +02:00 [DBG] Finished: Routing Notification $/setTrace in 18ms
+2026-03-08 06:42:55.646 +02:00 [DBG] Finished: Processing notification $/setTrace in 18ms
+2026-03-08 06:42:58.640 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:42:58.640 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:42:58.642 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:42:58.642 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:42:58.642 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:42:58.650 +02:00 [DBG] Finished: Routing Notification $/setTrace in 6ms
+2026-03-08 06:42:58.650 +02:00 [DBG] Finished: Processing notification $/setTrace in 8ms
+2026-03-08 06:43:12.117 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:43:12.117 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:43:12.117 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:43:12.117 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:43:12.118 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:43:12.119 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 06:43:12.119 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 06:43:15.842 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:43:15.842 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:43:15.842 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:43:15.842 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:43:15.842 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:43:15.845 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 06:43:15.846 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 06:43:27.918 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:43:27.919 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:43:27.919 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:43:27.920 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:43:27.921 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:43:27.931 +02:00 [DBG] Finished: Routing Notification $/setTrace in 10ms
+2026-03-08 06:43:27.931 +02:00 [DBG] Finished: Processing notification $/setTrace in 11ms
+2026-03-08 06:43:31.085 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 06:43:31.085 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 06:43:31.086 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 06:43:31.086 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 06:43:31.086 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 06:43:31.087 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 06:43:31.087 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:01:33.389 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:01:33.446 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:01:33.453 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:01:33.454 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:01:33.454 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:01:33.476 +02:00 [DBG] Finished: Routing Notification $/setTrace in 22ms
+2026-03-08 07:01:33.477 +02:00 [DBG] Finished: Processing notification $/setTrace in 23ms
+2026-03-08 07:02:15.215 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:02:15.217 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:02:15.218 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:02:15.218 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:02:15.218 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:02:15.220 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:02:15.220 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:03:15.998 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:03:15.999 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:03:16.000 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:03:16.000 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:03:16.000 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:03:16.003 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 07:03:16.003 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:03:16.474 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:03:16.479 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:03:16.480 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:03:16.480 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:03:16.480 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:03:16.481 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:03:16.482 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:03:20.767 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:03:20.770 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:03:20.771 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:03:20.771 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:03:20.771 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:03:20.772 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:03:20.772 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:03:23.771 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:03:23.771 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:03:23.771 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:03:23.772 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:03:23.772 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:03:23.773 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:03:23.773 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:03:25.545 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:03:25.546 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:03:25.547 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:03:25.547 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:03:25.547 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:03:25.553 +02:00 [DBG] Finished: Routing Notification $/setTrace in 5ms
+2026-03-08 07:03:25.553 +02:00 [DBG] Finished: Processing notification $/setTrace in 6ms
+2026-03-08 07:03:28.136 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:03:28.136 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:03:28.137 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:03:28.137 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:03:28.137 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:03:28.138 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:03:28.138 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 07:37:38.371 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:37:38.505 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:37:38.528 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:37:38.530 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:37:38.532 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:37:38.592 +02:00 [DBG] Finished: Routing Notification $/setTrace in 60ms
+2026-03-08 07:37:38.593 +02:00 [DBG] Finished: Processing notification $/setTrace in 63ms
+2026-03-08 07:38:13.231 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:38:13.236 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:38:13.245 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:38:13.245 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:38:13.245 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:38:13.254 +02:00 [DBG] Finished: Routing Notification $/setTrace in 8ms
+2026-03-08 07:38:13.254 +02:00 [DBG] Finished: Processing notification $/setTrace in 9ms
+2026-03-08 07:38:55.024 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:38:55.026 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:38:55.026 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:38:55.026 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:38:55.027 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:38:55.028 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:38:55.028 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:38:59.088 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:38:59.089 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:38:59.090 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:38:59.090 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:38:59.091 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:38:59.091 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:38:59.095 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:39:01.744 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:39:01.744 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:39:01.745 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:39:01.745 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:39:01.745 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:39:01.746 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:39:01.747 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:39:04.607 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:39:04.608 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:39:04.609 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:39:04.609 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:39:04.609 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:39:04.613 +02:00 [DBG] Finished: Routing Notification $/setTrace in 3ms
+2026-03-08 07:39:04.613 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 07:39:25.205 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:39:25.206 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:39:25.206 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:39:25.206 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:39:25.206 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:39:25.208 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 07:39:25.209 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:39:28.053 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:39:28.057 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:39:28.058 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:39:28.058 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:39:28.058 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:39:28.058 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:39:28.059 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 07:39:30.012 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:39:30.012 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:39:30.012 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:39:30.013 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:39:30.013 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:39:30.018 +02:00 [DBG] Finished: Routing Notification $/setTrace in 5ms
+2026-03-08 07:39:30.018 +02:00 [DBG] Finished: Processing notification $/setTrace in 5ms
+2026-03-08 07:39:35.415 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:39:35.418 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:39:35.419 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:39:35.420 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:39:35.420 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:39:35.423 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 07:39:35.423 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 07:42:42.545 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:42:42.567 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:42:42.573 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:42:42.573 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:42:42.574 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:42:42.594 +02:00 [DBG] Finished: Routing Notification $/setTrace in 20ms
+2026-03-08 07:42:42.594 +02:00 [DBG] Finished: Processing notification $/setTrace in 21ms
+2026-03-08 07:42:45.486 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:42:45.487 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:42:45.487 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:42:45.488 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:42:45.488 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:42:45.491 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 07:42:45.492 +02:00 [DBG] Finished: Processing notification $/setTrace in 4ms
+2026-03-08 07:42:46.985 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:42:46.985 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:42:46.986 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:42:46.986 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:42:46.986 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:42:46.987 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:42:46.989 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:42:49.786 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:42:49.787 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:42:49.788 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:42:49.788 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:42:49.788 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:42:49.789 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:42:49.790 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:42:56.360 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:42:56.361 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:42:56.361 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:42:56.361 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:42:56.361 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:42:56.366 +02:00 [DBG] Finished: Routing Notification $/setTrace in 4ms
+2026-03-08 07:42:56.366 +02:00 [DBG] Finished: Processing notification $/setTrace in 5ms
+2026-03-08 07:43:38.678 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:43:38.679 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:43:38.679 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:43:38.679 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:43:38.680 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:43:38.681 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:43:38.683 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 07:45:00.263 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:45:00.264 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:45:00.265 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:45:00.265 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:45:00.265 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:45:00.266 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:45:00.267 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:45:22.492 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:45:22.493 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:45:22.493 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:45:22.493 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:45:22.493 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:45:22.496 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 07:45:22.496 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 07:46:03.213 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:46:03.214 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:46:03.214 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:46:03.215 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:46:03.215 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:46:03.216 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:46:03.217 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:46:07.586 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:46:07.588 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:46:07.588 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:46:07.588 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:46:07.588 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:46:07.590 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 07:46:07.591 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:46:09.737 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:46:09.737 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:46:09.737 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:46:09.737 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:46:09.737 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:46:09.738 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:46:09.738 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 07:46:13.796 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:46:13.796 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:46:13.797 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:46:13.797 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:46:13.797 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:46:13.798 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:46:13.798 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:46:35.738 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:46:35.738 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:46:35.739 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:46:35.739 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:46:35.739 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:46:35.740 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:46:35.741 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:46:38.767 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:46:38.767 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:46:38.767 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:46:38.768 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:46:38.768 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:46:38.770 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 07:46:38.771 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:46:41.574 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:46:41.574 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:46:41.574 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:46:41.574 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:46:41.574 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:46:41.575 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:46:41.575 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:46:44.777 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:46:44.777 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:46:44.777 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:46:44.777 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:46:44.777 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:46:44.778 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:46:44.778 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:50:44.605 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:50:44.611 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:50:44.613 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:50:44.613 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:50:44.614 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:50:44.632 +02:00 [DBG] Finished: Routing Notification $/setTrace in 18ms
+2026-03-08 07:50:44.632 +02:00 [DBG] Finished: Processing notification $/setTrace in 19ms
+2026-03-08 07:50:47.218 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:50:47.221 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:50:47.224 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:50:47.224 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:50:47.224 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:50:47.225 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:50:47.226 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:50:48.260 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:50:48.261 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:50:48.261 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:50:48.261 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:50:48.261 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:50:48.262 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:50:48.262 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 07:50:50.625 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:50:50.625 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:50:50.628 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:50:50.630 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:50:50.630 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:50:50.631 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:50:50.631 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:51:00.263 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:51:00.264 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:51:00.264 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:51:00.264 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:51:00.264 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:51:00.280 +02:00 [DBG] Finished: Routing Notification $/setTrace in 16ms
+2026-03-08 07:51:00.281 +02:00 [DBG] Finished: Processing notification $/setTrace in 16ms
+2026-03-08 07:51:02.878 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:51:02.881 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:51:02.881 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:51:02.882 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:51:02.882 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:51:02.883 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:51:02.883 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:55:46.424 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:55:46.443 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:55:46.446 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:55:46.446 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:55:46.446 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:55:46.460 +02:00 [DBG] Finished: Routing Notification $/setTrace in 14ms
+2026-03-08 07:55:46.461 +02:00 [DBG] Finished: Processing notification $/setTrace in 14ms
+2026-03-08 07:56:35.892 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:56:35.893 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:56:35.894 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:56:35.894 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:56:35.894 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:56:35.895 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:56:35.896 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:56:44.263 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:56:44.265 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:56:44.266 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:56:44.266 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:56:44.267 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:56:44.269 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 07:56:44.270 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 07:56:49.093 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:56:49.093 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:56:49.093 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:56:49.093 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:56:49.093 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:56:49.095 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:56:49.095 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:57:00.158 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:57:00.159 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:57:00.160 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:57:00.160 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:57:00.160 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:57:00.161 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:57:00.161 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 07:57:03.345 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:57:03.345 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:57:03.345 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:57:03.346 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:57:03.346 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:57:03.346 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:57:03.346 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 07:57:17.700 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:57:17.701 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:57:17.702 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:57:17.703 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:57:17.703 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:57:17.705 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 07:57:17.706 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:57:20.390 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:57:20.391 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:57:20.391 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:57:20.392 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:57:20.392 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:57:20.394 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:57:20.394 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:59:48.060 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:59:48.060 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:59:48.070 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:59:48.070 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:59:48.070 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:59:48.072 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 07:59:48.072 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 07:59:50.413 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 07:59:50.414 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 07:59:50.414 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 07:59:50.414 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 07:59:50.414 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 07:59:50.415 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 07:59:50.415 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:00:03.052 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:00:03.054 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:00:03.055 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:00:03.055 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:00:03.055 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:00:03.056 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:00:03.057 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:00:07.216 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:00:07.216 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:00:07.216 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:00:07.216 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:00:07.216 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:00:07.218 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:00:07.218 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:00:21.257 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:00:21.258 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:00:21.258 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:00:21.259 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:00:21.259 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:00:21.260 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:00:21.261 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:00:24.854 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:00:24.854 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:00:24.854 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:00:24.856 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:00:24.856 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:00:24.857 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:00:24.857 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:00:37.622 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:00:37.623 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:00:37.624 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:00:37.624 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:00:37.625 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:00:37.626 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:00:37.626 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:00:42.410 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:00:42.410 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:00:42.414 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:00:42.414 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:00:42.414 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:00:42.415 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:00:42.425 +02:00 [DBG] Finished: Processing notification $/setTrace in 11ms
+2026-03-08 08:00:57.367 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:00:57.369 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:00:57.369 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:00:57.369 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:00:57.369 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:00:57.371 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:00:57.371 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:01:01.813 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:01:01.814 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:01:01.814 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:01:01.814 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:01:01.814 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:01:01.815 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:01:01.815 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:01:22.225 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:01:22.227 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:01:22.227 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:01:22.227 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:01:22.227 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:01:22.228 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:01:22.228 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:01:26.891 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:01:26.892 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:01:26.892 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:01:26.892 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:01:26.892 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:01:26.894 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:01:26.894 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:01:42.490 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:01:42.491 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:01:42.492 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:01:42.493 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:01:42.493 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:01:42.494 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:01:42.495 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:01:49.852 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:01:49.852 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:01:49.852 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:01:49.853 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:01:49.853 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:01:49.860 +02:00 [DBG] Finished: Routing Notification $/setTrace in 7ms
+2026-03-08 08:01:49.861 +02:00 [DBG] Finished: Processing notification $/setTrace in 8ms
+2026-03-08 08:05:07.855 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:05:07.903 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:05:07.908 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:05:07.909 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:05:07.909 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:05:07.952 +02:00 [DBG] Finished: Routing Notification $/setTrace in 42ms
+2026-03-08 08:05:07.952 +02:00 [DBG] Finished: Processing notification $/setTrace in 42ms
+2026-03-08 08:05:11.169 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:05:11.173 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:05:11.176 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:05:11.176 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:05:11.176 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:05:11.177 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:05:11.180 +02:00 [DBG] Finished: Processing notification $/setTrace in 4ms
+2026-03-08 08:05:12.758 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:05:12.762 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:05:12.763 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:05:12.763 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:05:12.763 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:05:12.767 +02:00 [DBG] Finished: Routing Notification $/setTrace in 4ms
+2026-03-08 08:05:12.767 +02:00 [DBG] Finished: Processing notification $/setTrace in 4ms
+2026-03-08 08:05:18.146 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:05:18.147 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:05:18.150 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:05:18.150 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:05:18.150 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:05:18.152 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:05:18.153 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:08:42.835 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:08:42.837 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:08:42.838 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:08:42.838 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:08:42.838 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:08:42.841 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 08:08:42.841 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 08:08:44.733 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:08:44.733 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:08:44.733 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:08:44.733 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:08:44.734 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:08:44.734 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:08:44.735 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:10:11.388 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:10:11.390 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:10:11.391 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:10:11.391 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:10:11.391 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:10:11.392 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:10:11.392 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:10:14.116 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:10:14.117 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:10:14.117 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:10:14.117 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:10:14.117 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:10:14.118 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:10:14.118 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:10:23.570 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:10:23.571 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:10:23.571 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:10:23.572 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:10:23.573 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:10:23.575 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 08:10:23.575 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:10:28.374 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:10:28.375 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:10:28.375 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:10:28.376 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:10:28.376 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:10:28.377 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:10:28.377 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:10:48.352 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:10:48.353 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:10:48.353 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:10:48.353 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:10:48.353 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:10:48.354 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:10:48.354 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:10:48.598 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:10:48.599 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:10:48.599 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:10:48.599 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:10:48.602 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:10:48.603 +02:00 [DBG] Finished: Routing Notification $/setTrace in 4ms
+2026-03-08 08:10:48.604 +02:00 [DBG] Finished: Processing notification $/setTrace in 5ms
+2026-03-08 08:10:48.607 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:10:48.608 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:10:48.608 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:10:48.608 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:10:48.608 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:10:48.608 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:10:48.609 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:10:50.707 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:10:50.707 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:10:50.708 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:10:50.708 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:10:50.708 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:10:50.708 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:10:50.709 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:11:05.629 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:11:05.634 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:11:05.634 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:11:05.634 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:11:05.634 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:11:05.636 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:11:05.636 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:11:10.241 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:11:10.241 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:11:10.241 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:11:10.242 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:11:10.242 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:11:10.245 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:11:10.245 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 08:11:31.764 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:11:31.764 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:11:31.765 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:11:31.765 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:11:31.765 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:11:31.767 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 08:11:31.767 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:11:36.040 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:11:36.041 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:11:36.041 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:11:36.041 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:11:36.041 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:11:36.042 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:11:36.042 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:12:59.496 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:12:59.497 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:12:59.498 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:12:59.498 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:12:59.498 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:12:59.500 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:12:59.500 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:13:01.873 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:13:01.873 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:13:01.873 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:13:01.873 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:13:01.873 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:13:01.874 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:13:01.874 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:13:08.453 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:13:08.454 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:13:08.455 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:13:08.456 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:13:08.456 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:13:08.465 +02:00 [DBG] Finished: Routing Notification $/setTrace in 8ms
+2026-03-08 08:13:08.465 +02:00 [DBG] Finished: Processing notification $/setTrace in 9ms
+2026-03-08 08:13:12.840 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:13:12.842 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:13:12.842 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:13:12.842 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:13:12.842 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:13:12.847 +02:00 [DBG] Finished: Routing Notification $/setTrace in 5ms
+2026-03-08 08:13:12.847 +02:00 [DBG] Finished: Processing notification $/setTrace in 5ms
+2026-03-08 08:13:19.886 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:13:19.886 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:13:19.886 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:13:19.887 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:13:19.887 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:13:19.887 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:13:19.887 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:13:22.817 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:13:22.817 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:13:22.818 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:13:22.818 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:13:22.818 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:13:22.819 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:13:22.819 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:22:33.443 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:22:33.468 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:22:33.473 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:22:33.473 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:22:33.474 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:22:33.494 +02:00 [DBG] Finished: Routing Notification $/setTrace in 20ms
+2026-03-08 08:22:33.494 +02:00 [DBG] Finished: Processing notification $/setTrace in 21ms
+2026-03-08 08:22:36.453 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:22:36.453 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:22:36.454 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:22:36.454 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:22:36.454 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:22:36.455 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:22:36.456 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:22:46.064 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:22:46.065 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:22:46.065 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:22:46.066 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:22:46.066 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:22:46.068 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:22:46.068 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:22:50.156 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:22:50.157 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:22:50.158 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:22:50.158 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:22:50.159 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:22:50.160 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:22:50.160 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:22:58.061 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:22:58.061 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:22:58.061 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:22:58.062 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:22:58.062 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:22:58.063 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:22:58.064 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:23:01.800 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:23:01.801 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:23:01.801 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:23:01.801 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:23:01.801 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:23:01.806 +02:00 [DBG] Finished: Routing Notification $/setTrace in 4ms
+2026-03-08 08:23:01.832 +02:00 [DBG] Finished: Processing notification $/setTrace in 30ms
+2026-03-08 08:25:49.010 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:25:49.013 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:25:49.014 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:25:49.014 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:25:49.014 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:25:49.018 +02:00 [DBG] Finished: Routing Notification $/setTrace in 3ms
+2026-03-08 08:25:49.018 +02:00 [DBG] Finished: Processing notification $/setTrace in 4ms
+2026-03-08 08:25:51.472 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:25:51.473 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:25:51.473 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:25:51.473 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:25:51.473 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:25:51.474 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:25:51.474 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:26:31.019 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:26:31.021 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:26:31.022 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:26:31.022 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:26:31.023 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:26:31.025 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:26:31.025 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:26:35.596 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:26:35.596 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:26:35.596 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:26:35.596 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:26:35.597 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:26:35.597 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:26:35.597 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:28:45.097 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:28:45.098 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:28:45.098 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:28:45.098 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:28:45.098 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:28:45.102 +02:00 [DBG] Finished: Routing Notification $/setTrace in 3ms
+2026-03-08 08:28:45.102 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 08:28:47.464 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:28:47.465 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:28:47.465 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:28:47.465 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:28:47.465 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:28:47.467 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:28:47.472 +02:00 [DBG] Finished: Processing notification $/setTrace in 7ms
+2026-03-08 08:31:13.198 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:31:13.199 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:31:13.199 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:31:13.199 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:31:13.199 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:31:13.201 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:31:13.201 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:31:19.475 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:31:19.476 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:31:19.477 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:31:19.477 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:31:19.477 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:31:19.488 +02:00 [DBG] Finished: Routing Notification $/setTrace in 10ms
+2026-03-08 08:31:19.488 +02:00 [DBG] Finished: Processing notification $/setTrace in 11ms
+2026-03-08 08:31:23.439 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:31:23.440 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:31:23.440 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:31:23.440 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:31:23.440 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:31:23.441 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:31:23.442 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:31:27.865 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:31:27.865 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:31:27.866 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:31:27.866 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:31:27.866 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:31:27.867 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:31:27.867 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:36:08.471 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:36:08.491 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:36:08.494 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:36:08.495 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:36:08.496 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:36:08.509 +02:00 [DBG] Finished: Routing Notification $/setTrace in 14ms
+2026-03-08 08:36:08.510 +02:00 [DBG] Finished: Processing notification $/setTrace in 15ms
+2026-03-08 08:36:49.197 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:36:49.198 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:36:49.199 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:36:49.199 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:36:49.199 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:36:49.201 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 08:36:49.201 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:36:55.132 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:36:55.133 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:36:55.135 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:36:55.135 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:36:55.135 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:36:55.137 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:36:55.138 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:37:17.408 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:37:17.410 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:37:17.411 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:37:17.411 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:37:17.411 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:37:17.412 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:37:17.412 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:37:24.306 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:37:24.306 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:37:24.307 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:37:24.307 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:37:24.307 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:37:24.308 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:37:24.308 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:37:48.452 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:37:48.452 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:37:48.452 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:37:48.453 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:37:48.453 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:37:48.454 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:37:48.455 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:37:52.816 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:37:52.816 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:37:52.816 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:37:52.816 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:37:52.816 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:37:52.817 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:37:52.817 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:38:28.103 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:38:28.103 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:38:28.103 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:38:28.103 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:38:28.103 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:38:28.104 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:38:28.105 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:38:43.659 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:38:43.664 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:38:43.664 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:38:43.665 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:38:43.665 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:38:43.671 +02:00 [DBG] Finished: Routing Notification $/setTrace in 6ms
+2026-03-08 08:38:43.671 +02:00 [DBG] Finished: Processing notification $/setTrace in 6ms
+2026-03-08 08:38:47.165 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:38:47.165 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:38:47.166 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:38:47.166 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:38:47.166 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:38:47.167 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:38:47.167 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:38:54.912 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:38:54.913 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:38:54.913 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:38:54.914 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:38:54.914 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:38:54.914 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:38:54.914 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:38:57.989 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:38:57.989 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:38:57.990 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:38:57.990 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:38:57.990 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:38:57.991 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:38:57.991 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:39:38.956 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:39:38.957 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:39:38.959 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:39:38.960 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:39:38.960 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:39:38.973 +02:00 [DBG] Finished: Routing Notification $/setTrace in 13ms
+2026-03-08 08:39:38.974 +02:00 [DBG] Finished: Processing notification $/setTrace in 14ms
+2026-03-08 08:39:42.399 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:39:42.402 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:39:42.402 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:39:42.403 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:39:42.403 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:39:42.404 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:39:42.404 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:39:44.722 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:39:44.722 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:39:44.722 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:39:44.722 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:39:44.722 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:39:44.723 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:39:44.723 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:39:48.163 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:39:48.164 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:39:48.165 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:39:48.165 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:39:48.165 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:39:48.167 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 08:39:48.168 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:40:33.078 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:40:33.079 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:40:33.079 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:40:33.079 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:40:33.080 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:40:33.081 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:40:33.082 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:40:36.264 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:40:36.265 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:40:36.265 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:40:36.266 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:40:36.266 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:40:36.267 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:40:36.267 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:41:01.485 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:41:01.486 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:41:01.486 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:41:01.486 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:41:01.487 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:41:01.488 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:41:01.488 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:41:04.471 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:41:04.472 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:41:04.472 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:41:04.473 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:41:04.473 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:41:04.474 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:41:04.474 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:42:14.070 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:42:14.073 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:42:14.073 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:42:14.074 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:42:14.074 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:42:14.079 +02:00 [DBG] Finished: Routing Notification $/setTrace in 4ms
+2026-03-08 08:42:14.079 +02:00 [DBG] Finished: Processing notification $/setTrace in 5ms
+2026-03-08 08:42:17.354 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:42:17.354 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:42:17.355 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:42:17.355 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:42:17.355 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:42:17.356 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:42:17.357 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:44:40.390 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:44:40.391 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:44:40.393 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:44:40.393 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:44:40.394 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:44:40.397 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 08:44:40.397 +02:00 [DBG] Finished: Processing notification $/setTrace in 4ms
+2026-03-08 08:44:43.162 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:44:43.163 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:44:43.163 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:44:43.163 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:44:43.163 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:44:43.164 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:44:43.164 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 08:47:33.683 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:47:33.703 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:47:33.707 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:47:33.707 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:47:33.708 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:47:33.744 +02:00 [DBG] Finished: Routing Notification $/setTrace in 36ms
+2026-03-08 08:47:33.747 +02:00 [DBG] Finished: Processing notification $/setTrace in 39ms
+2026-03-08 08:47:37.637 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:47:37.638 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:47:37.639 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:47:37.639 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:47:37.639 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:47:37.641 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:47:37.641 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:47:54.499 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:47:54.500 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:47:54.501 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:47:54.501 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:47:54.501 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:47:54.503 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 08:47:54.503 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:47:59.373 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:47:59.374 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:47:59.376 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:47:59.376 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:47:59.376 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:47:59.377 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:47:59.377 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 08:55:35.217 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:55:35.236 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:55:35.240 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:55:35.241 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:55:35.242 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:55:35.259 +02:00 [DBG] Finished: Routing Notification $/setTrace in 17ms
+2026-03-08 08:55:35.260 +02:00 [DBG] Finished: Processing notification $/setTrace in 18ms
+2026-03-08 08:55:51.104 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:55:51.104 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:55:51.106 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:55:51.106 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:55:51.107 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:55:51.109 +02:00 [DBG] Finished: Routing Notification $/setTrace in 2ms
+2026-03-08 08:55:51.110 +02:00 [DBG] Finished: Processing notification $/setTrace in 3ms
+2026-03-08 08:59:46.884 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:59:46.895 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:59:46.899 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:59:46.899 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:59:46.900 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:59:46.907 +02:00 [DBG] Finished: Routing Notification $/setTrace in 7ms
+2026-03-08 08:59:46.908 +02:00 [DBG] Finished: Processing notification $/setTrace in 8ms
+2026-03-08 08:59:48.975 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:59:48.977 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:59:48.977 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:59:48.978 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:59:48.978 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:59:48.978 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:59:48.980 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 08:59:58.545 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 08:59:58.545 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 08:59:58.545 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 08:59:58.545 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 08:59:58.546 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 08:59:58.546 +02:00 [DBG] Finished: Routing Notification $/setTrace in 0ms
+2026-03-08 08:59:58.546 +02:00 [DBG] Finished: Processing notification $/setTrace in 0ms
+2026-03-08 09:00:00.949 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 09:00:00.949 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 09:00:00.950 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 09:00:00.950 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 09:00:00.950 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 09:00:00.951 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 09:00:00.951 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 09:00:09.035 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 09:00:09.036 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 09:00:09.037 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 09:00:09.037 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 09:00:09.038 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 09:00:09.039 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 09:00:09.039 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 09:00:10.700 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 09:00:10.702 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 09:00:10.702 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 09:00:10.703 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 09:00:10.703 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 09:00:10.704 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 09:00:10.705 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 09:01:30.922 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 09:01:30.923 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 09:01:30.924 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 09:01:30.924 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 09:01:30.924 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 09:01:30.925 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 09:01:30.925 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 09:01:35.233 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 09:01:35.234 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 09:01:35.234 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 09:01:35.234 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 09:01:35.234 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 09:01:35.236 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 09:01:35.236 +02:00 [DBG] Finished: Processing notification $/setTrace in 2ms
+2026-03-08 09:03:32.252 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 09:03:32.253 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 09:03:32.253 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 09:03:32.253 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 09:03:32.253 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 09:03:32.255 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 09:03:32.255 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 09:03:35.788 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 09:03:35.789 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 09:03:35.789 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 09:03:35.789 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 09:03:35.789 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 09:03:35.790 +02:00 [DBG] Finished: Routing Notification $/setTrace in 1ms
+2026-03-08 09:03:35.790 +02:00 [DBG] Finished: Processing notification $/setTrace in 1ms
+2026-03-08 09:10:41.112 +02:00 [DBG] Finding descriptors for $/setTrace
+2026-03-08 09:10:41.149 +02:00 [DBG] Queueing "Parallel":$/setTrace request for processing
+2026-03-08 09:10:41.157 +02:00 [DBG] Starting: Processing notification $/setTrace
+2026-03-08 09:10:41.158 +02:00 [DBG] Starting: Routing Notification $/setTrace
+2026-03-08 09:10:41.159 +02:00 [VRB] Converting params for Notification $/setTrace to OmniSharp.Extensions.LanguageServer.Protocol.Models.SetTraceParams
+2026-03-08 09:10:41.177 +02:00 [DBG] Finished: Routing Notification $/setTrace in 17ms
+2026-03-08 09:10:41.178 +02:00 [DBG] Finished: Processing notification $/setTrace in 19ms
+2026-03-08 13:42:47.422 +02:00 [VRB] Could not write to output handler, perhaps serialization failed?
+System.Threading.Channels.ChannelClosedException: The channel has been closed.
+   at System.Threading.Channels.AsyncOperation`1.GetResult(Int16 token)
+   at OmniSharp.Extensions.JsonRpc.OutputHandler.ProcessOutputStream(CancellationToken cancellationToken)

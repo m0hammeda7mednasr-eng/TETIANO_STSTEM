@@ -232,6 +232,107 @@ const parseJsonField = (value) => {
   return value;
 };
 
+const TETIANO_PAYMENT_TAG_PREFIXES = [
+  "tetiano_payment_method:",
+  "tetiano_pm:",
+];
+const TETIANO_PAYMENT_NOTE_ATTRIBUTE_NAMES = [
+  "tetiano_payment_method",
+  "tetiano_pm",
+  "payment_method",
+];
+
+const normalizePaymentMethod = (value) => {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .trim();
+  if (
+    normalized === "none" ||
+    normalized === "shopify" ||
+    normalized === "instapay" ||
+    normalized === "wallet"
+  ) {
+    return normalized;
+  }
+  return "";
+};
+
+const parseTagList = (tagsValue) => {
+  if (Array.isArray(tagsValue)) {
+    return tagsValue
+      .map((tag) => String(tag || "").trim())
+      .filter(Boolean);
+  }
+
+  return String(tagsValue || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+};
+
+const extractTagValueByPrefixes = (tags, prefixes = []) => {
+  for (const rawTag of tags || []) {
+    const tag = String(rawTag || "").trim();
+    const lowerTag = tag.toLowerCase();
+    for (const prefix of prefixes) {
+      const normalizedPrefix = String(prefix || "").toLowerCase();
+      if (lowerTag.startsWith(normalizedPrefix)) {
+        const rawValue = tag.slice(prefix.length).trim();
+        if (rawValue) {
+          return rawValue;
+        }
+      }
+    }
+  }
+  return "";
+};
+
+const getNoteAttributeValue = (data, keys = []) => {
+  const normalizedKeys = new Set(
+    (keys || [])
+      .map((key) => String(key || "").toLowerCase().trim())
+      .filter(Boolean),
+  );
+  const attributes = Array.isArray(data?.note_attributes)
+    ? data.note_attributes
+    : [];
+
+  for (const attribute of attributes) {
+    const name = String(attribute?.name || "")
+      .toLowerCase()
+      .trim();
+    if (!normalizedKeys.has(name)) {
+      continue;
+    }
+
+    const value = String(attribute?.value || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+};
+
+const resolveManualPaymentMethodFromData = (data = {}) => {
+  const fromData = normalizePaymentMethod(data?.tetiano_payment_method);
+  if (fromData) {
+    return fromData;
+  }
+
+  const fromAttributes = normalizePaymentMethod(
+    getNoteAttributeValue(data, TETIANO_PAYMENT_NOTE_ATTRIBUTE_NAMES),
+  );
+  if (fromAttributes) {
+    return fromAttributes;
+  }
+
+  const tags = parseTagList(data?.tags);
+  return normalizePaymentMethod(
+    extractTagValueByPrefixes(tags, TETIANO_PAYMENT_TAG_PREFIXES),
+  );
+};
+
 const normalizeOrderReference = (value) => String(value || "").trim().toLowerCase();
 
 const findOrderByReferenceForUser = async (userId, orderReference) => {
@@ -267,7 +368,7 @@ const findOrderByReferenceForUser = async (userId, orderReference) => {
 
 const getOrderFinancialStatus = (order) => {
   const data = parseJsonField(order?.data);
-  return String(order?.financial_status || order?.status || data?.financial_status || "")
+  return String(data?.financial_status || order?.financial_status || "")
     .toLowerCase()
     .trim();
 };
@@ -283,11 +384,9 @@ const resolveOrderPaymentMethod = (order) => {
   }
 
   const data = parseJsonField(order?.data);
-  const manualMethod = String(
-    order?.manual_payment_method || data?.tetiano_payment_method || "",
-  )
-    .toLowerCase()
-    .trim();
+  const manualMethod =
+    normalizePaymentMethod(order?.manual_payment_method) ||
+    resolveManualPaymentMethodFromData(data);
 
   if (manualMethod === "instapay" || manualMethod === "wallet") {
     return manualMethod;

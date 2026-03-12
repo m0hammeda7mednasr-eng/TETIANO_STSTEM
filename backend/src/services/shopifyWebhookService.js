@@ -4,6 +4,32 @@ import { Product, Order } from "../models/index.js";
 import { supabase } from "../supabaseClient.js";
 
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
+const TETIANO_PAYMENT_TAG_PREFIXES = [
+  "tetiano_payment_method:",
+  "tetiano_pm:",
+];
+const TETIANO_STATUS_TAG_PREFIX = "tetiano_status:";
+const TETIANO_PAYMENT_NOTE_ATTRIBUTE_NAMES = [
+  "tetiano_payment_method",
+  "tetiano_pm",
+];
+const TETIANO_PAYMENT_NOTE_ATTRIBUTE_PARSE_NAMES = [
+  "tetiano_payment_method",
+  "tetiano_pm",
+  "payment_method",
+];
+const TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES = ["tetiano_status"];
+const TETIANO_STATUS_NOTE_ATTRIBUTE_PARSE_NAMES = ["tetiano_status", "status"];
+const VALID_PAYMENT_METHODS = new Set(["none", "shopify", "instapay", "wallet"]);
+const VALID_ORDER_STATUSES = new Set([
+  "pending",
+  "authorized",
+  "paid",
+  "partially_paid",
+  "refunded",
+  "voided",
+  "partially_refunded",
+]);
 
 export const MANAGED_WEBHOOK_TOPICS = [
   "orders/create",
@@ -30,6 +56,191 @@ const toStringNumber = (value) => {
 const parseNumeric = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizeAttributeName = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
+
+const normalizePaymentMethod = (value) => {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .trim();
+  if (!VALID_PAYMENT_METHODS.has(normalized)) {
+    return "";
+  }
+  return normalized;
+};
+
+const normalizeOrderStatus = (value) => {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .trim();
+  if (!VALID_ORDER_STATUSES.has(normalized)) {
+    return "";
+  }
+  return normalized;
+};
+
+const parseTagList = (tagsValue) => {
+  if (Array.isArray(tagsValue)) {
+    return tagsValue
+      .map((tag) => String(tag || "").trim())
+      .filter(Boolean);
+  }
+
+  return String(tagsValue || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+};
+
+const serializeTagList = (tags) =>
+  Array.from(new Set((tags || []).map((tag) => String(tag || "").trim()).filter(Boolean))).join(", ");
+
+const extractTagValueByPrefixes = (tags, prefixes = []) => {
+  for (const rawTag of tags || []) {
+    const tag = String(rawTag || "").trim();
+    const lowerTag = tag.toLowerCase();
+    for (const prefix of prefixes) {
+      const normalizedPrefix = String(prefix || "").toLowerCase();
+      if (lowerTag.startsWith(normalizedPrefix)) {
+        const rawValue = tag.slice(prefix.length).trim();
+        if (rawValue) {
+          return rawValue;
+        }
+      }
+    }
+  }
+  return "";
+};
+
+const getNoteAttributeValue = (orderPayload, keys = []) => {
+  const normalizedKeys = new Set(
+    (keys || []).map((key) => normalizeAttributeName(key)),
+  );
+  const attrs = Array.isArray(orderPayload?.note_attributes)
+    ? orderPayload.note_attributes
+    : [];
+
+  for (const attr of attrs) {
+    const name = normalizeAttributeName(attr?.name);
+    if (!normalizedKeys.has(name)) {
+      continue;
+    }
+    const value = String(attr?.value || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+};
+
+const extractPaymentMethodFromOrderPayload = (orderPayload = {}) => {
+  const fromData = normalizePaymentMethod(orderPayload?.tetiano_payment_method);
+  if (fromData) {
+    return fromData;
+  }
+
+  const fromAttributes = normalizePaymentMethod(
+    getNoteAttributeValue(orderPayload, [
+      ...TETIANO_PAYMENT_NOTE_ATTRIBUTE_PARSE_NAMES,
+    ]),
+  );
+  if (fromAttributes) {
+    return fromAttributes;
+  }
+
+  const tags = parseTagList(orderPayload?.tags);
+  return normalizePaymentMethod(
+    extractTagValueByPrefixes(tags, TETIANO_PAYMENT_TAG_PREFIXES),
+  );
+};
+
+const extractStatusFromOrderPayload = (orderPayload = {}) => {
+  const fromData = normalizeOrderStatus(orderPayload?.tetiano_status);
+  if (fromData) {
+    return fromData;
+  }
+
+  const fromAttributes = normalizeOrderStatus(
+    getNoteAttributeValue(orderPayload, TETIANO_STATUS_NOTE_ATTRIBUTE_PARSE_NAMES),
+  );
+  if (fromAttributes) {
+    return fromAttributes;
+  }
+
+  const tags = parseTagList(orderPayload?.tags);
+  return normalizeOrderStatus(
+    extractTagValueByPrefixes(tags, [TETIANO_STATUS_TAG_PREFIX]),
+  );
+};
+
+const mergeTetianoControlTags = (orderPayload, { status = "", paymentMethod = "" } = {}) => {
+  const existingTags = parseTagList(orderPayload?.tags);
+  const filtered = existingTags.filter((tag) => {
+    const normalized = String(tag || "")
+      .toLowerCase()
+      .trim();
+    if (normalized.startsWith(TETIANO_STATUS_TAG_PREFIX)) {
+      return false;
+    }
+    return !TETIANO_PAYMENT_TAG_PREFIXES.some((prefix) =>
+      normalized.startsWith(prefix),
+    );
+  });
+
+  const normalizedStatus = normalizeOrderStatus(status);
+  if (normalizedStatus) {
+    filtered.push(`${TETIANO_STATUS_TAG_PREFIX}${normalizedStatus}`);
+  }
+
+  const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
+  if (normalizedPaymentMethod && normalizedPaymentMethod !== "none") {
+    filtered.push(`tetiano_pm:${normalizedPaymentMethod}`);
+  }
+
+  return serializeTagList(filtered);
+};
+
+const mergeTetianoControlNoteAttributes = (
+  orderPayload,
+  { status = "", paymentMethod = "" } = {},
+) => {
+  const existingAttributes = Array.isArray(orderPayload?.note_attributes)
+    ? orderPayload.note_attributes
+    : [];
+
+  const filtered = existingAttributes.filter((attribute) => {
+    const name = normalizeAttributeName(attribute?.name);
+    if (!name) {
+      return true;
+    }
+    if (TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES.includes(name)) {
+      return false;
+    }
+    return !TETIANO_PAYMENT_NOTE_ATTRIBUTE_NAMES.includes(name);
+  });
+
+  const normalizedStatus = normalizeOrderStatus(status);
+  if (normalizedStatus) {
+    filtered.push({
+      name: "tetiano_status",
+      value: normalizedStatus,
+    });
+  }
+
+  const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
+  if (normalizedPaymentMethod && normalizedPaymentMethod !== "none") {
+    filtered.push({
+      name: "tetiano_payment_method",
+      value: normalizedPaymentMethod,
+    });
+  }
+
+  return filtered;
 };
 
 const getWebhookBaseUrlFromReq = (req) => {
@@ -121,6 +332,35 @@ const mapOrderFromShopify = (order = {}) => {
   const customerName =
     `${order.customer?.first_name || ""} ${order.customer?.last_name || ""}`.trim();
   const lineItems = Array.isArray(order.line_items) ? order.line_items : [];
+  const normalizedFinancialStatus = normalizeOrderStatus(order.financial_status);
+  const mirroredStatus = extractStatusFromOrderPayload(order);
+  const resolvedStatus = mirroredStatus || normalizedFinancialStatus || "pending";
+  const isShopifyPaidOrder =
+    normalizedFinancialStatus === "paid" ||
+    normalizedFinancialStatus === "partially_paid";
+  const mirroredPaymentMethod = extractPaymentMethodFromOrderPayload(order);
+  const resolvedManualPaymentMethod = isShopifyPaidOrder
+    ? "none"
+    : mirroredPaymentMethod || "none";
+
+  const normalizedOrderPayload = {
+    ...order,
+    tetiano_status: resolvedStatus,
+    tags: mergeTetianoControlTags(order, {
+      status: resolvedStatus,
+      paymentMethod: resolvedManualPaymentMethod,
+    }),
+    note_attributes: mergeTetianoControlNoteAttributes(order, {
+      status: resolvedStatus,
+      paymentMethod: resolvedManualPaymentMethod,
+    }),
+  };
+
+  if (resolvedManualPaymentMethod !== "none") {
+    normalizedOrderPayload.tetiano_payment_method = resolvedManualPaymentMethod;
+  } else {
+    delete normalizedOrderPayload.tetiano_payment_method;
+  }
 
   return {
     shopify_id: toStringNumber(order.id),
@@ -132,7 +372,7 @@ const mapOrderFromShopify = (order = {}) => {
     total_tax: parseNumeric(order.total_tax),
     total_discounts: parseNumeric(order.total_discounts),
     currency: order.currency || "USD",
-    status: order.financial_status || "pending",
+    status: resolvedStatus,
     fulfillment_status: order.fulfillment_status || null,
     items_count: lineItems.length,
     created_at: order.created_at || new Date().toISOString(),
@@ -141,7 +381,7 @@ const mapOrderFromShopify = (order = {}) => {
     pending_sync: false,
     sync_error: null,
     last_synced_at: new Date().toISOString(),
-    data: order,
+    data: normalizedOrderPayload,
   };
 };
 

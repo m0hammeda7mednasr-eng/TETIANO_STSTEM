@@ -107,8 +107,20 @@ export default function OrderDetails() {
   };
 
   const isShopifyPaidOrder = (orderValue) => {
+    const rawData = orderValue?.data;
+    let parsedData = {};
+    if (typeof rawData === "string") {
+      try {
+        parsedData = JSON.parse(rawData);
+      } catch {
+        parsedData = {};
+      }
+    } else if (rawData && typeof rawData === "object") {
+      parsedData = rawData;
+    }
+
     const status = String(
-      orderValue?.financial_status || orderValue?.status || "",
+      orderValue?.financial_status || parsedData?.financial_status || "",
     )
       .toLowerCase()
       .trim();

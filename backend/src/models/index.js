@@ -101,6 +101,8 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
   const storeIds = await getAccessibleStoreIdsSafe(userId);
 
   const builders = [];
+
+  // First try: user's accessible stores
   if (storeIds.length > 0) {
     builders.push(
       ...buildListQueryFallbacks(tableName, (query) =>
@@ -109,13 +111,23 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
     );
   }
 
+  // Second try: user's direct data
   builders.push(
     ...buildListQueryFallbacks(tableName, (query) =>
       query.eq("user_id", userId),
     ),
   );
 
+  // Third try: all Shopify data (fallback for shared data)
+  builders.push(
+    ...buildListQueryFallbacks(tableName, (query) =>
+      query.not("shopify_id", "is", null),
+    ),
+  );
+
+  // Final fallback: all data
   builders.push(...buildListQueryFallbacks(tableName));
+
   const result = await executeWithSchemaAndEmptyFallback(builders);
 
   if (result.error && isSchemaCompatibilityError(result.error)) {

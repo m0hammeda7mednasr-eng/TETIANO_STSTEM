@@ -42,11 +42,17 @@ const ensureHeartbeat = () => {
   heartbeatTimer = setInterval(() => {
     const now = new Date().toISOString();
     for (const [clientId, client] of clients.entries()) {
-      try {
-        writeEvent(client.res, "heartbeat", {
-          at: now,
-        });
-      } catch {
+      if (client.res.writable) {
+        try {
+          writeEvent(client.res, "heartbeat", {
+            at: now,
+          });
+        } catch (e) {
+          console.error(`Heartbeat: Error writing to client ${clientId}, removing.`, e);
+          clients.delete(clientId);
+        }
+      } else {
+        console.log(`Heartbeat: Client ${clientId} is not writable, removing.`);
         clients.delete(clientId);
       }
     }
@@ -124,10 +130,16 @@ export const emitRealtimeEvent = ({
       continue;
     }
 
-    try {
-      writeEvent(client.res, eventName, eventPayload);
-      sentCount += 1;
-    } catch {
+    if (client.res.writable) {
+      try {
+        writeEvent(client.res, eventName, eventPayload);
+        sentCount += 1;
+      } catch (e) {
+        console.error(`Event Emit: Error writing to client ${clientId}, removing.`, e);
+        clients.delete(clientId);
+      }
+    } else {
+      console.log(`Event Emit: Client ${clientId} is not writable, removing.`);
       clients.delete(clientId);
     }
   }

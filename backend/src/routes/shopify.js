@@ -1399,18 +1399,16 @@ router.get(
   async (req, res) => {
   try {
     const isAdmin = await resolveIsAdmin(req);
-    let { data, error } = await Order.findByUser(req.user.id);
-    if (error) {
-      console.error("Error fetching orders:", error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    const latestKnownOrderAt = getLatestOrderTimestamp(data || []);
     const syncRecentParam = String(req.query.sync_recent || "").toLowerCase().trim();
     const shouldSyncRecent = syncRecentParam !== "false";
     const forceSyncRecent = syncRecentParam === "force";
     let liveSyncResult = null;
+
     if (shouldSyncRecent) {
+      // We need to check the latest order timestamp before attempting the sync
+      const { data: existingOrders } = await Order.findByUser(req.user.id);
+      const latestKnownOrderAt = getLatestOrderTimestamp(existingOrders || []);
+
       liveSyncResult = await syncRecentOrdersWithCooldown({
         userId: req.user.id,
         requestedStoreId: getRequestedStoreId(req),
@@ -1419,15 +1417,14 @@ router.get(
         waitForCompletion: true,
         forceRun: forceSyncRecent,
       });
+    }
 
-      if (liveSyncResult?.triggered) {
-        const refreshed = await Order.findByUser(req.user.id);
-        if (!refreshed.error) {
-          data = refreshed.data || [];
-        } else {
-          console.error("Error refreshing orders after live sync:", refreshed.error);
-        }
-      }
+    // After any potential sync, ALWAYS fetch the latest data from the DB.
+    // This ensures that data from a full sync is also reflected.
+    const { data, error } = await Order.findByUser(req.user.id);
+    if (error) {
+      console.error("Error fetching orders:", error);
+      return res.status(500).json({ error: error.message });
     }
 
     console.log(

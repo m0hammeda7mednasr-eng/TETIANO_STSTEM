@@ -396,21 +396,24 @@ export const Customer = {
 
 export const ShopifyToken = {
   async save(userId, shop, accessToken, storeId) {
-    return await supabase
-      .from("shopify_tokens")
-      .upsert([
-        {
-          user_id: userId,
-          shop: shop,
-          access_token: accessToken,
-          store_id: storeId,
-          updated_at: new Date().toISOString(),
-        },
-      ], {
-        onConflict: "user_id,shop",
-        ignoreDuplicates: false,
-      })
-      .select();
+    const baseRow = {
+      user_id: userId,
+      shop,
+      access_token: accessToken,
+      updated_at: new Date().toISOString(),
+    };
+
+    return await upsertWithFallback("shopify_tokens", [
+      {
+        ...baseRow,
+        store_id: storeId || null,
+      },
+    ], [
+      "user_id,shop,store_id",
+      "user_id,shop",
+      "shop",
+      null,
+    ]);
   },
 
   async findByShop(shop) {

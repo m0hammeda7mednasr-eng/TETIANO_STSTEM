@@ -216,6 +216,100 @@ const resolveSyncToken = async ({ userId, requestedStoreId, isAdmin }) => {
   return null;
 };
 
+const isSchemaCompatibilityError = (error) => {
+  if (!error) return false;
+
+  const code = String(error.code || "");
+  if (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    code === "PGRST205"
+  ) {
+    return true;
+  }
+
+  const text =
+    `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+  return (
+    text.includes("does not exist") ||
+    text.includes("could not find the") ||
+    text.includes("relation") ||
+    text.includes("column")
+  );
+};
+
+const getSchemaErrorMessage = (error) =>
+  String(
+    error?.message || error?.details || error?.hint || "Database schema mismatch",
+  ).trim();
+
+const findOrCreateStoreConnection = async ({ supabase, shop, userId }) => {
+  const lookup = await supabase
+    .from("stores")
+    .select("id,name")
+    .eq("name", shop)
+    .maybeSingle();
+
+  if (lookup.error && !isSchemaCompatibilityError(lookup.error)) {
+    throw lookup.error;
+  }
+
+  if (lookup.data?.id) {
+    return lookup.data;
+  }
+
+  if (lookup.error && isSchemaCompatibilityError(lookup.error)) {
+    return null;
+  }
+
+  const create = await supabase
+    .from("stores")
+    .insert({ name: shop, created_by: userId })
+    .select("id,name")
+    .single();
+
+  if (create.error && !isSchemaCompatibilityError(create.error)) {
+    throw create.error;
+  }
+
+  return create.data || null;
+};
+
+const grantUserStoreAccess = async ({ supabase, userId, storeId }) => {
+  if (!storeId) {
+    return { skipped: true };
+  }
+
+  const result = await supabase
+    .from("user_stores")
+    .upsert({ user_id: userId, store_id: storeId });
+
+  if (result.error && !isSchemaCompatibilityError(result.error)) {
+    throw result.error;
+  }
+
+  return { skipped: false, error: result.error || null };
+};
+
+const findExistingStoreIdByShop = async ({ supabase, shop }) => {
+  if (!shop) {
+    return null;
+  }
+
+  const result = await supabase
+    .from("stores")
+    .select("id")
+    .eq("name", shop)
+    .maybeSingle();
+
+  if (result.error && !isSchemaCompatibilityError(result.error)) {
+    throw result.error;
+  }
+
+  return result.data?.id || null;
+};
+
 const resolveUpdateErrorStatusCode = (errorMessage) => {
   const message = String(errorMessage || "").toLowerCase();
   if (
@@ -896,39 +990,53 @@ router.get("/callback", async (req, res) => {
     );
 
     const accessToken = response.data.access_token;
-    const { supabase } = await import('../supabaseClient.js');
+    const { supabase } = await import("../supabaseClient.js");
 
-    // Find or create a store for the Shopify shop
-    let { data: store, error: storeError } = await supabase
-      .from('stores')
-      .select('id')
-      .eq('name', shop)
-      .single();
+    const store = await findOrCreateStoreConnection({
+      supabase,
+      shop,
+      userId,
+    });
+    const storeId = store?.id || null;
 
-    if (storeError && storeError.code === 'PGRST116') {
-      // Store not found, create it
-      const { data: newStore, error: newStoreError } = await supabase
-        .from('stores')
-        .insert({ name: shop, created_by: userId })
-        .select('id')
-        .single();
-      if (newStoreError) throw newStoreError;
-      store = newStore;
-    } else if (storeError) {
-      throw storeError;
+    await grantUserStoreAccess({
+      supabase,
+      userId,
+      storeId,
+    });
+
+    const saveTokenResult = await ShopifyToken.save(
+      userId,
+      shop,
+      accessToken,
+      storeId,
+    );
+    if (saveTokenResult?.error) {
+      throw new Error(
+        `Failed to save Shopify connection: ${getSchemaErrorMessage(saveTokenResult.error)}`,
+      );
     }
 
-    const storeId = store.id;
+    let initialSyncStatus = "started";
+    let initialSyncCounts = null;
+    try {
+      const syncResult = await ShopifyService.syncAllData(
+        userId,
+        shop,
+        accessToken,
+        storeId,
+      );
+      initialSyncCounts = {
+        products: syncResult?.products?.length || 0,
+        orders: syncResult?.orders?.length || 0,
+        customers: syncResult?.customers?.length || 0,
+      };
+      initialSyncStatus = "completed";
+    } catch (syncError) {
+      initialSyncStatus = "failed";
+      console.error("Initial Shopify sync failed after callback:", syncError);
+    }
 
-    // Grant the user access to this store
-    await supabase.from('user_stores').upsert({ user_id: userId, store_id: storeId });
-
-    await ShopifyToken.save(userId, shop, accessToken, storeId);
-
-    // Perform initial sync in the background
-    ShopifyService.syncAllData(userId, shop, accessToken, storeId).catch((syncError) => {
-      console.error("Background sync error after callback:", syncError);
-    });
     ensureWebhooksRegistered({
       shop,
       accessToken,
@@ -937,7 +1045,22 @@ router.get("/callback", async (req, res) => {
       console.error("Webhook registration error after callback:", webhookError);
     });
 
-    res.redirect(`${frontendUrl}/settings?connected=true`);
+    const callbackParams = new URLSearchParams({
+      connected: "true",
+      shop,
+      sync_status: initialSyncStatus,
+    });
+    if (storeId) {
+      callbackParams.set("store_id", storeId);
+    }
+    if (initialSyncCounts) {
+      callbackParams.set(
+        "sync_counts",
+        JSON.stringify(initialSyncCounts),
+      );
+    }
+
+    res.redirect(`${frontendUrl}/settings?${callbackParams.toString()}`);
   } catch (error) {
     console.error(
       "Shopify OAuth Callback Error:",
@@ -1032,6 +1155,7 @@ router.get("/status", verifyToken, async (req, res) => {
   try {
     const requestedStoreId = getRequestedStoreId(req);
     const isAdmin = await resolveIsAdmin(req);
+    const { supabase } = await import("../supabaseClient.js");
     const tokenData = await resolveSyncToken({
       userId: req.user.id,
       requestedStoreId,
@@ -1039,11 +1163,18 @@ router.get("/status", verifyToken, async (req, res) => {
     });
 
     const redirectUri = getRedirectUri(req);
+    const resolvedStoreId =
+      tokenData?.store_id ||
+      requestedStoreId ||
+      (await findExistingStoreIdByShop({
+        supabase,
+        shop: tokenData?.shop || "",
+      }));
 
     res.json({
       connected: !!tokenData?.access_token,
       shop: tokenData?.shop || null,
-      store_id: tokenData?.store_id || requestedStoreId || null,
+      store_id: resolvedStoreId || null,
       redirectUri: redirectUri,
       webhookAddress: getWebhookAddress(req),
     });

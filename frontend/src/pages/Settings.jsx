@@ -54,7 +54,35 @@ export default function Settings() {
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
     if (query.get("connected") === "true") {
-      setMessage({ type: "success", text: "Shopify store connected successfully." });
+      const connectedShop = String(query.get("shop") || "").trim();
+      const connectedStoreId = String(query.get("store_id") || "").trim();
+      const syncStatus = String(query.get("sync_status") || "").trim();
+      const syncCountsRaw = String(query.get("sync_counts") || "").trim();
+
+      if (connectedStoreId) {
+        localStorage.setItem("currentStoreId", connectedStoreId);
+      }
+
+      let syncCounts = null;
+      if (syncCountsRaw) {
+        try {
+          syncCounts = JSON.parse(syncCountsRaw);
+        } catch {
+          syncCounts = null;
+        }
+      }
+
+      const syncSuffix =
+        syncStatus === "completed" && syncCounts
+          ? ` Initial sync completed: ${syncCounts.products} products, ${syncCounts.orders} orders, ${syncCounts.customers} customers.`
+          : syncStatus === "failed"
+            ? " Connection saved, but initial sync failed. Run Sync Shopify."
+            : "";
+
+      setMessage({
+        type: syncStatus === "failed" ? "info" : "success",
+        text: `Shopify store connected successfully${connectedShop ? `: ${connectedShop}` : ""}.${syncSuffix}`,
+      });
       markSharedDataUpdated();
       window.history.replaceState({}, document.title, "/settings");
     } else if (query.get("error")) {
@@ -84,6 +112,11 @@ export default function Settings() {
     try {
       const { data } = await api.get("/shopify/status");
       setConnected(Boolean(data.connected));
+      if (data.connected && data.store_id) {
+        localStorage.setItem("currentStoreId", data.store_id);
+      } else if (!data.connected) {
+        localStorage.removeItem("currentStoreId");
+      }
       setShopifyConfig((prev) => ({
         ...prev,
         shop: data.shop || prev.shop,
@@ -211,6 +244,7 @@ export default function Settings() {
     try {
       const response = await api.post("/shopify/disconnect", {});
       markSharedDataUpdated();
+      localStorage.removeItem("currentStoreId");
       setConnected(false);
       setShopifyConfig((prev) => ({
         ...prev,

@@ -244,6 +244,45 @@ const getSchemaErrorMessage = (error) =>
     error?.message || error?.details || error?.hint || "Database schema mismatch",
   ).trim();
 
+const getReadableShopifyError = (error) => {
+  const responseData = error?.response?.data;
+
+  if (typeof responseData === "string" && responseData.trim()) {
+    return responseData.trim();
+  }
+
+  if (responseData && typeof responseData === "object") {
+    const candidates = [
+      responseData.error_description,
+      responseData.error,
+      responseData.message,
+      responseData.errors,
+    ];
+
+    for (const value of candidates) {
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+      if (Array.isArray(value) && value.length > 0) {
+        return value.map((item) => String(item || "").trim()).filter(Boolean).join(", ");
+      }
+      if (value && typeof value === "object") {
+        const flattened = Object.values(value)
+          .flatMap((item) =>
+            Array.isArray(item) ? item : [item],
+          )
+          .map((item) => String(item || "").trim())
+          .filter(Boolean);
+        if (flattened.length > 0) {
+          return flattened.join(", ");
+        }
+      }
+    }
+  }
+
+  return String(error?.message || "Unknown Shopify OAuth error").trim();
+};
+
 const findOrCreateStoreConnection = async ({ supabase, shop, userId }) => {
   const lookup = await supabase
     .from("stores")
@@ -1062,11 +1101,16 @@ router.get("/callback", async (req, res) => {
 
     res.redirect(`${frontendUrl}/settings?${callbackParams.toString()}`);
   } catch (error) {
+    const readableError = getReadableShopifyError(error);
     console.error(
       "Shopify OAuth Callback Error:",
       error.response?.data || error.message,
     );
-    res.redirect(`${frontendUrl}/settings?error=callback_failed`);
+    const callbackErrorParams = new URLSearchParams({
+      error: "callback_failed",
+      error_message: readableError,
+    });
+    res.redirect(`${frontendUrl}/settings?${callbackErrorParams.toString()}`);
   }
 });
 

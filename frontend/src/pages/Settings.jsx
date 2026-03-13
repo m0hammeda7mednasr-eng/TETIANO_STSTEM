@@ -86,9 +86,12 @@ export default function Settings() {
       markSharedDataUpdated();
       window.history.replaceState({}, document.title, "/settings");
     } else if (query.get("error")) {
+      const rawErrorMessage = String(query.get("error_message") || "").trim();
       setMessage({
         type: "error",
-        text: "Shopify connection failed. Check credentials and try again.",
+        text:
+          rawErrorMessage ||
+          "Shopify connection failed. Check credentials and try again.",
       });
       window.history.replaceState({}, document.title, "/settings");
     }

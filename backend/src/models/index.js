@@ -11,7 +11,8 @@ const isSchemaCompatibilityError = (error) => {
     return true;
   }
 
-  const text = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+  const text =
+    `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
   return (
     text.includes("does not exist") ||
     text.includes("could not find the") ||
@@ -102,12 +103,16 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
   const builders = [];
   if (storeIds.length > 0) {
     builders.push(
-      ...buildListQueryFallbacks(tableName, (query) => query.in("store_id", storeIds)),
+      ...buildListQueryFallbacks(tableName, (query) =>
+        query.in("store_id", storeIds),
+      ),
     );
   }
 
   builders.push(
-    ...buildListQueryFallbacks(tableName, (query) => query.eq("user_id", userId)),
+    ...buildListQueryFallbacks(tableName, (query) =>
+      query.eq("user_id", userId),
+    ),
   );
 
   builders.push(...buildListQueryFallbacks(tableName));
@@ -145,11 +150,7 @@ const findRowByIdForUserWithFallback = async (tableName, userId, id) => {
   );
 
   builders.push(async () =>
-    supabase
-      .from(tableName)
-      .select()
-      .eq("id", id)
-      .maybeSingle(),
+    supabase.from(tableName).select().eq("id", id).maybeSingle(),
   );
 
   const { data, error } = await executeWithSchemaAndEmptyFallback(builders);
@@ -396,24 +397,41 @@ export const Customer = {
 
 export const ShopifyToken = {
   async save(userId, shop, accessToken, storeId) {
+    // First, try to find existing token
+    const { data: existingTokens } = await supabase
+      .from("shopify_tokens")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("shop", shop);
+
     const baseRow = {
       user_id: userId,
       shop,
       access_token: accessToken,
+      store_id: storeId || null,
       updated_at: new Date().toISOString(),
     };
 
-    return await upsertWithFallback("shopify_tokens", [
-      {
-        ...baseRow,
-        store_id: storeId || null,
-      },
-    ], [
-      "user_id,shop,store_id",
-      "user_id,shop",
-      "shop",
-      null,
-    ]);
+    if (existingTokens && existingTokens.length > 0) {
+      // Update existing token
+      return await supabase
+        .from("shopify_tokens")
+        .update(baseRow)
+        .eq("user_id", userId)
+        .eq("shop", shop)
+        .select();
+    } else {
+      // Insert new token
+      return await supabase
+        .from("shopify_tokens")
+        .insert([
+          {
+            ...baseRow,
+            created_at: new Date().toISOString(),
+          },
+        ])
+        .select();
+    }
   },
 
   async findByShop(shop) {

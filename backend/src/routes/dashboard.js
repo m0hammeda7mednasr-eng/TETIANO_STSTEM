@@ -268,6 +268,23 @@ const getOrderNetSalesAmount = (order) => {
   return Math.max(0, grossAmount - refundedAmount);
 };
 
+const getOrderBookedGrossAmount = (order) => {
+  if (isCancelledOrder(order)) {
+    return 0;
+  }
+
+  return getOrderGrossAmount(order);
+};
+
+const getOrderBookedNetAmount = (order) => {
+  const grossAmount = getOrderBookedGrossAmount(order);
+  if (grossAmount <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, grossAmount - getOrderRefundedAmount(order));
+};
+
 const getRequestedStoreId = (req) => {
   const value = req.headers["x-store-id"] || req.query.store_id;
   if (!value) return null;
@@ -653,16 +670,16 @@ router.get(
         getScopedRows(req, Order),
       ]);
 
-      const revenueOrders = orders.filter(
-        (order) => getOrderGrossSalesAmount(order) > 0,
+      const profitabilityOrders = orders.filter(
+        (order) => getOrderBookedNetAmount(order) > 0,
       );
 
       const salesByProduct = new Map();
       const ordersByProduct = new Map();
 
-      revenueOrders.forEach((order) => {
-        const grossOrderAmount = getOrderGrossSalesAmount(order);
-        const netOrderAmount = getOrderNetSalesAmount(order);
+      profitabilityOrders.forEach((order) => {
+        const grossOrderAmount = getOrderBookedGrossAmount(order);
+        const netOrderAmount = getOrderBookedNetAmount(order);
         const netRatio =
           grossOrderAmount > 0
             ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
@@ -720,6 +737,8 @@ router.get(
         }
         return sum;
       }, 0);
+      const fixedSharePerProduct =
+        products.length > 0 ? totalFixedCosts / products.length : 0;
 
       const metrics = products.map((product) => {
         const productKeys = [
@@ -761,27 +780,7 @@ router.get(
           perOrderCosts * ordersCount +
           fixedProductCosts;
 
-        const fixedShare =
-          soldQuantity > 0 && totalFixedCosts > 0
-            ? (soldQuantity /
-              Math.max(
-                1,
-                products.reduce((sum, p) => {
-                  const keys = [
-                    String(p.id),
-                    String(p.shopify_id || ""),
-                    String(p.sku || ""),
-                  ].filter(Boolean);
-                  let qty = 0;
-                  keys.forEach((k) => {
-                    const val = salesByProduct.get(k);
-                    if (val) qty = Math.max(qty, val.soldQuantity);
-                  });
-                  return sum + qty;
-                }, 0),
-              )) *
-            totalFixedCosts
-            : 0;
+        const fixedShare = totalFixedCosts > 0 ? fixedSharePerProduct : 0;
 
         const netProfit = grossProfit - operationalCostsTotal - fixedShare;
         const profitPerUnit = soldQuantity > 0 ? netProfit / soldQuantity : 0;

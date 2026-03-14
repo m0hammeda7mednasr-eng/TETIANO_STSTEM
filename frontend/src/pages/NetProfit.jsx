@@ -39,6 +39,19 @@ const FIXED_COST_CONFIGS = [
 ];
 
 const formatAmount = (value) => `${Number(value || 0).toFixed(2)} ${CURRENCY_LABEL}`;
+const buildFixedCostsState = (costs) => {
+  const activeFixedCosts = (costs || []).filter(
+    (cost) => !cost.product_id && cost.apply_to === "fixed" && cost.is_active !== false,
+  );
+
+  return FIXED_COST_CONFIGS.reduce((acc, config) => {
+    const total = activeFixedCosts
+      .filter((cost) => cost.cost_type === config.cost_type)
+      .reduce((sum, cost) => sum + Number(cost.amount || 0), 0);
+    acc[config.key] = total > 0 ? String(total) : "";
+    return acc;
+  }, {});
+};
 
 export default function NetProfit() {
   const [products, setProducts] = useState([]);
@@ -62,18 +75,7 @@ export default function NetProfit() {
     other: "",
   });
 
-  const loadAll = useCallback(async () => {
-    try {
-      setLoading(true);
-      await Promise.all([fetchProfitability(), fetchOperationalCosts()]);
-    } catch (error) {
-      // handled in called methods
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const fetchProfitability = async () => {
+  const fetchProfitability = useCallback(async () => {
     try {
       const { data } = await api.get("/dashboard/products");
       const list = extractArray(data);
@@ -87,9 +89,9 @@ export default function NetProfit() {
       setSummary(SUMMARY_DEFAULT);
       setMessage({ type: "error", text: "Failed to load net profit data" });
     }
-  };
+  }, []);
 
-  const fetchOperationalCosts = async () => {
+  const fetchOperationalCosts = useCallback(async () => {
     try {
       const { data } = await api.get("/operational-costs");
       const list = extractArray(data);
@@ -99,21 +101,18 @@ export default function NetProfit() {
       setOperationalCosts([]);
       setFixedCosts({ marketing: "", shipping: "", other: "" });
     }
-  };
+  }, []);
 
-  const buildFixedCostsState = (costs) => {
-    const activeFixedCosts = (costs || []).filter(
-      (cost) => !cost.product_id && cost.apply_to === "fixed" && cost.is_active !== false,
-    );
-
-    return FIXED_COST_CONFIGS.reduce((acc, config) => {
-      const total = activeFixedCosts
-        .filter((cost) => cost.cost_type === config.cost_type)
-        .reduce((sum, cost) => sum + Number(cost.amount || 0), 0);
-      acc[config.key] = total > 0 ? String(total) : "";
-      return acc;
-    }, {});
-  };
+  const loadAll = useCallback(async () => {
+    try {
+      setLoading(true);
+      await Promise.all([fetchProfitability(), fetchOperationalCosts()]);
+    } catch (error) {
+      // handled in called methods
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchOperationalCosts, fetchProfitability]);
 
   useEffect(() => {
     loadAll();

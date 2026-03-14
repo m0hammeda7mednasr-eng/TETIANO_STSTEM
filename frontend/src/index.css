@@ -2,6 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .data-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .data-table th,
+  .data-table td {
+    vertical-align: middle;
+    text-align: left;
+  }
+
+  .data-table th {
+    white-space: nowrap;
+  }
+
+  .data-table td {
+    overflow-wrap: anywhere;
+  }
+}
+
 * {
   margin: 0;
   padding: 0;

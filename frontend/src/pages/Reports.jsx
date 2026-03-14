@@ -317,7 +317,7 @@ export default function Reports() {
             </h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="data-table w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
@@ -406,7 +406,7 @@ export default function Reports() {
           <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80">
             <h2 className="text-xl font-semibold text-slate-900">Latest Submitted Reports</h2>
           </div>
-          <table className="w-full">
+          <table className="data-table w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">

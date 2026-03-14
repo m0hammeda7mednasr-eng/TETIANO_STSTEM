@@ -836,7 +836,7 @@ export default function Orders() {
 
           <div className="bg-white rounded-xl shadow overflow-hidden border border-slate-200">
             <div className="hidden lg:block overflow-x-auto">
-              <table className="w-full min-w-[1220px]">
+              <table className="data-table w-full min-w-[1220px]">
                 <thead>
                   <tr className="bg-slate-50 border-b">
                     <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">

@@ -348,7 +348,7 @@ export default function Users() {
           {/* Users Table */}
           {activeTab === "users" && (
             <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-              <table className="w-full">
+              <table className="data-table w-full">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
@@ -424,7 +424,7 @@ export default function Users() {
           {/* Access Requests Table */}
           {activeTab === "requests" && (
             <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-              <table className="w-full">
+              <table className="data-table w-full">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
@@ -541,7 +541,7 @@ export default function Users() {
           {/* Daily Reports Table */}
           {activeTab === "reports" && (
             <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-              <table className="w-full">
+              <table className="data-table w-full">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">

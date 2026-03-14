@@ -579,7 +579,7 @@ const Analytics = () => {
                   الاتجاهات الشهرية (آخر 6 شهور)
                 </h3>
                 <div className="overflow-x-auto">
-                  <table className="min-w-full">
+                  <table className="data-table min-w-full">
                     <thead>
                       <tr className="border-b-2 border-gray-200">
                         <th className="text-right py-4 px-4 font-semibold text-gray-700">

@@ -360,7 +360,7 @@ export default function Customers() {
 
           <div className="bg-white rounded-xl shadow overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px]">
+              <table className="data-table w-full min-w-[980px]">
                 <thead>
                   <tr className="bg-slate-50 border-b">
                     <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
@@ -520,7 +520,7 @@ export default function Customers() {
                     </p>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[760px]">
+                      <table className="data-table w-full min-w-[760px]">
                         <thead>
                           <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
                             <th className="py-2">Order</th>

@@ -452,7 +452,7 @@ export default function NetProfit() {
 
           <div className="bg-white rounded-lg shadow-lg overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="data-table w-full">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-right text-sm font-semibold">

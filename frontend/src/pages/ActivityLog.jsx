@@ -113,7 +113,7 @@ export default function ActivityLog() {
           </div>
         ) : (
           <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-            <table className="w-full">
+            <table className="data-table w-full">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">

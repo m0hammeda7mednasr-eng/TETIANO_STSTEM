@@ -451,7 +451,7 @@ export default function Dashboard() {
                 <p className="px-5 py-6 text-slate-500">No recent orders found.</p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px]">
+                  <table className="data-table w-full min-w-[720px]">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
                         <th className="px-5 py-3">Order</th>

@@ -1,5 +1,6 @@
 import express from "express";
 import multer from "multer";
+import { randomUUID } from "crypto";
 import { supabase } from "../supabaseClient.js";
 import { authenticateToken } from "../middleware/auth.js";
 import { applyUserFilter } from "../helpers/dataFilter.js";
@@ -13,6 +14,8 @@ import notificationService from "../services/notificationService.js";
 const router = express.Router();
 
 const TASK_ATTACHMENT_BUCKET = "task-attachments";
+const TASK_META_PREFIX = "\n\n<!--TASK_META:";
+const TASK_META_SUFFIX = "-->";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -86,6 +89,128 @@ const normalizeNullableDateValue = (value) => {
   }
 
   return text;
+};
+
+const normalizeOptionalText = (value) => {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  return String(value).trim();
+};
+
+const uniqueIds = (values = []) =>
+  Array.from(
+    new Set(
+      (values || [])
+        .map((value) => String(value || "").trim())
+        .filter((value) => UUID_REGEX.test(value)),
+    ),
+  );
+
+const normalizeAssigneeIds = (payload = {}) => {
+  if (Array.isArray(payload.assigned_to_ids)) {
+    return uniqueIds(payload.assigned_to_ids);
+  }
+
+  if (payload.assigned_to !== undefined) {
+    return uniqueIds([payload.assigned_to]);
+  }
+
+  return [];
+};
+
+const normalizeTaskIds = (value) => {
+  if (Array.isArray(value)) {
+    return uniqueIds(value);
+  }
+
+  if (typeof value === "string") {
+    return uniqueIds(value.split(","));
+  }
+
+  return [];
+};
+
+const parseTaskMeta = (description) => {
+  const raw = typeof description === "string" ? description : "";
+  const start = raw.lastIndexOf(TASK_META_PREFIX);
+
+  if (start === -1 || !raw.endsWith(TASK_META_SUFFIX)) {
+    return {
+      cleanDescription: raw,
+      meta: null,
+    };
+  }
+
+  const jsonText = raw
+    .slice(start + TASK_META_PREFIX.length, raw.length - TASK_META_SUFFIX.length)
+    .trim();
+
+  try {
+    const parsed = JSON.parse(jsonText);
+    const groupId = String(parsed?.group_id || "").trim();
+    const groupName = normalizeOptionalText(parsed?.group_name);
+
+    if (!UUID_REGEX.test(groupId)) {
+      return {
+        cleanDescription: raw,
+        meta: null,
+      };
+    }
+
+    return {
+      cleanDescription: raw.slice(0, start).trim(),
+      meta: {
+        group_id: groupId,
+        group_name: groupName || null,
+      },
+    };
+  } catch {
+    return {
+      cleanDescription: raw,
+      meta: null,
+    };
+  }
+};
+
+const buildTaskDescription = (description, taskMeta = null) => {
+  const cleanDescription = normalizeOptionalText(description);
+
+  if (!taskMeta?.group_id || !UUID_REGEX.test(taskMeta.group_id)) {
+    return cleanDescription;
+  }
+
+  const serializedMeta = JSON.stringify({
+    group_id: taskMeta.group_id,
+    group_name: normalizeOptionalText(taskMeta.group_name) || null,
+  });
+
+  return `${cleanDescription}${TASK_META_PREFIX}${serializedMeta}${TASK_META_SUFFIX}`;
+};
+
+const decorateTaskRecord = (task) => {
+  if (!task) {
+    return task;
+  }
+
+  const { cleanDescription, meta } = parseTaskMeta(task.description);
+
+  return {
+    ...task,
+    description: cleanDescription,
+    group_id: meta?.group_id || null,
+    group_name: meta?.group_name || null,
+    is_group_task: Boolean(meta?.group_id),
+  };
+};
+
+const decorateTaskCollection = (tasks) => {
+  if (Array.isArray(tasks)) {
+    return tasks.map(decorateTaskRecord);
+  }
+
+  return decorateTaskRecord(tasks);
 };
 
 const resolveStoreIdFromRequest = (req) => {
@@ -217,7 +342,7 @@ const enrichTasksWithUsers = async (tasks) => {
     assigned_by_user: usersMap.get(task?.assigned_by) || null,
   }));
 
-  return Array.isArray(tasks) ? enriched : enriched[0];
+  return decorateTaskCollection(Array.isArray(tasks) ? enriched : enriched[0]);
 };
 
 const getTaskBase = async (taskId) => {
@@ -374,6 +499,162 @@ const fetchTaskAssignees = async () => {
   throw lastError || new Error("Failed to fetch assignees");
 };
 
+const buildTaskInsertPayload = ({
+  title,
+  description,
+  assigneeId,
+  assignedBy,
+  priority,
+  status,
+  dueDate,
+  storeId,
+  taskMeta = null,
+}) => ({
+  title,
+  description: buildTaskDescription(description, taskMeta),
+  assigned_to: assigneeId,
+  user_id: assigneeId,
+  assigned_by: assignedBy,
+  priority: priority || "medium",
+  status: status || "pending",
+  due_date: dueDate,
+  store_id: storeId,
+});
+
+const insertTaskRow = async (payload) => {
+  return await executeWithMissingColumnFallback(payload, (insertPayload) =>
+    supabase.from("tasks").insert(insertPayload).select(TASK_BASE_SELECT).single(),
+  );
+};
+
+const buildTaskUpdatePayload = ({
+  existingTask,
+  body,
+  assigneeId,
+  storeId,
+  taskMeta,
+  forceDescriptionRewrite = false,
+}) => {
+  const payload = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (body.title !== undefined) payload.title = body.title;
+  if (body.priority !== undefined) payload.priority = body.priority;
+  if (body.status !== undefined) payload.status = body.status;
+  if (body.due_date !== undefined) {
+    payload.due_date = normalizeNullableDateValue(body.due_date);
+  }
+
+  if (assigneeId !== undefined) {
+    payload.assigned_to = assigneeId;
+    payload.user_id = assigneeId;
+  } else if (body.assigned_to !== undefined) {
+    payload.assigned_to = body.assigned_to;
+    payload.user_id = body.assigned_to;
+  }
+
+  if (storeId) {
+    payload.store_id = storeId;
+  }
+
+  const shouldRewriteDescription =
+    forceDescriptionRewrite || body.description !== undefined;
+
+  if (shouldRewriteDescription) {
+    const baseDescription =
+      body.description !== undefined ? body.description : existingTask.description;
+    payload.description = buildTaskDescription(baseDescription, taskMeta);
+  }
+
+  if (body.status === "completed") {
+    payload.completed_at = new Date().toISOString();
+  } else if (body.status !== undefined && body.status !== "completed") {
+    payload.completed_at = null;
+  }
+
+  return payload;
+};
+
+const updateTaskRow = async (taskId, payload) => {
+  return await executeWithMissingColumnFallback(payload, (updatePayload) =>
+    supabase
+      .from("tasks")
+      .update(updatePayload)
+      .eq("id", taskId)
+      .select(TASK_BASE_SELECT)
+      .single(),
+  );
+};
+
+const fetchTasksByIds = async (taskIds) => {
+  const normalizedTaskIds = normalizeTaskIds(taskIds);
+  if (normalizedTaskIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(TASK_BASE_SELECT)
+    .in("id", normalizedTaskIds);
+
+  if (error) {
+    throw error;
+  }
+
+  const withUsers = await enrichTasksWithUsers(data || []);
+  return await attachTaskAttachments(withUsers || []);
+};
+
+const deleteTasksCascade = async (taskIds) => {
+  const normalizedTaskIds = normalizeTaskIds(taskIds);
+  if (normalizedTaskIds.length === 0) {
+    return;
+  }
+
+  const { data: attachments, error: attachmentsError } = await supabase
+    .from("task_attachments")
+    .select("*")
+    .in("task_id", normalizedTaskIds);
+
+  if (attachmentsError) {
+    throw attachmentsError;
+  }
+
+  for (const attachment of attachments || []) {
+    if (attachment.storage_path) {
+      await fileUploadService.deleteFile(
+        attachment.storage_path,
+        TASK_ATTACHMENT_BUCKET,
+      );
+    }
+  }
+
+  const { error: deleteAttachmentsError } = await supabase
+    .from("task_attachments")
+    .delete()
+    .in("task_id", normalizedTaskIds);
+  if (deleteAttachmentsError) {
+    throw deleteAttachmentsError;
+  }
+
+  const { error: deleteCommentsError } = await supabase
+    .from("task_comments")
+    .delete()
+    .in("task_id", normalizedTaskIds);
+  if (deleteCommentsError) {
+    throw deleteCommentsError;
+  }
+
+  const { error: deleteTasksError } = await supabase
+    .from("tasks")
+    .delete()
+    .in("id", normalizedTaskIds);
+  if (deleteTasksError) {
+    throw deleteTasksError;
+  }
+};
+
 // Get all tasks (Manager/Admin sees all, non-admin sees assigned tasks only)
 router.get("/", authenticateToken, async (req, res) => {
   try {
@@ -452,67 +733,96 @@ router.post(
   requirePermission("can_manage_tasks"),
   async (req, res) => {
     try {
-      const { title, description, assigned_to, priority, due_date } = req.body;
+      const { title, description, priority, due_date } = req.body;
       const normalizedDueDate = normalizeNullableDateValue(due_date);
+      const assigneeIds = normalizeAssigneeIds(req.body);
+      const isGroupTask = assigneeIds.length > 1;
+      const groupMeta = isGroupTask
+        ? {
+            group_id: randomUUID(),
+            group_name:
+              normalizeOptionalText(req.body.group_name) ||
+              normalizeOptionalText(title),
+          }
+        : null;
 
-      if (!title || !assigned_to) {
+      if (!title || assigneeIds.length === 0) {
         return res
           .status(400)
-          .json({ error: "Title and assigned user are required" });
+          .json({ error: "Title and at least one assigned user are required" });
       }
 
-      const insertPayload = {
-        title,
-        description,
-        assigned_to,
-        user_id: assigned_to,
-        assigned_by: req.user.id,
-        priority: priority || "medium",
-        status: "pending",
-        due_date: normalizedDueDate,
-        store_id: resolveStoreIdFromRequest(req),
-      };
+      const assigneesMap = await fetchUsersByIds(assigneeIds);
+      if (assigneesMap.size !== assigneeIds.length) {
+        return res.status(400).json({ error: "Invalid assigned user" });
+      }
 
-      const { data, error } = await executeWithMissingColumnFallback(
-        insertPayload,
-        (payload) =>
-          supabase
-            .from("tasks")
-            .insert(payload)
-            .select(TASK_BASE_SELECT)
-            .single(),
-      );
+      const storeId = resolveStoreIdFromRequest(req);
+      const createdTasks = [];
 
-      if (error) {
-        if (isMissingTaskUserIdFieldError(error)) {
-          return res.status(500).json({
-            error: `Failed to create task: ${taskUserIdMigrationHint}`,
+      for (const assigneeId of assigneeIds) {
+        const insertPayload = buildTaskInsertPayload({
+          title,
+          description,
+          assigneeId,
+          assignedBy: req.user.id,
+          priority,
+          dueDate: normalizedDueDate,
+          storeId,
+          taskMeta: groupMeta,
+        });
+
+        const { data, error } = await insertTaskRow(insertPayload);
+
+        if (error) {
+          if (isMissingTaskUserIdFieldError(error)) {
+            return res.status(500).json({
+              error: `Failed to create task: ${taskUserIdMigrationHint}`,
+            });
+          }
+
+          if (error.code === "23503" || error.code === "22P02") {
+            return res.status(400).json({ error: "Invalid assigned user" });
+          }
+
+          console.error("Database error creating task:", error);
+          return res
+            .status(500)
+            .json({ error: withErrorDetails("Failed to create task", error) });
+        }
+
+        createdTasks.push(data);
+
+        if (assigneeId !== req.user.id) {
+          await createTaskNotification({
+            userId: assigneeId,
+            title: isGroupTask ? "Task group assignment" : "Task assigned",
+            message: isGroupTask
+              ? `You have been added to task group: ${groupMeta?.group_name || title}`
+              : `A new task has been assigned: ${title}`,
+            taskId: data.id,
+            metadata: {
+              assigned_by: req.user.id,
+              group_id: groupMeta?.group_id || null,
+            },
           });
         }
-
-        if (error.code === "23503" || error.code === "22P02") {
-          return res.status(400).json({ error: "Invalid assigned user" });
-        }
-        console.error("Database error creating task:", error);
-        return res
-          .status(500)
-          .json({ error: withErrorDetails("Failed to create task", error) });
       }
 
-      if (assigned_to !== req.user.id) {
-        await createTaskNotification({
-          userId: assigned_to,
-          title: "Task assigned",
-          message: `A new task has been assigned: ${title}`,
-          taskId: data.id,
-          metadata: {
-            assigned_by: req.user.id,
-          },
-        });
+      const withUsers = await enrichTasksWithUsers(createdTasks);
+      const withAttachments = await attachTaskAttachments(withUsers);
+
+      if (withAttachments.length === 1) {
+        return res.status(201).json(withAttachments[0]);
       }
 
-      const withUsers = await enrichTasksWithUsers(data);
-      res.status(201).json({ ...withUsers, attachments: [] });
+      return res.status(201).json({
+        is_group: true,
+        group_id: groupMeta?.group_id || null,
+        group_name: groupMeta?.group_name || null,
+        primary_task_id: withAttachments[0]?.id || null,
+        created_tasks: withAttachments,
+      });
     } catch (error) {
       console.error("Error creating task:", error);
       res
@@ -534,11 +844,14 @@ router.put("/:id", authenticateToken, async (req, res) => {
     const existingTask = access.task;
     const isManager = access.canManage;
     const statusOnlyAllowed = !isManager && req.user.role !== "admin";
+    const applyToTaskIds = normalizeTaskIds(req.body.apply_to_task_ids);
 
     const hasRestrictedFields =
       req.body.title !== undefined ||
       req.body.description !== undefined ||
       req.body.assigned_to !== undefined ||
+      req.body.assigned_to_ids !== undefined ||
+      req.body.group_name !== undefined ||
       req.body.priority !== undefined ||
       req.body.due_date !== undefined;
 
@@ -548,48 +861,167 @@ router.put("/:id", authenticateToken, async (req, res) => {
       });
     }
 
-    const updateData = {
-      updated_at: new Date().toISOString(),
-    };
+    if (isManager && applyToTaskIds.length > 1) {
+      const groupTasks = await fetchTasksByIds(applyToTaskIds);
 
-      if (statusOnlyAllowed) {
-        updateData.status = req.body.status || existingTask.status;
-      } else {
-      const { title, description, assigned_to, priority, status, due_date } =
-        req.body;
+      if (groupTasks.length !== applyToTaskIds.length) {
+        return res.status(404).json({ error: "One or more tasks were not found" });
+      }
 
-      if (title !== undefined) updateData.title = title;
-      if (description !== undefined) updateData.description = description;
-        if (assigned_to !== undefined) updateData.assigned_to = assigned_to;
-        if (assigned_to !== undefined) updateData.user_id = assigned_to;
-        if (priority !== undefined) updateData.priority = priority;
-        if (status !== undefined) updateData.status = status;
-        if (due_date !== undefined) {
-          updateData.due_date = normalizeNullableDateValue(due_date);
+      const desiredAssigneeIds =
+        normalizeAssigneeIds(req.body).length > 0
+          ? normalizeAssigneeIds(req.body)
+          : uniqueIds(groupTasks.map((task) => task.assigned_to));
+
+      if (desiredAssigneeIds.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "At least one assigned user is required" });
+      }
+
+      const assigneesMap = await fetchUsersByIds(desiredAssigneeIds);
+      if (assigneesMap.size !== desiredAssigneeIds.length) {
+        return res.status(400).json({ error: "Invalid assigned user" });
+      }
+
+      const storeId = resolveStoreIdFromRequest(req);
+      const shouldRemainGroup = desiredAssigneeIds.length > 1;
+      const groupMeta = shouldRemainGroup
+        ? {
+            group_id: existingTask.group_id || randomUUID(),
+            group_name:
+              normalizeOptionalText(req.body.group_name) ||
+              existingTask.group_name ||
+              normalizeOptionalText(req.body.title) ||
+              existingTask.title,
+          }
+        : null;
+
+      const existingByAssignee = new Map(
+        groupTasks.map((task) => [task.assigned_to, task]),
+      );
+
+      const finalTaskIds = [];
+
+      for (const assigneeId of desiredAssigneeIds) {
+        const matchingTask = existingByAssignee.get(assigneeId);
+
+        if (matchingTask) {
+          const updatePayload = buildTaskUpdatePayload({
+            existingTask: matchingTask,
+            body: req.body,
+            assigneeId,
+            storeId,
+            taskMeta: groupMeta,
+            forceDescriptionRewrite: true,
+          });
+
+          const { data, error } = await updateTaskRow(matchingTask.id, updatePayload);
+
+          if (error) {
+            if (isMissingTaskUserIdFieldError(error)) {
+              return res.status(500).json({
+                error: `Failed to update task: ${taskUserIdMigrationHint}`,
+              });
+            }
+
+            console.error("Database error updating grouped task:", error);
+            return res.status(500).json({
+              error: withErrorDetails("Failed to update task group", error),
+            });
+          }
+
+          finalTaskIds.push(data.id);
+          continue;
         }
 
-        const maybeStoreId = resolveStoreIdFromRequest(req);
-        if (maybeStoreId) {
-          updateData.store_id = maybeStoreId;
+        const insertPayload = buildTaskInsertPayload({
+          title: req.body.title !== undefined ? req.body.title : existingTask.title,
+          description:
+            req.body.description !== undefined
+              ? req.body.description
+              : existingTask.description,
+          assigneeId,
+          assignedBy: existingTask.assigned_by || req.user.id,
+          priority:
+            req.body.priority !== undefined
+              ? req.body.priority
+              : existingTask.priority,
+          status:
+            req.body.status !== undefined ? req.body.status : "pending",
+          dueDate:
+            req.body.due_date !== undefined
+              ? normalizeNullableDateValue(req.body.due_date)
+              : existingTask.due_date,
+          storeId: storeId || existingTask.store_id || undefined,
+          taskMeta: groupMeta,
+        });
+
+        const { data, error } = await insertTaskRow(insertPayload);
+
+        if (error) {
+          if (isMissingTaskUserIdFieldError(error)) {
+            return res.status(500).json({
+              error: `Failed to update task: ${taskUserIdMigrationHint}`,
+            });
+          }
+
+          console.error("Database error creating grouped task member:", error);
+          return res.status(500).json({
+            error: withErrorDetails("Failed to update task group", error),
+          });
+        }
+
+        finalTaskIds.push(data.id);
+
+        if (assigneeId !== req.user.id) {
+          await createTaskNotification({
+            userId: assigneeId,
+            title: shouldRemainGroup ? "Task group assignment" : "Task assigned",
+            message: shouldRemainGroup
+              ? `You have been added to task group: ${groupMeta?.group_name || data.title}`
+              : `A task has been assigned to you: ${data.title}`,
+            taskId: data.id,
+            metadata: {
+              assigned_by: req.user.id,
+              group_id: groupMeta?.group_id || null,
+            },
+          });
         }
       }
 
-    if (updateData.status === "completed") {
-      updateData.completed_at = new Date().toISOString();
-    } else if (updateData.status && updateData.status !== "completed") {
-      updateData.completed_at = null;
+      const removedTaskIds = groupTasks
+        .filter((task) => !desiredAssigneeIds.includes(task.assigned_to))
+        .map((task) => task.id);
+
+      if (removedTaskIds.length > 0) {
+        await deleteTasksCascade(removedTaskIds);
+      }
+
+      const updatedTasks = await fetchTasksByIds(finalTaskIds);
+      return res.json({
+        is_group: updatedTasks.length > 1,
+        group_id: groupMeta?.group_id || null,
+        group_name: groupMeta?.group_name || null,
+        primary_task_id: updatedTasks[0]?.id || existingTask.id,
+        updated_tasks: updatedTasks,
+      });
     }
 
-    const { data, error } = await executeWithMissingColumnFallback(
-      updateData,
-      (payload) =>
-        supabase
-          .from("tasks")
-          .update(payload)
-          .eq("id", req.params.id)
-          .select(TASK_BASE_SELECT)
-          .single(),
-    );
+    const updatePayload = statusOnlyAllowed
+      ? buildTaskUpdatePayload({
+          existingTask,
+          body: {
+            status: req.body.status || existingTask.status,
+          },
+        })
+      : buildTaskUpdatePayload({
+          existingTask,
+          body: req.body,
+          storeId: resolveStoreIdFromRequest(req),
+        });
+
+    const { data, error } = await updateTaskRow(req.params.id, updatePayload);
 
     if (error) {
       if (isMissingTaskUserIdFieldError(error)) {
@@ -604,15 +1036,11 @@ router.put("/:id", authenticateToken, async (req, res) => {
         .json({ error: withErrorDetails("Failed to update task", error) });
     }
 
-    // Notify interested users
-    if (updateData.status && updateData.status !== existingTask.status) {
-      let statusNotificationRecipient = null;
-
-      if (req.user.id === existingTask.assigned_to) {
-        statusNotificationRecipient = existingTask.assigned_by;
-      } else {
-        statusNotificationRecipient = existingTask.assigned_to;
-      }
+    if (updatePayload.status && updatePayload.status !== existingTask.status) {
+      const statusNotificationRecipient =
+        req.user.id === existingTask.assigned_to
+          ? existingTask.assigned_by
+          : existingTask.assigned_to;
 
       if (
         statusNotificationRecipient &&
@@ -621,24 +1049,24 @@ router.put("/:id", authenticateToken, async (req, res) => {
         await createTaskNotification({
           userId: statusNotificationRecipient,
           title: "Task status updated",
-          message: `Task "${existingTask.title}" status changed to "${updateData.status}"`,
+          message: `Task "${existingTask.title}" status changed to "${updatePayload.status}"`,
           taskId: existingTask.id,
           metadata: {
             updated_by: req.user.id,
             old_status: existingTask.status,
-            new_status: updateData.status,
+            new_status: updatePayload.status,
           },
         });
       }
     }
 
     if (
-      updateData.assigned_to &&
-      updateData.assigned_to !== existingTask.assigned_to &&
-      updateData.assigned_to !== req.user.id
+      updatePayload.assigned_to &&
+      updatePayload.assigned_to !== existingTask.assigned_to &&
+      updatePayload.assigned_to !== req.user.id
     ) {
       await createTaskNotification({
-        userId: updateData.assigned_to,
+        userId: updatePayload.assigned_to,
         title: "Task assigned",
         message: `A task has been assigned to you: ${data.title}`,
         taskId: data.id,
@@ -666,15 +1094,11 @@ router.delete(
   requirePermission("can_manage_tasks"),
   async (req, res) => {
     try {
-      const { error } = await supabase
-        .from("tasks")
-        .delete()
-        .eq("id", req.params.id);
+      const taskIds = normalizeTaskIds(req.body?.task_ids);
+      const targetTaskIds =
+        taskIds.length > 0 ? taskIds : normalizeTaskIds([req.params.id]);
 
-      if (error) {
-        console.error("Database error deleting task:", error);
-        return res.status(500).json({ error: "Failed to delete task" });
-      }
+      await deleteTasksCascade(targetTaskIds);
 
       res.json({ message: "Task deleted successfully" });
     } catch (error) {
@@ -807,7 +1231,7 @@ router.post(
       }));
 
       await fileUploadService.ensureBucket(TASK_ATTACHMENT_BUCKET, {
-        public: false,
+        public: true,
         fileSizeLimit: 10 * 1024 * 1024,
       });
 

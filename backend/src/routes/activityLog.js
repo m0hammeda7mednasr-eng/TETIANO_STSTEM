@@ -11,8 +11,8 @@ router.use(authenticateToken, requirePermission("can_view_activity_log"));
 router.get("/", async (req, res) => {
   try {
     const { entity_type } = req.query;
-    const limit = parseInt(req.query.limit) || 100;
-    const offset = parseInt(req.query.offset) || 0;
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const offset = parseInt(req.query.offset, 10) || 0;
 
     let query = supabase
       .from("activity_log")
@@ -44,42 +44,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// Get activity log for specific entity (with role-based filtering)
-router.get("/entity/:type/:id", async (req, res) => {
-  try {
-    const { type, id } = req.params;
-
-    if (!type || !id) {
-      return res.status(400).json({ error: "Entity type and ID are required" });
-    }
-
-    let query = supabase
-      .from("activity_log")
-      .select(
-        `
-        *,
-        user:users(id, name, email)
-      `,
-      )
-      .eq("entity_type", type)
-      .eq("entity_id", id)
-      .order("created_at", { ascending: false });
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error("Database error fetching entity activity:", error);
-      throw error;
-    }
-
-    res.json(data || []);
-  } catch (err) {
-    console.error("Error fetching entity activity:", err);
-    res.status(500).json({ error: "Failed to fetch entity activity" });
-  }
-});
-
-// Get activity statistics (with role-based filtering)
+// Get activity statistics — MUST be before /entity/:type/:id to avoid route conflict
 router.get("/stats", async (req, res) => {
   try {
     const sevenDaysAgo = new Date(
@@ -87,20 +52,16 @@ router.get("/stats", async (req, res) => {
     ).toISOString();
 
     // Get activity counts by type
-    let activityQuery = supabase
+    const { data: activityByType, error: error1 } = await supabase
       .from("activity_log")
       .select("entity_type, action")
       .gte("created_at", sevenDaysAgo);
 
-    const { data: activityByType, error: error1 } = await activityQuery;
-
     // Get most active users (with filtering)
-    let usersQuery = supabase
+    const { data: activeUsers, error: error2 } = await supabase
       .from("activity_log")
       .select("user_id, users(name)")
       .gte("created_at", sevenDaysAgo);
-
-    const { data: activeUsers, error: error2 } = await usersQuery;
 
     if (error1) {
       console.error("Database error fetching activity by type:", error1);
@@ -134,6 +95,39 @@ router.get("/stats", async (req, res) => {
   } catch (err) {
     console.error("Error fetching activity stats:", err);
     res.status(500).json({ error: "Failed to fetch activity statistics" });
+  }
+});
+
+// Get activity log for specific entity (with role-based filtering)
+router.get("/entity/:type/:id", async (req, res) => {
+  try {
+    const { type, id } = req.params;
+
+    if (!type || !id) {
+      return res.status(400).json({ error: "Entity type and ID are required" });
+    }
+
+    const { data, error } = await supabase
+      .from("activity_log")
+      .select(
+        `
+        *,
+        user:users(id, name, email)
+      `,
+      )
+      .eq("entity_type", type)
+      .eq("entity_id", id)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Database error fetching entity activity:", error);
+      throw error;
+    }
+
+    res.json(data || []);
+  } catch (err) {
+    console.error("Error fetching entity activity:", err);
+    res.status(500).json({ error: "Failed to fetch entity activity" });
   }
 });
 

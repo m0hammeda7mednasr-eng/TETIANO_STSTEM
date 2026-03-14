@@ -15,6 +15,7 @@ import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
+import { normalizeTaskRecord } from "../utils/taskGroups";
 
 const POLLING_INTERVAL_MS = 30000;
 
@@ -30,7 +31,7 @@ export default function MyTasks() {
       }
 
       const response = await api.get("/tasks");
-      setTasks(extractArray(response.data));
+      setTasks(extractArray(response.data).map(normalizeTaskRecord));
     } catch (error) {
       if (!silent) {
         setMessage({ type: "error", text: getErrorMessage(error) });
@@ -186,6 +187,11 @@ function TaskColumn({ title, icon: Icon, color, tasks, onStatusChange, onUpload 
 function TaskCard({ task, onStatusChange, onUpload }) {
   return (
     <div className="border rounded-lg p-3 bg-slate-50">
+      {task.group_name && (
+        <span className="inline-flex rounded-full bg-violet-100 px-2 py-1 text-[11px] font-semibold text-violet-700">
+          {task.group_name}
+        </span>
+      )}
       <h3 className="font-semibold text-slate-900">{task.title}</h3>
 
       {task.description && (

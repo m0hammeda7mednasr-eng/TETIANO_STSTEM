@@ -16,13 +16,12 @@ import {
   getWebhookAddress,
   removeManagedWebhooks,
 } from "../services/shopifyWebhookService.js";
-import jwt from "jsonwebtoken";
 import {
   getUserRole,
-  normalizeRole,
   requireAdminRole,
   requirePermission,
 } from "../middleware/permissions.js";
+import { authenticateToken } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -97,28 +96,7 @@ const getRedirectUri = (req) => {
   return `${protocol}://${host}/api/shopify/callback`;
 };
 
-// Middleware to verify JWT token
-const verifyToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-  try {
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || "your-secret-key",
-    );
-    const normalizedRole = normalizeRole(decoded.role);
-    req.user = {
-      ...decoded,
-      role: normalizedRole,
-      isAdmin: normalizedRole === "admin",
-    };
-    next();
-  } catch (error) {
-    res.status(401).json({ error: "Invalid token" });
-  }
-};
+const verifyToken = authenticateToken;
 
 const resolveIsAdmin = async (req) => {
   if (req.user?.role === "admin") {
@@ -148,6 +126,40 @@ const getRequestedStoreId = (req) => {
   }
 
   return normalized;
+};
+
+const filterRowsByStoreId = (rows, requestedStoreId) => {
+  if (!requestedStoreId) {
+    return rows || [];
+  }
+
+  return (rows || []).filter(
+    (row) => row?.store_id && String(row.store_id) === requestedStoreId,
+  );
+};
+
+const getScopedEntityRows = async (req, entityModel) => {
+  const requestedStoreId = getRequestedStoreId(req);
+  const isAdmin = await resolveIsAdmin(req);
+  const sourceResult = isAdmin
+    ? await entityModel.findAll()
+    : await entityModel.findByUser(req.user.id);
+
+  if (sourceResult?.error) {
+    return {
+      data: [],
+      error: sourceResult.error,
+      isAdmin,
+      requestedStoreId,
+    };
+  }
+
+  return {
+    data: filterRowsByStoreId(sourceResult?.data || [], requestedStoreId),
+    error: null,
+    isAdmin,
+    requestedStoreId,
+  };
 };
 
 const resolveSyncToken = async ({ userId, requestedStoreId, isAdmin }) => {
@@ -242,9 +254,9 @@ const isSchemaCompatibilityError = (error) => {
 const getSchemaErrorMessage = (error) =>
   String(
     error?.message ||
-      error?.details ||
-      error?.hint ||
-      "Database schema mismatch",
+    error?.details ||
+    error?.hint ||
+    "Database schema mismatch",
   ).trim();
 
 const getReadableShopifyError = (error) => {
@@ -285,6 +297,54 @@ const getReadableShopifyError = (error) => {
   }
 
   return String(error?.message || "Unknown Shopify OAuth error").trim();
+};
+
+const isShopifyCredentialError = (error) => {
+  const status = Number(error?.response?.status || 0);
+  if (status === 401 || status === 403) {
+    return true;
+  }
+
+  const text = `${getReadableShopifyError(error)} ${error?.message || ""}`
+    .toLowerCase()
+    .trim();
+
+  return (
+    text.includes("invalid api key") ||
+    text.includes("invalid access token") ||
+    text.includes("unrecognized login") ||
+    text.includes("reauthoriz") ||
+    text.includes("access token") ||
+    text.includes("forbidden")
+  );
+};
+
+const validateShopifyConnection = async ({ shop, accessToken }) => {
+  if (!shop || !accessToken) {
+    return {
+      valid: false,
+      requiresReconnect: false,
+      message: "Missing Shopify connection details",
+    };
+  }
+
+  try {
+    await axios.get(`https://${shop}/admin/api/2024-01/shop.json`, {
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json",
+      },
+      timeout: 10000,
+    });
+
+    return { valid: true, requiresReconnect: false, message: null };
+  } catch (error) {
+    return {
+      valid: false,
+      requiresReconnect: isShopifyCredentialError(error),
+      message: getReadableShopifyError(error),
+    };
+  }
 };
 
 const findOrCreateStoreConnection = async ({ supabase, shop, userId }) => {
@@ -797,7 +857,31 @@ const syncRecentOrdersWithCooldown = async ({
     }
 
     const syncOwnerUserId = tokenData.user_id || userId;
-    const syncStoreId = requestedStoreId || tokenData.store_id || null;
+    const { supabase } = await import("../supabaseClient.js");
+    let syncStoreId =
+      requestedStoreId ||
+      tokenData.store_id ||
+      (await findExistingStoreIdByShop({
+        supabase,
+        shop: tokenData.shop,
+      }));
+
+    if (!syncStoreId) {
+      const storeConnection = await findOrCreateStoreConnection({
+        supabase,
+        shop: tokenData.shop,
+        userId: syncOwnerUserId,
+      });
+      syncStoreId = storeConnection?.id || null;
+    }
+
+    if (syncStoreId) {
+      await grantUserStoreAccess({
+        supabase,
+        userId: syncOwnerUserId,
+        storeId: syncStoreId,
+      });
+    }
     const key = buildBackgroundSyncKey({
       userId: syncOwnerUserId,
       storeId: syncStoreId,
@@ -1009,7 +1093,7 @@ const applyProductsQueryFilters = (rows, query = {}) => {
 };
 
 // 1. Get Shopify Authorization URL
-router.post("/auth-url", verifyToken, async (req, res) => {
+router.post("/auth-url", authenticateToken, async (req, res) => {
   try {
     const inputShop = normalizeShopDomain(req.body?.shop);
     const userId = req.user.id; // Changed from req.user.userId
@@ -1155,8 +1239,8 @@ router.get("/callback", async (req, res) => {
 // 3. Sync data from Shopify
 router.post(
   "/sync",
-  verifyToken,
-  requirePermission("can_manage_settings"),
+  authenticateToken,
+  requireAdminRole,
   async (req, res) => {
     try {
       console.log("🔄 Starting Shopify sync process...");
@@ -1198,17 +1282,71 @@ router.post(
       const syncOwnerUserId = tokenData.user_id || userId;
 
       // Force store ID to ensure data linking
-      let syncStoreId = requestedStoreId || tokenData.store_id;
+      const { supabase } = await import("../supabaseClient.js");
+      let syncStoreId =
+        requestedStoreId ||
+        tokenData.store_id ||
+        (await findExistingStoreIdByShop({
+          supabase,
+          shop: tokenData.shop,
+        }));
 
-      // If no store ID, use default store
       if (!syncStoreId) {
-        syncStoreId = "59b47070-f018-4919-b628-1009af216fd7"; // Default store UUID
+        const storeConnection = await findOrCreateStoreConnection({
+          supabase,
+          shop: tokenData.shop,
+          userId: syncOwnerUserId,
+        });
+        syncStoreId = storeConnection?.id || null;
+      }
+
+      // Legacy fallback if store mapping could not be resolved dynamically
+      if (!syncStoreId) {
+        syncStoreId = null;
+        console.warn(
+          "Sync continuing without resolved store_id; rows stay user-scoped until store mapping exists.",
+        );
         console.log("🏪 Using default store ID for sync:", syncStoreId);
       }
 
       console.log(
         `🔄 Starting sync for user: ${syncOwnerUserId}, store: ${syncStoreId}`,
       );
+
+      if (syncStoreId) {
+        await grantUserStoreAccess({
+          supabase,
+          userId: syncOwnerUserId,
+          storeId: syncStoreId,
+        });
+
+        if (userId !== syncOwnerUserId) {
+          await grantUserStoreAccess({
+            supabase,
+            userId,
+            storeId: syncStoreId,
+          });
+        }
+
+        if (tokenData.id && tokenData.store_id !== syncStoreId) {
+          const { error: tokenStoreUpdateError } = await supabase
+            .from("shopify_tokens")
+            .update({
+              store_id: syncStoreId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", tokenData.id);
+
+          if (tokenStoreUpdateError) {
+            console.warn(
+              "Failed to persist resolved store_id on Shopify token:",
+              tokenStoreUpdateError.message,
+            );
+          } else {
+            tokenData.store_id = syncStoreId;
+          }
+        }
+      }
 
       // Try to sync data with better error handling
       let syncResult;
@@ -1221,8 +1359,14 @@ router.post(
         );
       } catch (syncError) {
         console.error("❌ Shopify sync failed:", syncError);
-        return res.status(500).json({
-          error: "Failed to sync data from Shopify",
+        const requiresReconnect = isShopifyCredentialError(syncError);
+        return res.status(requiresReconnect ? 400 : 500).json({
+          error: requiresReconnect
+            ? "Shopify authorization is invalid or expired. Please reconnect Shopify."
+            : "Failed to sync data from Shopify",
+          code: requiresReconnect
+            ? "SHOPIFY_REAUTH_REQUIRED"
+            : "SHOPIFY_SYNC_FAILED",
           details: syncError.message,
           shop: tokenData.shop,
         });
@@ -1272,12 +1416,12 @@ router.post(
         },
         latest_order: latestSyncedOrder
           ? {
-              shopify_id: latestSyncedOrder.shopify_id || null,
-              order_number: latestSyncedOrder.order_number || null,
-              financial_status: latestSyncedOrder.status || null,
-              created_at: latestSyncedOrder.created_at || null,
-              updated_at: latestSyncedOrder.updated_at || null,
-            }
+            shopify_id: latestSyncedOrder.shopify_id || null,
+            order_number: latestSyncedOrder.order_number || null,
+            financial_status: latestSyncedOrder.status || null,
+            created_at: latestSyncedOrder.created_at || null,
+            updated_at: latestSyncedOrder.updated_at || null,
+          }
           : null,
       };
 
@@ -1295,7 +1439,7 @@ router.post(
 );
 
 // 4. Check Shopify connection status
-router.get("/status", verifyToken, async (req, res) => {
+router.get("/status", authenticateToken, async (req, res) => {
   try {
     const requestedStoreId = getRequestedStoreId(req);
     const isAdmin = await resolveIsAdmin(req);
@@ -1315,12 +1459,25 @@ router.get("/status", verifyToken, async (req, res) => {
         shop: tokenData?.shop || "",
       }));
 
+    const validation = tokenData?.access_token
+      ? await validateShopifyConnection({
+        shop: tokenData.shop,
+        accessToken: tokenData.access_token,
+      })
+      : {
+        valid: false,
+        requiresReconnect: false,
+        message: null,
+      };
+
     res.json({
-      connected: !!tokenData?.access_token,
+      connected: Boolean(tokenData?.access_token && validation.valid),
       shop: tokenData?.shop || null,
       store_id: resolvedStoreId || null,
       redirectUri: redirectUri,
       webhookAddress: getWebhookAddress(req),
+      requires_reconnect: validation.requiresReconnect,
+      connection_error: validation.valid ? null : validation.message,
     });
   } catch (error) {
     res.json({
@@ -1334,8 +1491,8 @@ router.get("/status", verifyToken, async (req, res) => {
 
 router.post(
   "/disconnect",
-  verifyToken,
-  requirePermission("can_manage_settings"),
+  authenticateToken,
+  requireAdminRole,
   async (req, res) => {
     try {
       const requestedStoreId = getRequestedStoreId(req);
@@ -1478,8 +1635,7 @@ router.get(
   requirePermission("can_view_products"),
   async (req, res) => {
     try {
-      const isAdmin = await resolveIsAdmin(req);
-      const { data, error } = await Product.findByUser(req.user.id);
+      const { data, error, isAdmin } = await getScopedEntityRows(req, Product);
       if (error) {
         console.error("Error fetching products:", error);
         return res.status(500).json({ error: error.message });
@@ -1507,7 +1663,17 @@ router.get(
   requirePermission("can_view_orders"),
   async (req, res) => {
     try {
-      const isAdmin = await resolveIsAdmin(req);
+      const {
+        data: initialScopedOrders,
+        error: initialOrdersError,
+        isAdmin,
+        requestedStoreId,
+      } = await getScopedEntityRows(req, Order);
+      if (initialOrdersError) {
+        console.error("Error fetching orders before sync:", initialOrdersError);
+        return res.status(500).json({ error: initialOrdersError.message });
+      }
+
       const syncRecentParam = String(req.query.sync_recent || "")
         .toLowerCase()
         .trim();
@@ -1516,17 +1682,11 @@ router.get(
       let liveSyncResult = null;
 
       if (shouldSyncRecent) {
-        // We need to check the latest order timestamp before attempting the sync
-        const { data: existingOrders } = await Order.findByUser(req.user.id);
-        const latestKnownOrderAt = getLatestOrderTimestamp(
-          existingOrders || [],
-        );
-
         liveSyncResult = await syncRecentOrdersWithCooldown({
           userId: req.user.id,
-          requestedStoreId: getRequestedStoreId(req),
+          requestedStoreId,
           isAdmin,
-          latestKnownOrderAt,
+          latestKnownOrderAt: getLatestOrderTimestamp(initialScopedOrders || []),
           waitForCompletion: true,
           forceRun: forceSyncRecent,
         });
@@ -1534,7 +1694,7 @@ router.get(
 
       // After any potential sync, ALWAYS fetch the latest data from the DB.
       // This ensures that data from a full sync is also reflected.
-      const { data, error } = await Order.findByUser(req.user.id);
+      const { data, error } = await getScopedEntityRows(req, Order);
       if (error) {
         console.error("Error fetching orders:", error);
         return res.status(500).json({ error: error.message });
@@ -1571,7 +1731,7 @@ router.get(
   requirePermission("can_view_customers"),
   async (req, res) => {
     try {
-      const { data, error } = await Customer.findByUser(req.user.id);
+      const { data, error } = await getScopedEntityRows(req, Customer);
       if (error) {
         console.error("Error fetching customers:", error);
         return res.status(500).json({ error: error.message });
@@ -2013,13 +2173,13 @@ router.get(
         profitData && profitData.length > 0
           ? profitData[0]
           : {
-              total_revenue: 0,
-              total_cost: 0,
-              total_operational_costs: 0,
-              gross_profit: 0,
-              net_profit: 0,
-              profit_margin: 0,
-            };
+            total_revenue: 0,
+            total_cost: 0,
+            total_operational_costs: 0,
+            gross_profit: 0,
+            net_profit: 0,
+            profit_margin: 0,
+          };
 
       res.json({
         total_revenue: result.total_revenue || 0,

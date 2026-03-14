@@ -3,7 +3,7 @@
  *
  * This module provides centralized logic for applying role-based query filters
  * to ensure employees see only their own data while admins see all data.
- * Shopify data (products, orders, customers) is shared across all users.
+ * Store-aware Shopify scoping is handled in dedicated routes/models, not here.
  */
 
 /**
@@ -18,7 +18,7 @@ const ENTITY_CONFIG = {
   activity_log: { filterColumn: "user_id", requiresFilter: true },
   operational_costs: { filterColumn: "user_id", requiresFilter: true },
 
-  // Shopify shared data that should not be filtered
+  // Shopify entities are scoped in dedicated store-aware code paths.
   products: { filterColumn: null, requiresFilter: false },
   orders: { filterColumn: null, requiresFilter: false },
   customers: { filterColumn: null, requiresFilter: false },
@@ -91,7 +91,7 @@ export function requiresUserFiltering(entityType) {
  * Gets the appropriate user ID column name for an entity type
  *
  * @param {string} entityType - Type of entity
- * @returns {string|null} Column name ('user_id', 'created_by', or 'assigned_to') or null for Shopify data
+ * @returns {string|null} Column name ('user_id' or 'assigned_to') or null when this helper should not scope the entity
  */
 export function getUserIdColumn(entityType) {
   const entityConfig = ENTITY_CONFIG[entityType];
@@ -112,7 +112,7 @@ export function getEntityTypes() {
 }
 
 /**
- * Checks if an entity type is Shopify data (shared across all users)
+ * Checks if an entity type is Shopify data
  *
  * @param {string} entityType - Type of entity
  * @returns {boolean} True if entity is Shopify data

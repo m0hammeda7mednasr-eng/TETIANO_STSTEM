@@ -215,26 +215,8 @@ const getScopedRows = async (req, entityModel) => {
     // Admin gets all data
     sourceResult = await entityModel.findAll();
   } else {
-    // Regular users get their accessible data
+    // Regular users get only their accessible data — no fallback to all data
     sourceResult = await entityModel.findByUser(req.user.id);
-  }
-
-  // If no data found, try to get all Shopify data as fallback
-  if (!sourceResult.data || sourceResult.data.length === 0) {
-    console.log(`No data found for user ${req.user.id}, trying fallback...`);
-    try {
-      const fallbackResult = await entityModel.findAll();
-      if (fallbackResult.data && fallbackResult.data.length > 0) {
-        // Filter to only Shopify data
-        const shopifyData = fallbackResult.data.filter(
-          (item) => item.shopify_id,
-        );
-        sourceResult = { data: shopifyData, error: null };
-        console.log(`Fallback found ${shopifyData.length} Shopify items`);
-      }
-    } catch (fallbackError) {
-      console.error("Fallback query failed:", fallbackError);
-    }
   }
 
   return applyStoreFilter(sourceResult.data || [], requestedStoreId);
@@ -500,20 +482,20 @@ router.get(
           successRate:
             totalOrders > 0
               ? parseFloat(
-                  ((ordersByStatus.paid / totalOrders) * 100).toFixed(2),
-                )
+                ((ordersByStatus.paid / totalOrders) * 100).toFixed(2),
+              )
               : 0,
           cancellationRate:
             totalOrders > 0
               ? parseFloat(
-                  ((ordersByStatus.cancelled / totalOrders) * 100).toFixed(2),
-                )
+                ((ordersByStatus.cancelled / totalOrders) * 100).toFixed(2),
+              )
               : 0,
           refundRate:
             totalOrders > 0
               ? parseFloat(
-                  ((ordersByStatus.refunded / totalOrders) * 100).toFixed(2),
-                )
+                ((ordersByStatus.refunded / totalOrders) * 100).toFixed(2),
+              )
               : 0,
         },
       });
@@ -616,9 +598,10 @@ router.get(
       });
 
       const productIds = products.map((p) => p.id);
+      const scopedUserId = req.user?.role === "admin" ? null : req.user?.id;
       const [productCosts, globalCosts] = await Promise.all([
-        getOperationalCostsByProduct(productIds, null),
-        getGlobalOperationalCosts(null),
+        getOperationalCostsByProduct(productIds, scopedUserId),
+        getGlobalOperationalCosts(scopedUserId),
       ]);
 
       const costsByProductId = new Map();
@@ -678,23 +661,23 @@ router.get(
         const fixedShare =
           soldQuantity > 0 && totalFixedCosts > 0
             ? (soldQuantity /
-                Math.max(
-                  1,
-                  products.reduce((sum, p) => {
-                    const keys = [
-                      String(p.id),
-                      String(p.shopify_id || ""),
-                      String(p.sku || ""),
-                    ].filter(Boolean);
-                    let qty = 0;
-                    keys.forEach((k) => {
-                      const val = salesByProduct.get(k);
-                      if (val) qty = Math.max(qty, val.soldQuantity);
-                    });
-                    return sum + qty;
-                  }, 0),
-                )) *
-              totalFixedCosts
+              Math.max(
+                1,
+                products.reduce((sum, p) => {
+                  const keys = [
+                    String(p.id),
+                    String(p.shopify_id || ""),
+                    String(p.sku || ""),
+                  ].filter(Boolean);
+                  let qty = 0;
+                  keys.forEach((k) => {
+                    const val = salesByProduct.get(k);
+                    if (val) qty = Math.max(qty, val.soldQuantity);
+                  });
+                  return sum + qty;
+                }, 0),
+              )) *
+            totalFixedCosts
             : 0;
 
         const netProfit = grossProfit - operationalCostsTotal - fixedShare;
@@ -748,11 +731,11 @@ router.get(
       summary.profit_margin =
         summary.total_revenue > 0
           ? parseFloat(
-              (
-                (summary.total_net_profit / summary.total_revenue) *
-                100
-              ).toFixed(2),
-            )
+            (
+              (summary.total_net_profit / summary.total_revenue) *
+              100
+            ).toFixed(2),
+          )
           : 0;
 
       res.json({

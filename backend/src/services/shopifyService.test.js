@@ -18,9 +18,9 @@ describe("ShopifyService", () => {
     jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     // Spy on model methods
-    jest.spyOn(Product, 'updateMultiple').mockImplementation(async () => {});
-    jest.spyOn(Order, 'updateMultiple').mockImplementation(async () => {});
-    jest.spyOn(Customer, 'updateMultiple').mockImplementation(async () => {});
+    jest.spyOn(Product, 'updateMultiple').mockImplementation(async () => ({ data: [] }));
+    jest.spyOn(Order, 'updateMultiple').mockImplementation(async () => ({ data: [] }));
+    jest.spyOn(Customer, 'updateMultiple').mockImplementation(async () => ({ data: [] }));
   });
   
   afterEach(() => {
@@ -123,7 +123,7 @@ describe("ShopifyService", () => {
       // Expect the sync function to throw an error
       await expect(ShopifyService.syncAllData(userId, shop, accessToken))
         .rejects
-        .toThrow("Failed to fetch data from Shopify page: https://test-shop.myshopify.com/admin/api/2024-01/products.json?limit=250");
+        .toThrow("Shopify connection failed: API is down");
       
       // Ensure no database calls were made
       expect(Product.updateMultiple).not.toHaveBeenCalled();

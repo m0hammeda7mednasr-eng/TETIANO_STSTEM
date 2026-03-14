@@ -11,6 +11,7 @@ import {
   Trash2,
   Upload,
   User,
+  Users,
   X,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
@@ -20,6 +21,10 @@ import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
+import {
+  buildTaskGroups,
+  extractTaskIdsForUpload,
+} from "../utils/taskGroups";
 
 const POLLING_INTERVAL_MS = 30000;
 let assigneesEndpointUnsupported = false;
@@ -28,10 +33,20 @@ let assigneesProbeInFlight = false;
 const EMPTY_FORM = {
   title: "",
   description: "",
+  assignment_mode: "single",
   assigned_to: "",
+  assigned_to_ids: [],
+  group_name: "",
   priority: "medium",
   due_date: "",
 };
+
+const getSelectedAssigneeIds = (formData) =>
+  formData.assignment_mode === "group"
+    ? Array.from(new Set(formData.assigned_to_ids.filter(Boolean)))
+    : formData.assigned_to
+      ? [formData.assigned_to]
+      : [];
 
 export default function Tasks() {
   const [tasks, setTasks] = useState([]);
@@ -46,76 +61,81 @@ export default function Tasks() {
     !assigneesEndpointUnsupported,
   );
 
-  const loadPageData = useCallback(async ({ silent = false } = {}) => {
-    try {
-      if (!silent) {
-        setLoading(true);
-      }
+  const loadPageData = useCallback(
+    async ({ silent = false } = {}) => {
+      try {
+        if (!silent) {
+          setLoading(true);
+        }
 
-      const shouldUseAssigneesEndpoint =
-        assigneesEndpointAvailable &&
-        !assigneesEndpointUnsupported &&
-        !assigneesProbeInFlight;
+        const shouldUseAssigneesEndpoint =
+          assigneesEndpointAvailable &&
+          !assigneesEndpointUnsupported &&
+          !assigneesProbeInFlight;
 
-      const assigneesRequest = shouldUseAssigneesEndpoint
-        ? (() => {
-            assigneesProbeInFlight = true;
-            return api
-              .get("/tasks/assignees")
-              .finally(() => {
+        const assigneesRequest = shouldUseAssigneesEndpoint
+          ? (() => {
+              assigneesProbeInFlight = true;
+              return api.get("/tasks/assignees").finally(() => {
                 assigneesProbeInFlight = false;
               });
-          })()
-        : api.get("/users");
+            })()
+          : api.get("/users");
 
-      const [tasksResult, assigneesResult] = await Promise.allSettled([
-        api.get("/tasks"),
-        assigneesRequest,
-      ]);
+        const [tasksResult, assigneesResult] = await Promise.allSettled([
+          api.get("/tasks"),
+          assigneesRequest,
+        ]);
 
-      if (tasksResult.status === "fulfilled") {
-        setTasks(extractArray(tasksResult.value.data));
-      } else if (!silent) {
-        setTasks([]);
-        setMessage({ type: "error", text: getErrorMessage(tasksResult.reason) });
-      }
-
-      if (assigneesResult.status === "fulfilled") {
-        setUsers(extractArray(assigneesResult.value.data));
-      } else {
-        const status = assigneesResult.reason?.response?.status;
-
-        // Older backend may not have /tasks/assignees yet.
-        if (assigneesEndpointAvailable && (status === 404 || status === 500)) {
-          assigneesEndpointUnsupported = true;
-          setAssigneesEndpointAvailable(false);
-          try {
-            const fallbackUsersResponse = await api.get("/users");
-            setUsers(extractArray(fallbackUsersResponse.data));
-          } catch {
-            setUsers([]);
-          }
-        } else {
-          setUsers([]);
-        }
-
-        if (!silent && status !== 403) {
+        if (tasksResult.status === "fulfilled") {
+          const rawTasks = extractArray(tasksResult.value.data);
+          setTasks(buildTaskGroups(rawTasks));
+        } else if (!silent) {
+          setTasks([]);
           setMessage({
             type: "error",
-            text: "Unable to load assignable users list",
+            text: getErrorMessage(tasksResult.reason),
           });
         }
+
+        if (assigneesResult.status === "fulfilled") {
+          setUsers(extractArray(assigneesResult.value.data));
+        } else {
+          const status = assigneesResult.reason?.response?.status;
+
+          if (assigneesEndpointAvailable && (status === 404 || status === 500)) {
+            assigneesEndpointUnsupported = true;
+            setAssigneesEndpointAvailable(false);
+
+            try {
+              const fallbackUsersResponse = await api.get("/users");
+              setUsers(extractArray(fallbackUsersResponse.data));
+            } catch {
+              setUsers([]);
+            }
+          } else {
+            setUsers([]);
+          }
+
+          if (!silent && status !== 403) {
+            setMessage({
+              type: "error",
+              text: "Unable to load assignable users list",
+            });
+          }
+        }
+      } catch (error) {
+        if (!silent) {
+          setMessage({ type: "error", text: getErrorMessage(error) });
+        }
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
       }
-    } catch (error) {
-      if (!silent) {
-        setMessage({ type: "error", text: getErrorMessage(error) });
-      }
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, [assigneesEndpointAvailable]);
+    },
+    [assigneesEndpointAvailable],
+  );
 
   useEffect(() => {
     loadPageData();
@@ -155,41 +175,118 @@ export default function Tasks() {
   };
 
   const openEditModal = (task) => {
+    const childTasks = Array.isArray(task.child_tasks) ? task.child_tasks : [task];
+    const assigneeIds = childTasks
+      .map((item) => item.assigned_to)
+      .filter(Boolean);
+
     setEditingTask(task);
     setFormData({
       title: task.title || "",
       description: task.description || "",
-      assigned_to: task.assigned_to || "",
+      assignment_mode: task.is_group ? "group" : "single",
+      assigned_to: !task.is_group ? assigneeIds[0] || "" : "",
+      assigned_to_ids: assigneeIds,
+      group_name: task.group_name || "",
       priority: task.priority || "medium",
-      due_date: task.due_date ? task.due_date.split("T")[0] : "",
+      due_date: task.due_date ? String(task.due_date).split("T")[0] : "",
     });
     setFiles([]);
     setShowModal(true);
   };
 
-  const uploadTaskFiles = async (taskId, fileList) => {
-    if (!fileList || fileList.length === 0) return;
+  const toggleAssignee = (userId) => {
+    setFormData((prev) => {
+      const nextIds = prev.assigned_to_ids.includes(userId)
+        ? prev.assigned_to_ids.filter((value) => value !== userId)
+        : [...prev.assigned_to_ids, userId];
 
-    const payload = new FormData();
-    fileList.forEach((file) => payload.append("files", file));
-    await api.post(`/tasks/${taskId}/attachments`, payload, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+      return {
+        ...prev,
+        assigned_to_ids: nextIds,
+      };
     });
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const uploadTaskFiles = async (taskIds, fileList) => {
+    if (!fileList || fileList.length === 0) return;
+
+    const normalizedTaskIds = Array.from(
+      new Set((Array.isArray(taskIds) ? taskIds : [taskIds]).filter(Boolean)),
+    );
+
+    if (normalizedTaskIds.length === 0) return;
+
+    await Promise.all(
+      normalizedTaskIds.map(async (taskId) => {
+        const payload = new FormData();
+        fileList.forEach((file) => payload.append("files", file));
+        await api.post(`/tasks/${taskId}/attachments`, payload, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        });
+      }),
+    );
+  };
+
+  const buildSubmitPayload = () => {
+    const selectedAssigneeIds = getSelectedAssigneeIds(formData);
+
+    if (!formData.title.trim()) {
+      throw new Error("Task title is required");
+    }
+
+    if (formData.assignment_mode === "group" && selectedAssigneeIds.length < 2) {
+      throw new Error("Select at least two assignees to create a task group");
+    }
+
+    if (formData.assignment_mode === "single" && selectedAssigneeIds.length !== 1) {
+      throw new Error("Select one assignee for a single task");
+    }
+
+    const payload = {
+      title: formData.title.trim(),
+      description: formData.description.trim(),
+      priority: formData.priority,
+      due_date: formData.due_date || null,
+    };
+
+    if (formData.assignment_mode === "group") {
+      payload.assigned_to_ids = selectedAssigneeIds;
+      payload.group_name = formData.group_name.trim() || formData.title.trim();
+    } else {
+      payload.assigned_to = selectedAssigneeIds[0];
+    }
+
+    if (editingTask?.is_group) {
+      payload.apply_to_task_ids = editingTask.child_tasks.map((task) => task.id);
+      payload.group_name = formData.group_name.trim() || formData.title.trim();
+      payload.assigned_to_ids = selectedAssigneeIds;
+    }
+
+    return payload;
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
     try {
+      const payload = buildSubmitPayload();
+
       if (editingTask) {
-        await api.put(`/tasks/${editingTask.id}`, formData);
-        await uploadTaskFiles(editingTask.id, files);
-        setMessage({ type: "success", text: "تم تحديث المهمة بنجاح" });
+        const { data } = await api.put(
+          `/tasks/${editingTask.primary_task_id || editingTask.id}`,
+          payload,
+        );
+        const uploadIds = extractTaskIdsForUpload(data, editingTask);
+        await uploadTaskFiles(uploadIds, files);
+        setMessage({ type: "success", text: "Task updated successfully" });
       } else {
-        const { data } = await api.post("/tasks", formData);
-        await uploadTaskFiles(data.id, files);
-        setMessage({ type: "success", text: "تم إنشاء المهمة بنجاح" });
+        const { data } = await api.post("/tasks", payload);
+        const uploadIds = extractTaskIdsForUpload(data);
+        await uploadTaskFiles(uploadIds, files);
+        setMessage({ type: "success", text: "Task created successfully" });
       }
 
       setShowModal(false);
@@ -197,16 +294,32 @@ export default function Tasks() {
       markSharedDataUpdated();
       await loadPageData();
     } catch (error) {
-      setMessage({ type: "error", text: getErrorMessage(error) });
+      setMessage({
+        type: "error",
+        text: error?.response ? getErrorMessage(error) : error.message,
+      });
     }
   };
 
-  const handleDeleteTask = async (taskId) => {
-    if (!window.confirm("هل أنت متأكد من حذف المهمة؟")) return;
+  const handleDeleteTask = async (task) => {
+    const confirmText = task.is_group
+      ? "Delete this task group and all linked member tasks?"
+      : "Delete this task?";
+
+    if (!window.confirm(confirmText)) {
+      return;
+    }
+
     try {
-      await api.delete(`/tasks/${taskId}`);
+      const taskIds = task.is_group
+        ? task.child_tasks.map((item) => item.id)
+        : [task.id];
+
+      await api.delete(`/tasks/${task.primary_task_id || task.id}`, {
+        data: taskIds.length > 1 ? { task_ids: taskIds } : undefined,
+      });
       markSharedDataUpdated();
-      setMessage({ type: "success", text: "تم حذف المهمة بنجاح" });
+      setMessage({ type: "success", text: "Task deleted successfully" });
       await loadPageData();
     } catch (error) {
       setMessage({ type: "error", text: getErrorMessage(error) });
@@ -227,7 +340,7 @@ export default function Tasks() {
     return (
       <div className="flex h-screen bg-slate-100">
         <Sidebar />
-        <main className="flex-1 p-8">جاري التحميل...</main>
+        <main className="flex-1 p-8">Loading tasks...</main>
       </div>
     );
   }
@@ -236,35 +349,37 @@ export default function Tasks() {
     <div className="flex h-screen bg-slate-100">
       <Sidebar />
       <main className="flex-1 overflow-auto p-8 space-y-6">
-        <div className="flex justify-between items-center">
+        <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">إدارة المهام</h1>
-            <p className="text-slate-600 mt-1">إنشاء المهام وتوزيعها ومتابعة تنفيذها</p>
+            <h1 className="text-3xl font-bold text-slate-900">Task Control Center</h1>
+            <p className="mt-1 text-slate-600">
+              Create single tasks or coordinated task groups for multiple teammates
+            </p>
           </div>
           <button
             onClick={openCreateModal}
-            className="bg-sky-700 hover:bg-sky-800 text-white px-5 py-2 rounded-lg flex items-center gap-2"
+            className="inline-flex items-center gap-2 rounded-lg bg-sky-700 px-5 py-2 text-white hover:bg-sky-800"
           >
             <Plus size={18} />
-            مهمة جديدة
+            New Task
           </button>
         </div>
 
         {message.text && (
           <div
-            className={`px-4 py-3 rounded-lg ${
+            className={`rounded-lg border px-4 py-3 ${
               message.type === "error"
-                ? "bg-red-50 border border-red-200 text-red-700"
-                : "bg-emerald-50 border border-emerald-200 text-emerald-700"
+                ? "border-red-200 bg-red-50 text-red-700"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700"
             }`}
           >
             {message.text}
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <TaskColumn
-            title="قيد الانتظار"
+            title="Pending"
             icon={Clock}
             color="text-yellow-600"
             tasks={groupedTasks.pending}
@@ -273,7 +388,7 @@ export default function Tasks() {
             onStatusChange={handleStatusChange}
           />
           <TaskColumn
-            title="قيد التنفيذ"
+            title="In Progress"
             icon={AlertCircle}
             color="text-blue-600"
             tasks={groupedTasks.in_progress}
@@ -282,7 +397,7 @@ export default function Tasks() {
             onStatusChange={handleStatusChange}
           />
           <TaskColumn
-            title="مكتملة"
+            title="Completed"
             icon={CheckCircle}
             color="text-emerald-600"
             tasks={groupedTasks.completed}
@@ -294,60 +409,185 @@ export default function Tasks() {
       </main>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">
-                {editingTask ? "تعديل المهمة" : "مهمة جديدة"}
-              </h2>
-              <button onClick={() => setShowModal(false)} className="text-slate-600">
-                <X size={20} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  {editingTask ? "Edit Task" : "Create Task"}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Choose single assignment or coordinated group delivery
+                </p>
+              </div>
+              <button
+                onClick={() => setShowModal(false)}
+                className="rounded-md p-2 text-slate-500 hover:bg-slate-100"
+              >
+                <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">العنوان</label>
-                <input
-                  value={formData.title}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, title: e.target.value }))
-                  }
-                  required
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">الوصف</label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      description: e.target.value,
-                    }))
-                  }
-                  rows={3}
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.4fr,0.8fr]">
                 <div>
-                  <label className="block text-sm font-medium mb-1">المكلّف</label>
-                  <select
-                    value={formData.assigned_to}
-                    onChange={(e) =>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Task title
+                  </label>
+                  <input
+                    value={formData.title}
+                    onChange={(event) =>
                       setFormData((prev) => ({
                         ...prev,
-                        assigned_to: e.target.value,
+                        title: event.target.value,
                       }))
                     }
                     required
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full rounded-lg border px-3 py-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Work mode
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          assignment_mode: "single",
+                          assigned_to_ids:
+                            prev.assigned_to_ids.length > 0
+                              ? [prev.assigned_to_ids[0]]
+                              : prev.assigned_to
+                                ? [prev.assigned_to]
+                                : [],
+                        }))
+                      }
+                      className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                        formData.assignment_mode === "single"
+                          ? "border-sky-600 bg-sky-50 text-sky-700"
+                          : "border-slate-200 text-slate-600"
+                      }`}
+                    >
+                      Single Task
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          assignment_mode: "group",
+                          assigned_to_ids: getSelectedAssigneeIds(prev),
+                        }))
+                      }
+                      className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                        formData.assignment_mode === "group"
+                          ? "border-sky-600 bg-sky-50 text-sky-700"
+                          : "border-slate-200 text-slate-600"
+                      }`}
+                    >
+                      Task Group
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Description
+                </label>
+                <textarea
+                  value={formData.description}
+                  onChange={(event) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      description: event.target.value,
+                    }))
+                  }
+                  rows={3}
+                  className="w-full rounded-lg border px-3 py-2"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Priority
+                  </label>
+                  <select
+                    value={formData.priority}
+                    onChange={(event) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        priority: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-lg border px-3 py-2"
                   >
-                    <option value="">اختر مستخدم</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Due date
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.due_date}
+                    onChange={(event) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        due_date: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-lg border px-3 py-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Group label
+                  </label>
+                  <input
+                    value={formData.group_name}
+                    onChange={(event) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        group_name: event.target.value,
+                      }))
+                    }
+                    disabled={formData.assignment_mode !== "group" && !editingTask?.is_group}
+                    placeholder="Optional team label"
+                    className="w-full rounded-lg border px-3 py-2 disabled:bg-slate-50"
+                  />
+                </div>
+              </div>
+
+              {formData.assignment_mode === "single" && !editingTask?.is_group ? (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Assign to
+                  </label>
+                  <select
+                    value={formData.assigned_to}
+                    onChange={(event) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        assigned_to: event.target.value,
+                        assigned_to_ids: event.target.value ? [event.target.value] : [],
+                      }))
+                    }
+                    required
+                    className="w-full rounded-lg border px-3 py-2"
+                  >
+                    <option value="">Select a teammate</option>
                     {users.map((item) => (
                       <option key={item.id} value={item.id}>
                         {item.name} ({item.email})
@@ -355,52 +595,67 @@ export default function Tasks() {
                     ))}
                   </select>
                 </div>
+              ) : (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">
+                        Group assignees
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Select every teammate who should receive their own linked task
+                      </p>
+                    </div>
+                    <div className="rounded-full bg-slate-900 px-3 py-1 text-xs text-white">
+                      {getSelectedAssigneeIds(formData).length} selected
+                    </div>
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-1">الأولوية</label>
-                  <select
-                    value={formData.priority}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        priority: e.target.value,
-                      }))
-                    }
-                    className="w-full border rounded-lg px-3 py-2"
-                  >
-                    <option value="low">منخفضة</option>
-                    <option value="medium">متوسطة</option>
-                    <option value="high">عالية</option>
-                    <option value="urgent">عاجلة</option>
-                  </select>
+                  <div className="grid max-h-64 grid-cols-1 gap-2 overflow-auto md:grid-cols-2">
+                    {users.map((item) => {
+                      const checked = formData.assigned_to_ids.includes(item.id);
+                      return (
+                        <label
+                          key={item.id}
+                          className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 ${
+                            checked
+                              ? "border-sky-600 bg-sky-50"
+                              : "border-slate-200 bg-white"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleAssignee(item.id)}
+                            className="mt-1"
+                          />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-slate-900">
+                              {item.name}
+                            </p>
+                            <p className="truncate text-xs text-slate-500">
+                              {item.email}
+                            </p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1">تاريخ الاستحقاق</label>
-                  <input
-                    type="date"
-                    value={formData.due_date}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        due_date: e.target.value,
-                      }))
-                    }
-                    className="w-full border rounded-lg px-3 py-2"
-                  />
-                </div>
-              </div>
+              )}
 
               <div>
-                <label className="block text-sm font-medium mb-1">
-                  مرفقات المهمة
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Task attachments
                 </label>
                 <input
                   type="file"
                   multiple
                   accept="image/*,.pdf,.xlsx,.xls,.doc,.docx"
-                  onChange={(e) => setFiles(Array.from(e.target.files || []))}
-                  className="w-full border rounded-lg px-3 py-2"
+                  onChange={(event) =>
+                    setFiles(Array.from(event.target.files || []))
+                  }
+                  className="w-full rounded-lg border px-3 py-2"
                 />
                 {files.length > 0 && (
                   <div className="mt-2 space-y-1 text-sm text-slate-600">
@@ -413,10 +668,10 @@ export default function Tasks() {
 
               <button
                 type="submit"
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-lg flex items-center justify-center gap-2"
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-3 text-white hover:bg-emerald-700"
               >
                 <Save size={18} />
-                حفظ
+                Save
               </button>
             </form>
           </div>
@@ -426,10 +681,18 @@ export default function Tasks() {
   );
 }
 
-function TaskColumn({ title, icon: Icon, color, tasks, onEdit, onDelete, onStatusChange }) {
+function TaskColumn({
+  title,
+  icon: Icon,
+  color,
+  tasks,
+  onEdit,
+  onDelete,
+  onStatusChange,
+}) {
   return (
-    <div className="bg-white rounded-xl shadow p-4">
-      <h2 className={`text-lg font-bold mb-3 flex items-center gap-2 ${color}`}>
+    <div className="rounded-xl bg-white p-4 shadow">
+      <h2 className={`mb-3 flex items-center gap-2 text-lg font-bold ${color}`}>
         <Icon size={18} />
         {title} ({tasks.length})
       </h2>
@@ -456,24 +719,71 @@ function TaskCard({ task, onEdit, onDelete, onStatusChange }) {
     urgent: "bg-red-100 text-red-700",
   };
 
+  const statusChipClass = {
+    pending: "bg-yellow-100 text-yellow-700",
+    in_progress: "bg-blue-100 text-blue-700",
+    completed: "bg-emerald-100 text-emerald-700",
+    cancelled: "bg-slate-200 text-slate-700",
+  };
+
   return (
-    <div className="border rounded-lg p-3 bg-slate-50">
-      <div className="flex justify-between items-start gap-2">
-        <h3 className="font-semibold text-slate-900">{task.title}</h3>
-        <span className={`text-xs px-2 py-1 rounded-full ${priorityClass[task.priority] || priorityClass.medium}`}>
+    <div className="rounded-lg border bg-slate-50 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            {task.is_group && (
+              <span className="rounded-full bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white">
+                Task Group
+              </span>
+            )}
+            {task.group_name && (
+              <span className="rounded-full bg-violet-100 px-2 py-1 text-[11px] font-semibold text-violet-700">
+                {task.group_name}
+              </span>
+            )}
+          </div>
+          <h3 className="mt-2 text-sm font-semibold text-slate-900">{task.title}</h3>
+        </div>
+        <span
+          className={`rounded-full px-2 py-1 text-xs ${
+            priorityClass[task.priority] || priorityClass.medium
+          }`}
+        >
           {task.priority}
         </span>
       </div>
 
       {task.description && (
-        <p className="text-sm text-slate-600 mt-2 line-clamp-2">{task.description}</p>
+        <p className="mt-2 line-clamp-2 text-sm text-slate-600">{task.description}</p>
       )}
 
-      <div className="text-xs text-slate-600 mt-2 space-y-1">
-        <p className="flex items-center gap-1">
-          <User size={12} />
-          {task.assigned_to_user?.name || "-"}
-        </p>
+      <div className="mt-3 space-y-2 text-xs text-slate-600">
+        {task.is_group ? (
+          <>
+            <p className="flex items-center gap-1">
+              <Users size={12} />
+              {task.completed_count}/{task.task_count} completed
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {(task.assignees || []).map((assignee) => (
+                <span
+                  key={`${task.id}-${assignee.task_id}`}
+                  className={`rounded-full px-2 py-1 text-[11px] ${
+                    statusChipClass[assignee.status] || statusChipClass.pending
+                  }`}
+                >
+                  {assignee.name}
+                </span>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="flex items-center gap-1">
+            <User size={12} />
+            {task.assigned_to_user?.name || "-"}
+          </p>
+        )}
+
         {task.due_date && (
           <p className="flex items-center gap-1">
             <Calendar size={12} />
@@ -484,9 +794,9 @@ function TaskCard({ task, onEdit, onDelete, onStatusChange }) {
 
       {Array.isArray(task.attachments) && task.attachments.length > 0 && (
         <div className="mt-3 border-t pt-2">
-          <p className="text-xs font-medium text-slate-700 flex items-center gap-1">
+          <p className="flex items-center gap-1 text-xs font-medium text-slate-700">
             <Paperclip size={12} />
-            المرفقات ({task.attachments.length})
+            Attachments ({task.attachments.length})
           </p>
           <div className="mt-1 space-y-1">
             {task.attachments.slice(0, 3).map((item) => (
@@ -495,7 +805,7 @@ function TaskCard({ task, onEdit, onDelete, onStatusChange }) {
                 href={item.file_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs text-sky-700 hover:text-sky-900 flex items-center gap-1"
+                className="flex items-center gap-1 text-xs text-sky-700 hover:text-sky-900"
               >
                 <Upload size={11} />
                 {item.file_name}
@@ -506,26 +816,28 @@ function TaskCard({ task, onEdit, onDelete, onStatusChange }) {
       )}
 
       <div className="mt-3 flex gap-2">
-        <select
-          value={task.status}
-          onChange={(e) => onStatusChange(task.id, e.target.value)}
-          className="flex-1 border rounded px-2 py-1 text-sm"
-        >
-          <option value="pending">pending</option>
-          <option value="in_progress">in_progress</option>
-          <option value="completed">completed</option>
-          <option value="cancelled">cancelled</option>
-        </select>
+        {!task.is_group && (
+          <select
+            value={task.status}
+            onChange={(event) => onStatusChange(task.id, event.target.value)}
+            className="flex-1 rounded border px-2 py-1 text-sm"
+          >
+            <option value="pending">pending</option>
+            <option value="in_progress">in_progress</option>
+            <option value="completed">completed</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        )}
 
         <button
           onClick={() => onEdit(task)}
-          className="px-2 py-1 rounded bg-sky-100 text-sky-700 hover:bg-sky-200"
+          className="rounded bg-sky-100 px-2 py-1 text-sky-700 hover:bg-sky-200"
         >
           <Edit size={14} />
         </button>
         <button
-          onClick={() => onDelete(task.id)}
-          className="px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200"
+          onClick={() => onDelete(task)}
+          className="rounded bg-red-100 px-2 py-1 text-red-700 hover:bg-red-200"
         >
           <Trash2 size={14} />
         </button>

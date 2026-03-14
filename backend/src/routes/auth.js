@@ -3,6 +3,7 @@ import { supabase } from "../supabaseClient.js";
 import jwt from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
 import { normalizeRole } from "../middleware/permissions.js";
+import { getJwtSecret } from "../helpers/jwt.js";
 
 const router = express.Router();
 
@@ -46,7 +47,7 @@ router.post("/register", async (req, res) => {
         email: userData[0].email,
         role: normalizeRole(userData[0].role || "user"),
       },
-      process.env.JWT_SECRET || "your-secret-key",
+      getJwtSecret(),
       { expiresIn: "7d" },
     );
 
@@ -104,7 +105,7 @@ router.post("/login", async (req, res) => {
         email: user.email,
         role: normalizeRole(user.role || "user"),
       },
-      process.env.JWT_SECRET || "your-secret-key",
+      getJwtSecret(),
       { expiresIn: "7d" },
     );
 
@@ -126,10 +127,7 @@ router.post("/verify", async (req, res) => {
       return res.status(401).json({ error: "No token provided" });
     }
 
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || "your-secret-key",
-    );
+    const decoded = jwt.verify(token, getJwtSecret());
     res.json({ valid: true, user: decoded });
   } catch (error) {
     res.status(401).json({ error: "Invalid token" });

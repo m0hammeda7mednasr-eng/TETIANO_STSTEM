@@ -17,9 +17,6 @@ export class ShopifyService {
           },
         });
 
-        console.log('Shopify Response Body:', JSON.stringify(response.data, null, 2));
-        console.log('Shopify Response Headers:', JSON.stringify(response.headers, null, 2));
-
         const responseDataKey = Object.keys(response.data)[0];
         if (response.data && response.data[responseDataKey]) {
           const newItems = response.data[responseDataKey];
@@ -282,21 +279,21 @@ export class ShopifyService {
       if (productsWithUser.length > 0) {
         console.log(`Syncing ${productsWithUser.length} products...`);
         const productResult = await Product.updateMultiple(productsWithUser);
-        syncResults.products = productResult.data || [];
+        syncResults.products = productResult?.data || [];
         console.log(`Synced ${syncResults.products.length} products to DB.`);
       }
 
       if (ordersWithUser.length > 0) {
         console.log(`Syncing ${ordersWithUser.length} orders...`);
         const orderResult = await Order.updateMultiple(ordersWithUser);
-        syncResults.orders = orderResult.data || [];
+        syncResults.orders = orderResult?.data || [];
         console.log(`Synced ${syncResults.orders.length} orders to DB.`);
       }
 
       if (customersWithUser.length > 0) {
         console.log(`Syncing ${customersWithUser.length} customers...`);
         const customerResult = await Customer.updateMultiple(customersWithUser);
-        syncResults.customers = customerResult.data || [];
+        syncResults.customers = customerResult?.data || [];
         console.log(`Synced ${syncResults.customers.length} customers to DB.`);
       }
 

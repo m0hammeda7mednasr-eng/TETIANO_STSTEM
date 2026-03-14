@@ -2,6 +2,7 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import { getUserRole, normalizeRole } from "../middleware/permissions.js";
 import { registerRealtimeClient } from "../services/realtimeEventService.js";
+import { getJwtSecret } from "../helpers/jwt.js";
 
 const router = express.Router();
 const UUID_REGEX =
@@ -43,7 +44,7 @@ const resolveAuthenticatedUser = async (req) => {
 
   let decoded;
   try {
-    decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key");
+    decoded = jwt.verify(token, getJwtSecret());
   } catch {
     return null;
   }

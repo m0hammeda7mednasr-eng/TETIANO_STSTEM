@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { getUserRole, normalizeRole } from "./permissions.js";
+import { getJwtSecret } from "../helpers/jwt.js";
 
 /**
  * Centralized JWT validation middleware
@@ -30,7 +31,7 @@ export const authenticateToken = async (req, res, next) => {
     }
 
     // Validate token using JWT_SECRET
-    const jwtSecret = process.env.JWT_SECRET || "your-secret-key";
+    const jwtSecret = getJwtSecret();
     let decoded;
     try {
       decoded = jwt.verify(token, jwtSecret);

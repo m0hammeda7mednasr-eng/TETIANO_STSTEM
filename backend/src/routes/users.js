@@ -1,15 +1,14 @@
 import express from "express";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import { requirePermission } from "../middleware/permissions.js";
 import { authenticateToken } from "../middleware/auth.js";
-import { supabase } from "../supabaseClient.js";
 import {
+  requirePermission,
   DEFAULT_PERMISSIONS,
   PERMISSION_KEYS,
   normalizePermissions,
   normalizeRole,
 } from "../middleware/permissions.js";
+import { supabase } from "../supabaseClient.js";
 
 const router = express.Router();
 
@@ -19,11 +18,11 @@ router.get(
   authenticateToken,
   requirePermission("can_manage_users"),
   async (req, res) => {
-  try {
-    const { data: users, error } = await supabase
-      .from("users")
-      .select(
-        `
+    try {
+      const { data: users, error } = await supabase
+        .from("users")
+        .select(
+          `
         id,
         email,
         name,
@@ -32,16 +31,16 @@ router.get(
         created_at,
         permissions (*)
       `,
-      )
-      .order("created_at", { ascending: false });
+        )
+        .order("created_at", { ascending: false });
 
-    if (error) throw error;
+      if (error) throw error;
 
-    res.json(users || []);
-  } catch (error) {
-    console.error("Error fetching users:", error);
-    res.status(500).json({ error: error.message });
-  }
+      res.json(users || []);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      res.status(500).json({ error: error.message });
+    }
   },
 );
 
@@ -51,71 +50,71 @@ router.post(
   authenticateToken,
   requirePermission("can_manage_users"),
   async (req, res) => {
-  try {
-    const { email, password, name, role, permissions } = req.body;
+    try {
+      const { email, password, name, role, permissions } = req.body;
 
-    if (!email || !password || !name) {
-      return res
-        .status(400)
-        .json({ error: "Email, password, and name are required" });
-    }
+      if (!email || !password || !name) {
+        return res
+          .status(400)
+          .json({ error: "Email, password, and name are required" });
+      }
 
-    // Check if user already exists
-    const { data: existingUser } = await supabase
-      .from("users")
-      .select("id")
-      .eq("email", email)
-      .single();
+      // Check if user already exists
+      const { data: existingUser } = await supabase
+        .from("users")
+        .select("id")
+        .eq("email", email)
+        .single();
 
-    if (existingUser) {
-      return res.status(400).json({ error: "User already exists" });
-    }
+      if (existingUser) {
+        return res.status(400).json({ error: "User already exists" });
+      }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
-    const { data: newUser, error: userError } = await supabase
-      .from("users")
-      .insert([
+      // Create user
+      const { data: newUser, error: userError } = await supabase
+        .from("users")
+        .insert([
+          {
+            email,
+            password: hashedPassword,
+            name,
+            role: normalizeRole(role || "user"),
+            created_by: req.user.id,
+            is_active: true,
+          },
+        ])
+        .select()
+        .single();
+
+      if (userError) throw userError;
+
+      // Create permissions
+      const { error: permError } = await supabase.from("permissions").insert([
         {
-          email,
-          password: hashedPassword,
-          name,
-          role: normalizeRole(role || "user"),
-          created_by: req.user.id,
-          is_active: true,
+          user_id: newUser.id,
+          ...permissions,
         },
-      ])
-      .select()
-      .single();
+      ]);
 
-    if (userError) throw userError;
+      if (permError) throw permError;
 
-    // Create permissions
-    const { error: permError } = await supabase.from("permissions").insert([
-      {
-        user_id: newUser.id,
-        ...permissions,
-      },
-    ]);
-
-    if (permError) throw permError;
-
-    res.json({
-      success: true,
-      message: "User created successfully",
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-        role: newUser.role,
-      },
-    });
-  } catch (error) {
-    console.error("Error creating user:", error);
-    res.status(500).json({ error: error.message });
-  }
+      res.json({
+        success: true,
+        message: "User created successfully",
+        user: {
+          id: newUser.id,
+          email: newUser.email,
+          name: newUser.name,
+          role: newUser.role,
+        },
+      });
+    } catch (error) {
+      console.error("Error creating user:", error);
+      res.status(500).json({ error: error.message });
+    }
   },
 );
 
@@ -125,57 +124,57 @@ router.put(
   authenticateToken,
   requirePermission("can_manage_users"),
   async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { permissions, role } = req.body; // Include role
+    try {
+      const { userId } = req.params;
+      const { permissions, role } = req.body; // Include role
 
-    // Update user role if provided
-    if (role) {
-      const { error: roleError } = await supabase
-        .from("users")
-        .update({ role: normalizeRole(role) })
-        .eq("id", userId);
-      if (roleError) throw roleError;
-    }
-
-    // Update permissions
-    if (permissions) {
-      // Check if permissions exist
-      const { data: existing } = await supabase
-        .from("permissions")
-        .select("id")
-        .eq("user_id", userId)
-        .single();
-
-      if (existing) {
-        // Update existing permissions
-        const { error } = await supabase
-          .from("permissions")
-          .update({
-            ...permissions,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("user_id", userId);
-
-        if (error) throw error;
-      } else {
-        // Create new permissions if they don't exist
-        const { error } = await supabase.from("permissions").insert([
-          {
-            user_id: userId,
-            ...permissions,
-          },
-        ]);
-
-        if (error) throw error;
+      // Update user role if provided
+      if (role) {
+        const { error: roleError } = await supabase
+          .from("users")
+          .update({ role: normalizeRole(role) })
+          .eq("id", userId);
+        if (roleError) throw roleError;
       }
-    }
 
-    res.json({ success: true, message: "User updated successfully" });
-  } catch (error) {
-    console.error("Error updating user:", error);
-    res.status(500).json({ error: error.message });
-  }
+      // Update permissions
+      if (permissions) {
+        // Check if permissions exist
+        const { data: existing } = await supabase
+          .from("permissions")
+          .select("id")
+          .eq("user_id", userId)
+          .single();
+
+        if (existing) {
+          // Update existing permissions
+          const { error } = await supabase
+            .from("permissions")
+            .update({
+              ...permissions,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("user_id", userId);
+
+          if (error) throw error;
+        } else {
+          // Create new permissions if they don't exist
+          const { error } = await supabase.from("permissions").insert([
+            {
+              user_id: userId,
+              ...permissions,
+            },
+          ]);
+
+          if (error) throw error;
+        }
+      }
+
+      res.json({ success: true, message: "User updated successfully" });
+    } catch (error) {
+      console.error("Error updating user:", error);
+      res.status(500).json({ error: error.message });
+    }
   },
 );
 
@@ -185,35 +184,37 @@ router.delete(
   authenticateToken,
   requirePermission("can_manage_users"),
   async (req, res) => {
-  try {
-    const { userId } = req.params;
+    try {
+      const { userId } = req.params;
 
-    // Prevent deleting yourself
-    if (userId === req.user.id) {
-      return res.status(400).json({ error: "Cannot delete your own account" });
+      // Prevent deleting yourself
+      if (userId === req.user.id) {
+        return res
+          .status(400)
+          .json({ error: "Cannot delete your own account" });
+      }
+
+      // Check if user is admin
+      const { data: user } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", userId)
+        .single();
+
+      if (user && user.role === "admin") {
+        return res.status(400).json({ error: "Cannot delete admin users" });
+      }
+
+      // Delete user (permissions will be deleted automatically due to CASCADE)
+      const { error } = await supabase.from("users").delete().eq("id", userId);
+
+      if (error) throw error;
+
+      res.json({ success: true, message: "User deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      res.status(500).json({ error: error.message });
     }
-
-    // Check if user is admin
-    const { data: user } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", userId)
-      .single();
-
-    if (user && user.role === "admin") {
-      return res.status(400).json({ error: "Cannot delete admin users" });
-    }
-
-    // Delete user (permissions will be deleted automatically due to CASCADE)
-    const { error } = await supabase.from("users").delete().eq("id", userId);
-
-    if (error) throw error;
-
-    res.json({ success: true, message: "User deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting user:", error);
-    res.status(500).json({ error: error.message });
-  }
   },
 );
 
@@ -324,13 +325,13 @@ router.get(
   authenticateToken,
   requirePermission("can_manage_users"),
   async (req, res) => {
-  try {
-    const { userId } = req.params;
+    try {
+      const { userId } = req.params;
 
-    const { data: user, error } = await supabase
-      .from("users")
-      .select(
-        `
+      const { data: user, error } = await supabase
+        .from("users")
+        .select(
+          `
         id,
         email,
         name,
@@ -340,21 +341,21 @@ router.get(
         permissions (*),
         shopify_credentials (*)
       `,
-      )
-      .eq("id", userId)
-      .single();
+        )
+        .eq("id", userId)
+        .single();
 
-    if (error) throw error;
+      if (error) throw error;
 
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json(user);
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      res.status(500).json({ error: error.message });
     }
-
-    res.json(user);
-  } catch (error) {
-    console.error("Error fetching user:", error);
-    res.status(500).json({ error: error.message });
-  }
   },
 );
 

@@ -1,33 +1,82 @@
 import express from "express";
-import jwt from "jsonwebtoken";
-import { isAdmin } from "../middleware/permissions.js";
+import { authenticateToken } from "../middleware/auth.js";
+import { requireAdminRole } from "../middleware/permissions.js";
 import { supabase } from "../supabaseClient.js";
 
 const router = express.Router();
 
-// Middleware to verify token
-const verifyToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "No token provided" });
-  }
-
-  try {
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || "your-secret-key",
-    );
-    req.user = decoded;
-    next();
-  } catch (error) {
-    res.status(401).json({ error: "Invalid token" });
-  }
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
-// Get date range
+const parseJsonField = (value) => {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  return value;
+};
+
+const getOrderLineItems = (order) => {
+  if (Array.isArray(order?.line_items)) {
+    return order.line_items;
+  }
+
+  const data = parseJsonField(order?.data);
+  return Array.isArray(data?.line_items) ? data.line_items : [];
+};
+
+const buildTopProducts = (orders = [], products = []) => {
+  const revenueByProduct = new Map();
+
+  for (const order of orders) {
+    for (const item of getOrderLineItems(order)) {
+      const key = String(item.product_id || item.id || item.sku || item.title || "")
+        .trim();
+      if (!key) continue;
+
+      const current = revenueByProduct.get(key) || {
+        name: item.title || item.name || item.sku || "Unknown product",
+        sales: 0,
+        quantity: 0,
+      };
+
+      const quantity = toNumber(item.quantity);
+      current.quantity += quantity;
+      current.sales += toNumber(item.price) * quantity;
+      revenueByProduct.set(key, current);
+    }
+  }
+
+  if (revenueByProduct.size > 0) {
+    return Array.from(revenueByProduct.values())
+      .sort((a, b) => b.sales - a.sales)
+      .slice(0, 5)
+      .map((item) => ({
+        name: item.name,
+        sales: parseFloat(item.sales.toFixed(2)),
+        quantity: parseFloat(item.quantity.toFixed(2)),
+      }));
+  }
+
+  return [...products]
+    .sort((a, b) => toNumber(b.price) - toNumber(a.price))
+    .slice(0, 5)
+    .map((product) => ({
+      name: product.title || product.name || "Unknown product",
+      sales: parseFloat(toNumber(product.price).toFixed(2)),
+      quantity: toNumber(product.inventory_quantity),
+    }));
+};
+
 const getDateRange = (range) => {
   const now = new Date();
-  let startDate = new Date();
+  const startDate = new Date();
 
   switch (range) {
     case "today":
@@ -52,55 +101,43 @@ const getDateRange = (range) => {
   return { startDate: startDate.toISOString(), endDate: now.toISOString() };
 };
 
-// Get Reports (Admin only)
-router.get("/", verifyToken, isAdmin, async (req, res) => {
+router.get("/", authenticateToken, requireAdminRole, async (req, res) => {
   try {
     const { range = "7days" } = req.query;
     const { startDate, endDate } = getDateRange(range);
 
-    // Get orders in date range
     const { data: orders, error: ordersError } = await supabase
       .from("orders")
       .select("*")
       .gte("created_at", startDate)
       .lte("created_at", endDate);
-
     if (ordersError) throw ordersError;
 
-    // Get customers in date range
     const { data: customers, error: customersError } = await supabase
       .from("customers")
       .select("*")
       .gte("created_at", startDate)
       .lte("created_at", endDate);
-
     if (customersError) throw customersError;
 
-    // Get products
     const { data: products, error: productsError } = await supabase
       .from("products")
       .select("*");
-
     if (productsError) throw productsError;
 
-    // Calculate summary
-    const totalSales = orders.reduce(
-      (sum, order) => sum + parseFloat(order.total_price || 0),
+    const totalSales = (orders || []).reduce(
+      (sum, order) => sum + toNumber(order.total_price),
       0,
     );
-    const totalOrders = orders.length;
-    const newCustomers = customers.length;
+    const totalOrders = orders?.length || 0;
+    const newCustomers = customers?.length || 0;
     const avgOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0;
 
-    // Daily sales
     const dailySalesMap = {};
-    orders.forEach((order) => {
+    for (const order of orders || []) {
       const date = new Date(order.created_at).toISOString().split("T")[0];
-      if (!dailySalesMap[date]) {
-        dailySalesMap[date] = 0;
-      }
-      dailySalesMap[date] += parseFloat(order.total_price || 0);
-    });
+      dailySalesMap[date] = (dailySalesMap[date] || 0) + toNumber(order.total_price);
+    }
 
     const dailySales = Object.entries(dailySalesMap)
       .map(([date, sales]) => ({
@@ -109,38 +146,22 @@ router.get("/", verifyToken, isAdmin, async (req, res) => {
       }))
       .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    // Orders by status
     const statusMap = {};
-    orders.forEach((order) => {
+    for (const order of orders || []) {
       const status = order.status || "pending";
       statusMap[status] = (statusMap[status] || 0) + 1;
-    });
+    }
 
     const ordersByStatus = Object.entries(statusMap).map(([name, value]) => ({
-      name:
-        name === "pending"
-          ? "قيد الانتظار"
-          : name === "completed"
-            ? "مكتمل"
-            : name === "cancelled"
-              ? "ملغي"
-              : name,
+      name,
       value,
     }));
 
-    // Top products (mock data - you can enhance this with real product sales data)
-    const topProducts = products.slice(0, 5).map((product) => ({
-      name: product.title || product.name,
-      sales: Math.floor(Math.random() * 10000) + 1000,
-      quantity: Math.floor(Math.random() * 100) + 10,
-    }));
-
-    // Customer growth
     const customerGrowthMap = {};
-    customers.forEach((customer) => {
+    for (const customer of customers || []) {
       const date = new Date(customer.created_at).toISOString().split("T")[0];
       customerGrowthMap[date] = (customerGrowthMap[date] || 0) + 1;
-    });
+    }
 
     let cumulativeCustomers = 0;
     const customerGrowth = Object.entries(customerGrowthMap)
@@ -152,14 +173,14 @@ router.get("/", verifyToken, isAdmin, async (req, res) => {
 
     res.json({
       summary: {
-        totalSales,
+        totalSales: parseFloat(totalSales.toFixed(2)),
         totalOrders,
         newCustomers,
-        avgOrderValue,
+        avgOrderValue: parseFloat(avgOrderValue.toFixed(2)),
       },
       dailySales,
       ordersByStatus,
-      topProducts,
+      topProducts: buildTopProducts(orders || [], products || []),
       customerGrowth,
     });
   } catch (error) {
@@ -168,39 +189,40 @@ router.get("/", verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-// Download Report as CSV (Admin only)
-router.get("/download", verifyToken, isAdmin, async (req, res) => {
-  try {
-    const { range = "7days" } = req.query;
-    const { startDate, endDate } = getDateRange(range);
+router.get(
+  "/download",
+  authenticateToken,
+  requireAdminRole,
+  async (req, res) => {
+    try {
+      const { range = "7days" } = req.query;
+      const { startDate, endDate } = getDateRange(range);
 
-    // Get orders
-    const { data: orders, error } = await supabase
-      .from("orders")
-      .select("*")
-      .gte("created_at", startDate)
-      .lte("created_at", endDate);
+      const { data: orders, error } = await supabase
+        .from("orders")
+        .select("*")
+        .gte("created_at", startDate)
+        .lte("created_at", endDate);
 
-    if (error) throw error;
+      if (error) throw error;
 
-    // Create CSV
-    let csv = "التاريخ,رقم الطلب,العميل,المبلغ,الحالة\n";
-    orders.forEach((order) => {
-      const date = new Date(order.created_at).toLocaleDateString("ar-EG");
-      csv += `${date},${order.order_number || order.id},${order.customer_name || "غير معروف"},${order.total_price || 0},${order.status || "pending"}\n`;
-    });
+      let csv = "date,order_number,customer,total,status\n";
+      for (const order of orders || []) {
+        const date = new Date(order.created_at).toISOString().split("T")[0];
+        csv += `${date},${order.order_number || order.id},${order.customer_name || "Unknown"},${toNumber(order.total_price)},${order.status || "pending"}\n`;
+      }
 
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=report-${range}.csv`,
-    );
-    res.send("\uFEFF" + csv); // Add BOM for Excel Arabic support
-  } catch (error) {
-    console.error("Error downloading report:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=report-${range}.csv`,
+      );
+      res.send(csv);
+    } catch (error) {
+      console.error("Error downloading report:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
 
 export default router;
-

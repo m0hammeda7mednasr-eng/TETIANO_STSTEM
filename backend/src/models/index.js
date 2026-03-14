@@ -86,13 +86,21 @@ const buildListQueryFallbacks = (tableName, applyFilter) => {
   });
 };
 
+const getUniqueStoreIds = (rows) =>
+  Array.from(
+    new Set(
+      (rows || [])
+        .map((row) => row?.store_id)
+        .filter((value) => value !== null && value !== undefined),
+    ),
+  );
+
 const getAccessibleStoreIdsSafe = async (userId) => {
   try {
     return await getAccessibleStoreIds(userId);
   } catch (error) {
     console.error("getAccessibleStoreIds error:", error);
-    // Return default store ID as fallback
-    return ["59b47070-f018-4919-b628-1009af216fd7"];
+    return [];
   }
 };
 
@@ -101,7 +109,7 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
 
   const builders = [];
 
-  // First try: user's accessible stores
+  // First try: rows linked to stores this user can access.
   if (storeIds.length > 0) {
     builders.push(
       ...buildListQueryFallbacks(tableName, (query) =>
@@ -110,22 +118,12 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
     );
   }
 
-  // Second try: user's direct data
+  // Fallback for legacy rows that predate store_id backfill.
   builders.push(
     ...buildListQueryFallbacks(tableName, (query) =>
       query.eq("user_id", userId),
     ),
   );
-
-  // Third try: all Shopify data (fallback for shared data)
-  builders.push(
-    ...buildListQueryFallbacks(tableName, (query) =>
-      query.not("shopify_id", "is", null),
-    ),
-  );
-
-  // Final fallback: all data
-  builders.push(...buildListQueryFallbacks(tableName));
 
   const result = await executeWithSchemaAndEmptyFallback(builders);
 
@@ -160,10 +158,6 @@ const findRowByIdForUserWithFallback = async (tableName, userId, id) => {
       .maybeSingle(),
   );
 
-  builders.push(async () =>
-    supabase.from(tableName).select().eq("id", id).maybeSingle(),
-  );
-
   const { data, error } = await executeWithSchemaAndEmptyFallback(builders);
   if (error && isSchemaCompatibilityError(error)) {
     return { data: null, error: null };
@@ -196,15 +190,6 @@ export const getAccessibleStoreIds = async (userId) => {
   if (!userId) return [];
 
   try {
-    const uniqueValues = (rows) =>
-      Array.from(
-        new Set(
-          (rows || [])
-            .map((row) => row.store_id)
-            .filter((value) => value !== null && value !== undefined),
-        ),
-      );
-
     // Try user_stores table first
     try {
       const { data: directAccessRows, error: directAccessError } =
@@ -218,7 +203,7 @@ export const getAccessibleStoreIds = async (userId) => {
         directAccessRows &&
         directAccessRows.length > 0
       ) {
-        const directStoreIds = uniqueValues(directAccessRows);
+        const directStoreIds = getUniqueStoreIds(directAccessRows);
         if (directStoreIds.length > 0) {
           return directStoreIds;
         }
@@ -236,7 +221,7 @@ export const getAccessibleStoreIds = async (userId) => {
         .not("store_id", "is", null);
 
       if (!ownedTokenError && ownedTokenRows && ownedTokenRows.length > 0) {
-        const ownedStoreIds = uniqueValues(ownedTokenRows);
+        const ownedStoreIds = getUniqueStoreIds(ownedTokenRows);
         if (ownedStoreIds.length > 0) {
           return ownedStoreIds;
         }
@@ -247,12 +232,43 @@ export const getAccessibleStoreIds = async (userId) => {
       );
     }
 
-    // Final fallback: return default store ID
-    return ["59b47070-f018-4919-b628-1009af216fd7"];
+    // Final fallback: infer stores from previously synced data owned by the user.
+    try {
+      const inferredResults = await Promise.all([
+        supabase
+          .from("products")
+          .select("store_id")
+          .eq("user_id", userId)
+          .not("store_id", "is", null)
+          .limit(20),
+        supabase
+          .from("orders")
+          .select("store_id")
+          .eq("user_id", userId)
+          .not("store_id", "is", null)
+          .limit(20),
+        supabase
+          .from("customers")
+          .select("store_id")
+          .eq("user_id", userId)
+          .not("store_id", "is", null)
+          .limit(20),
+      ]);
+
+      const inferredStoreIds = getUniqueStoreIds(
+        inferredResults.flatMap((result) => result?.data || []),
+      );
+      if (inferredStoreIds.length > 0) {
+        return inferredStoreIds;
+      }
+    } catch (inferenceError) {
+      console.log("Store inference fallback failed:", inferenceError.message);
+    }
+
+    return [];
   } catch (error) {
     console.error("getAccessibleStoreIds error:", error);
-    // Return default store ID as ultimate fallback
-    return ["59b47070-f018-4919-b628-1009af216fd7"];
+    return [];
   }
 };
 

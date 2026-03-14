@@ -4,6 +4,7 @@ import React, {
   useEffect,
   useContext,
   useCallback,
+  useRef,
 } from "react";
 import api from "../utils/api";
 
@@ -11,14 +12,15 @@ const AuthContext = createContext(null);
 const AUTH_REFRESH_INTERVAL_MS = 120000;
 const MIN_AUTH_REFRESH_GAP_MS = 5000;
 
-let authRefreshInFlight = false;
-let lastAuthRefreshAt = 0;
-
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [permissions, setPermissions] = useState({});
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // Prevent race conditions using refs instead of outer module variables
+  const authRefreshInFlight = useRef(false);
+  const lastAuthRefreshAt = useRef(0);
 
   const resetAuthState = useCallback(() => {
     setUser(null);
@@ -28,12 +30,12 @@ export const AuthProvider = ({ children }) => {
 
   const loadAuthState = useCallback(
     async ({ silent = false } = {}) => {
-      if (authRefreshInFlight) {
+      if (authRefreshInFlight.current) {
         return;
       }
 
       const now = Date.now();
-      if (now - lastAuthRefreshAt < MIN_AUTH_REFRESH_GAP_MS) {
+      if (now - lastAuthRefreshAt.current < MIN_AUTH_REFRESH_GAP_MS) {
         return;
       }
 
@@ -48,8 +50,8 @@ export const AuthProvider = ({ children }) => {
       }
 
       try {
-        authRefreshInFlight = true;
-        lastAuthRefreshAt = now;
+        authRefreshInFlight.current = true;
+        lastAuthRefreshAt.current = now;
 
         const { data: userData } = await api.get("/users/me");
 
@@ -81,7 +83,7 @@ export const AuthProvider = ({ children }) => {
           }
         }
       } finally {
-        authRefreshInFlight = false;
+        authRefreshInFlight.current = false;
         if (!silent) {
           setLoading(false);
         }

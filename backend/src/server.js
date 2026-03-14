@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 import express from "express";
 import cors from "cors";
-import { createClient } from "@supabase/supabase-js";
+// import { createClient } from "@supabase/supabase-js"; // Not used directly here
 import authRoutes from "./routes/auth.js";
 import shopifyRoutes from "./routes/shopify.js";
 import dashboardRoutes from "./routes/dashboard.js";
@@ -21,8 +21,6 @@ import eventsRoutes from "./routes/events.js";
 import { supabase } from "./supabaseClient.js";
 import { setRlsContext } from "./middleware/rls.js";
 import { emitRealtimeEvent } from "./services/realtimeEventService.js";
-
-console.log("✅ operationalCostsRoutes loaded:", typeof operationalCostsRoutes);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -45,7 +43,11 @@ app.use(
     credentials: true,
   }),
 );
-app.use("/api/shopify/webhooks", express.raw({ type: "application/json" }), shopifyWebhooksRoutes);
+app.use(
+  "/api/shopify/webhooks",
+  express.raw({ type: "application/json" }),
+  shopifyWebhooksRoutes,
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -96,17 +98,6 @@ app.use((req, res, next) => {
     });
   });
 
-  next();
-});
-
-// Add debugging middleware for dashboard routes
-app.use("/api/dashboard", (req, res, next) => {
-  console.log(`🔍 Dashboard route accessed: ${req.method} ${req.path}`);
-  console.log(`🔍 Full URL: ${req.originalUrl}`);
-  console.log(
-    `🔍 Headers:`,
-    req.headers.authorization ? "Token present" : "No token",
-  );
   next();
 });
 

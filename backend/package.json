@@ -9,7 +9,8 @@
     "dev": "nodemon src/server.js",
     "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest",
     "build": "echo 'No build step required'",
-    "migrate": "node-pg-migrate"
+    "migrate": "node-pg-migrate",
+    "db:repair": "node scripts/repair-shopify-data-links.js"
   },
   "jest": {
     "transform": {}

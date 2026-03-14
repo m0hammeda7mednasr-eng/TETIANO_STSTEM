@@ -62,8 +62,14 @@ export class ShopifyService {
 
   static async getProductsFromShopify(accessToken, shop) {
     try {
+      console.log(
+        `🔍 Fetching products from: https://${shop}/admin/api/2024-01/products.json`,
+      );
       const url = `https://${shop}/admin/api/2024-01/products.json?limit=250`;
       const allProducts = await this.#fetchAllPages(url, accessToken);
+      console.log(
+        `✅ Successfully fetched ${allProducts.length} products from Shopify`,
+      );
 
       return allProducts.map((product) => {
         // Extract cost price from variant (if available in Shopify)
@@ -88,13 +94,20 @@ export class ShopifyService {
         };
       });
     } catch (error) {
-      console.error("Error processing products from Shopify:", error.message);
+      console.error(
+        "❌ Error processing products from Shopify:",
+        error.message,
+      );
+      console.error("Error details:", error.response?.data || error);
       throw error;
     }
   }
 
   static async getOrdersFromShopify(accessToken, shop, options = {}) {
     try {
+      console.log(
+        `🔍 Fetching orders from: https://${shop}/admin/api/2024-01/orders.json`,
+      );
       const query = new URLSearchParams({
         limit: "250",
         status: "any",
@@ -105,6 +118,9 @@ export class ShopifyService {
       }
       const url = `https://${shop}/admin/api/2024-01/orders.json?${query.toString()}`;
       const allOrders = await this.#fetchAllPages(url, accessToken);
+      console.log(
+        `✅ Successfully fetched ${allOrders.length} orders from Shopify`,
+      );
 
       return allOrders.map((order) => ({
         shopify_id: order.id.toString(),
@@ -125,7 +141,8 @@ export class ShopifyService {
         data: order,
       }));
     } catch (error) {
-      console.error("Error processing orders from Shopify:", error.message);
+      console.error("❌ Error processing orders from Shopify:", error.message);
+      console.error("Error details:", error.response?.data || error);
       throw error;
     }
   }
@@ -163,8 +180,14 @@ export class ShopifyService {
 
   static async getCustomersFromShopify(accessToken, shop) {
     try {
+      console.log(
+        `🔍 Fetching customers from: https://${shop}/admin/api/2024-01/customers.json`,
+      );
       const url = `https://${shop}/admin/api/2024-01/customers.json?limit=250`;
       const allCustomers = await this.#fetchAllPages(url, accessToken);
+      console.log(
+        `✅ Successfully fetched ${allCustomers.length} customers from Shopify`,
+      );
 
       return allCustomers.map((customer) => ({
         shopify_id: customer.id.toString(),
@@ -181,7 +204,11 @@ export class ShopifyService {
         data: customer,
       }));
     } catch (error) {
-      console.error("Error processing customers from Shopify:", error.message);
+      console.error(
+        "❌ Error processing customers from Shopify:",
+        error.message,
+      );
+      console.error("Error details:", error.response?.data || error);
       throw error;
     }
   }
@@ -192,6 +219,27 @@ export class ShopifyService {
       console.log(
         `Syncing for user: ${userId}, shop: ${shop}, store: ${storeId}`,
       );
+
+      // Test Shopify connection first
+      console.log("Testing Shopify connection...");
+      const testUrl = `https://${shop}/admin/api/2024-01/products.json?limit=1`;
+      try {
+        const testResponse = await axios.get(testUrl, {
+          headers: {
+            "X-Shopify-Access-Token": accessToken,
+            "Content-Type": "application/json",
+          },
+        });
+        console.log("✅ Shopify connection test successful");
+      } catch (testError) {
+        console.error(
+          "❌ Shopify connection test failed:",
+          testError.response?.data || testError.message,
+        );
+        throw new Error(
+          `Shopify connection failed: ${testError.response?.data?.errors || testError.message}`,
+        );
+      }
 
       const [products, orders, customers] = await Promise.all([
         this.getProductsFromShopify(accessToken, shop),

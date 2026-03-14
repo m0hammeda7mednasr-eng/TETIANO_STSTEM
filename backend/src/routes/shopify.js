@@ -2181,6 +2181,35 @@ router.post(
   },
 );
 
+router.post(
+  "/orders/:id/update-fulfillment",
+  verifyToken,
+  requirePermission("can_edit_orders"),
+  async (req, res) => {
+    try {
+      const { fulfillment_status } = req.body;
+      const orderId = req.params.id;
+      const userId = req.user.id;
+
+      if (!fulfillment_status) {
+        return res.status(400).json({ error: "Fulfillment status is required" });
+      }
+
+      const result = await OrderManagementService.updateOrderFulfillment(
+        userId,
+        orderId,
+        fulfillment_status,
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Update order fulfillment error:", error);
+      res
+        .status(resolveUpdateErrorStatusCode(error.message))
+        .json({ error: error.message });
+    }
+  },
+);
+
 router.get(
   "/orders/:id/profit",
   verifyToken,

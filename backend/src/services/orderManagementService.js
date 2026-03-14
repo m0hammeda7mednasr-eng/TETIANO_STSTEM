@@ -48,6 +48,7 @@ const VALID_ORDER_STATUSES = new Set([
   "voided",
   "partially_refunded",
 ]);
+const VALID_FULFILLMENT_ACTIONS = new Set(["fulfilled", "unfulfilled"]);
 
 const parseOrderData = (order) => {
   const value = order?.data;
@@ -85,6 +86,18 @@ const normalizeOrderStatus = (value) => {
     return normalized;
   }
   return "";
+};
+
+const normalizeFulfillmentStatus = (value) => {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .trim();
+
+  if (!normalized || normalized === "null") {
+    return "unfulfilled";
+  }
+
+  return normalized;
 };
 
 const parseTagList = (tagsValue) => {
@@ -305,6 +318,27 @@ const getOrderNumericShopifyId = (order) => {
 
 const toMoneyString = (value) => parseFloat(value || 0).toFixed(2);
 
+const getOrderFulfillmentStatus = (order) =>
+  normalizeFulfillmentStatus(
+    parseOrderData(order)?.fulfillment_status || order?.fulfillment_status,
+  );
+
+const getOrderFulfillments = (order) => {
+  const fulfillments = parseOrderData(order)?.fulfillments;
+  return Array.isArray(fulfillments) ? fulfillments : [];
+};
+
+const getFulfillableQuantity = (order) => {
+  const lineItems = Array.isArray(parseOrderData(order)?.line_items)
+    ? parseOrderData(order).line_items
+    : [];
+
+  return lineItems.reduce((sum, item) => {
+    const quantity = parseFloat(item?.fulfillable_quantity || 0);
+    return sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0);
+  }, 0);
+};
+
 const getOrderCurrency = (order, orderData = {}) =>
   String(orderData?.currency || order?.currency || "USD").trim() || "USD";
 
@@ -351,6 +385,50 @@ const fetchShopifyOrderTransactions = async ({ tokenData, order }) => {
   return Array.isArray(response?.data?.transactions)
     ? response.data.transactions
     : [];
+};
+
+const fetchShopifyFulfillmentOrders = async ({ tokenData, order }) => {
+  const response = await axios.get(
+    `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/orders/${order.shopify_id}/fulfillment_orders.json`,
+    {
+      headers: buildShopifyHeaders(tokenData.access_token),
+    },
+  );
+
+  return Array.isArray(response?.data?.fulfillment_orders)
+    ? response.data.fulfillment_orders
+    : [];
+};
+
+const createShopifyFulfillment = async ({
+  tokenData,
+  order,
+  fulfillment,
+}) => {
+  const response = await axios.post(
+    `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/fulfillments.json`,
+    { fulfillment },
+    {
+      headers: buildShopifyHeaders(tokenData.access_token),
+    },
+  );
+
+  return response?.data || null;
+};
+
+const cancelShopifyFulfillment = async ({
+  tokenData,
+  fulfillmentId,
+}) => {
+  const response = await axios.post(
+    `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/fulfillments/${fulfillmentId}/cancel.json`,
+    {},
+    {
+      headers: buildShopifyHeaders(tokenData.access_token),
+    },
+  );
+
+  return response?.data || null;
 };
 
 const createShopifyOrderTransaction = async ({
@@ -1346,6 +1424,180 @@ export class OrderManagementService {
       return { success: true };
     } catch (error) {
       console.error("Shopify status sync error:", error);
+
+      const { supabase } = await import("../supabaseClient.js");
+      await supabase
+        .from("orders")
+        .update({
+          pending_sync: false,
+          sync_error: error.message,
+        })
+        .eq("id", orderId);
+
+      await this.updateSyncOperationStatus(
+        userId,
+        orderId,
+        "failed",
+        null,
+        error.message,
+      );
+
+      throw error;
+    }
+  }
+
+  static async updateOrderFulfillment(userId, orderId, requestedStatus) {
+    try {
+      const { data: order } = await Order.findByIdForUser(userId, orderId);
+      if (!order || !order.shopify_id) {
+        throw new Error("Order not found or missing Shopify ID");
+      }
+
+      const tokenData = await getShopifyTokenForStore(order.store_id, userId);
+      if (!tokenData) {
+        throw new Error("Shopify not connected");
+      }
+
+      const normalizedRequestedStatus = normalizeFulfillmentStatus(
+        requestedStatus,
+      );
+      if (!VALID_FULFILLMENT_ACTIONS.has(normalizedRequestedStatus)) {
+        throw new Error("Invalid fulfillment status");
+      }
+
+      const currentFulfillmentStatus = getOrderFulfillmentStatus(order);
+      if (normalizedRequestedStatus === currentFulfillmentStatus) {
+        return {
+          success: true,
+          fulfillment_status: currentFulfillmentStatus,
+        };
+      }
+
+      await this.logSyncOperation(userId, orderId, "update_fulfillment_status", {
+        fulfillment_status: normalizedRequestedStatus,
+      });
+
+      let responseData = null;
+
+      if (normalizedRequestedStatus === "fulfilled") {
+        const fulfillmentOrders = await fetchShopifyFulfillmentOrders({
+          tokenData,
+          order,
+        });
+
+        const lineItemsByFulfillmentOrder = fulfillmentOrders
+          .map((fulfillmentOrder) => {
+            const lineItems = Array.isArray(fulfillmentOrder?.line_items)
+              ? fulfillmentOrder.line_items
+              : [];
+            const fulfillmentOrderLineItems = lineItems
+              .map((item) => {
+                const remainingQuantity = parseInt(
+                  item?.remaining_quantity ??
+                    item?.fulfillable_quantity ??
+                    item?.quantity ??
+                    0,
+                  10,
+                );
+
+                if (!Number.isFinite(remainingQuantity) || remainingQuantity <= 0) {
+                  return null;
+                }
+
+                return {
+                  id: item.id,
+                  quantity: remainingQuantity,
+                };
+              })
+              .filter(Boolean);
+
+            if (fulfillmentOrderLineItems.length === 0) {
+              return null;
+            }
+
+            return {
+              fulfillment_order_id: fulfillmentOrder.id,
+              fulfillment_order_line_items: fulfillmentOrderLineItems,
+            };
+          })
+          .filter(Boolean);
+
+        if (lineItemsByFulfillmentOrder.length === 0) {
+          const remainingQuantity = getFulfillableQuantity(order);
+          if (remainingQuantity <= 0) {
+            throw new Error("This order has no fulfillable items left on Shopify");
+          }
+          throw new Error(
+            "Shopify did not return any open fulfillment orders for this order",
+          );
+        }
+
+        responseData = await createShopifyFulfillment({
+          tokenData,
+          order,
+          fulfillment: {
+            notify_customer: false,
+            line_items_by_fulfillment_order: lineItemsByFulfillmentOrder,
+          },
+        });
+      }
+
+      if (normalizedRequestedStatus === "unfulfilled") {
+        const fulfillments = getOrderFulfillments(order).filter(
+          (fulfillment) => fulfillment?.id,
+        );
+
+        if (fulfillments.length === 0) {
+          throw new Error("This order does not have any Shopify fulfillment to cancel");
+        }
+
+        if (fulfillments.length > 1) {
+          throw new Error(
+            "Orders with multiple fulfillments must be adjusted directly in Shopify",
+          );
+        }
+
+        responseData = await cancelShopifyFulfillment({
+          tokenData,
+          fulfillmentId: fulfillments[0].id,
+        });
+      }
+
+      const refreshedOrderPayload = await fetchShopifyOrderById({
+        tokenData,
+        order,
+      });
+      const resolvedFulfillmentStatus = normalizeFulfillmentStatus(
+        refreshedOrderPayload?.fulfillment_status || currentFulfillmentStatus,
+      );
+
+      const { supabase } = await import("../supabaseClient.js");
+      await supabase
+        .from("orders")
+        .update({
+          fulfillment_status: refreshedOrderPayload?.fulfillment_status || null,
+          data: refreshedOrderPayload,
+          pending_sync: false,
+          last_synced_at: new Date().toISOString(),
+          shopify_updated_at:
+            refreshedOrderPayload?.updated_at || new Date().toISOString(),
+          sync_error: null,
+        })
+        .eq("id", orderId);
+
+      await this.updateSyncOperationStatus(userId, orderId, "success", responseData);
+
+      return {
+        success: true,
+        fulfillment_status: resolvedFulfillmentStatus,
+        order: {
+          ...order,
+          fulfillment_status: refreshedOrderPayload?.fulfillment_status || null,
+          data: refreshedOrderPayload,
+        },
+      };
+    } catch (error) {
+      console.error("Shopify fulfillment sync error:", error);
 
       const { supabase } = await import("../supabaseClient.js");
       await supabase

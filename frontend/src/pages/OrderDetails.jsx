@@ -25,6 +25,46 @@ const PAYMENT_METHOD_LABELS = {
   wallet: "Wallet",
   none: "None",
 };
+const FULFILLMENT_STATUS_LABELS = {
+  fulfilled: "Fulfilled",
+  partial: "Partially Fulfilled",
+  unfulfilled: "Unfulfilled",
+  restocked: "Restocked",
+  scheduled: "Scheduled",
+  on_hold: "On Hold",
+  in_progress: "In Progress",
+  open: "Open",
+};
+
+const parseOrderData = (orderValue) => {
+  const rawData = orderValue?.data;
+  if (typeof rawData === "string") {
+    try {
+      return JSON.parse(rawData);
+    } catch {
+      return {};
+    }
+  }
+
+  return rawData && typeof rawData === "object" ? rawData : {};
+};
+
+const normalizeFulfillmentStatus = (value) => {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .trim();
+
+  if (!normalized || normalized === "null") {
+    return "unfulfilled";
+  }
+
+  return normalized;
+};
+
+const getFulfillmentStatusLabel = (status) =>
+  FULFILLMENT_STATUS_LABELS[normalizeFulfillmentStatus(status)] ||
+  normalizeFulfillmentStatus(status) ||
+  "Unfulfilled";
 
 export default function OrderDetails() {
   const { id } = useParams();
@@ -35,6 +75,7 @@ export default function OrderDetails() {
   const [notification, setNotification] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [updatingPaymentMethod, setUpdatingPaymentMethod] = useState(false);
+  const [updatingFulfillment, setUpdatingFulfillment] = useState(false);
   const [profitData, setProfitData] = useState(null);
   const canEditOrders = hasPermission("can_edit_orders");
 
@@ -107,23 +148,106 @@ export default function OrderDetails() {
   };
 
   const getOrderFinancialStatus = (orderValue) => {
-    const rawData = orderValue?.data;
-    let parsedData = {};
-    if (typeof rawData === "string") {
-      try {
-        parsedData = JSON.parse(rawData);
-      } catch {
-        parsedData = {};
-      }
-    } else if (rawData && typeof rawData === "object") {
-      parsedData = rawData;
-    }
-
+    const parsedData = parseOrderData(orderValue);
     return String(
       parsedData?.financial_status || orderValue?.financial_status || orderValue?.status || "",
     )
       .toLowerCase()
       .trim();
+  };
+
+  const getOrderFulfillmentStatus = (orderValue) => {
+    const parsedData = parseOrderData(orderValue);
+    return normalizeFulfillmentStatus(
+      orderValue?.fulfillment_status || parsedData?.fulfillment_status,
+    );
+  };
+
+  const getFulfillmentStatusColor = (status) => {
+    const normalized = normalizeFulfillmentStatus(status);
+    if (normalized === "fulfilled") return "bg-green-100 text-green-800";
+    if (normalized === "partial") return "bg-amber-100 text-amber-800";
+    if (normalized === "restocked") return "bg-rose-100 text-rose-800";
+    if (
+      normalized === "scheduled" ||
+      normalized === "on_hold" ||
+      normalized === "in_progress" ||
+      normalized === "open"
+    ) {
+      return "bg-sky-100 text-sky-800";
+    }
+    return "bg-slate-100 text-slate-700";
+  };
+
+  const getFulfillableQuantity = (orderValue) =>
+    Array.isArray(orderValue?.line_items)
+      ? orderValue.line_items.reduce((sum, item) => {
+          const quantity = Number(item?.fulfillable_quantity || 0);
+          return sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0);
+        }, 0)
+      : 0;
+
+  const canCancelFulfillment = (orderValue) => {
+    const fulfillments = Array.isArray(orderValue?.fulfillments)
+      ? orderValue.fulfillments.filter((fulfillment) => fulfillment?.id)
+      : [];
+    return fulfillments.length === 1;
+  };
+
+  const getFulfillmentOptions = (orderValue) => {
+    const currentStatus = getOrderFulfillmentStatus(orderValue);
+    const options = [
+      {
+        value: currentStatus,
+        label: `${getFulfillmentStatusLabel(currentStatus)} (Current)`,
+      },
+    ];
+
+    if (getFulfillableQuantity(orderValue) > 0 && currentStatus !== "fulfilled") {
+      options.push({
+        value: "fulfilled",
+        label: "Fulfill on Shopify",
+      });
+    }
+
+    if (
+      currentStatus !== "unfulfilled" &&
+      currentStatus !== "restocked" &&
+      canCancelFulfillment(orderValue)
+    ) {
+      options.push({
+        value: "unfulfilled",
+        label: "Cancel fulfillment on Shopify",
+      });
+    }
+
+    return options.filter(
+      (option, index, list) =>
+        list.findIndex((entry) => entry.value === option.value) === index,
+    );
+  };
+
+  const getFulfillmentHelperText = (orderValue) => {
+    const currentStatus = getOrderFulfillmentStatus(orderValue);
+    const remainingQuantity = getFulfillableQuantity(orderValue);
+
+    if (currentStatus === "partial" && remainingQuantity > 0) {
+      return `${remainingQuantity} item(s) still need fulfillment on Shopify`;
+    }
+
+    if (remainingQuantity > 0 && currentStatus !== "fulfilled") {
+      return `${remainingQuantity} item(s) can be fulfilled now`;
+    }
+
+    if (currentStatus === "fulfilled" && canCancelFulfillment(orderValue)) {
+      return "You can cancel the latest Shopify fulfillment from here";
+    }
+
+    if (currentStatus === "fulfilled") {
+      return "This order is already fulfilled on Shopify";
+    }
+
+    return "Fulfillment stays synced with the Shopify order";
   };
 
   const isShopifyPaidOrder = (orderValue) => {
@@ -173,6 +297,31 @@ export default function OrderDetails() {
       );
     } finally {
       setUpdatingPaymentMethod(false);
+    }
+  };
+
+  const handleFulfillmentChange = async (fulfillmentStatus) => {
+    if (!order || !canEditOrders) return;
+
+    const currentStatus = getOrderFulfillmentStatus(order);
+    if (fulfillmentStatus === currentStatus) return;
+
+    setUpdatingFulfillment(true);
+    try {
+      await api.post(`/shopify/orders/${id}/update-fulfillment`, {
+        fulfillment_status: fulfillmentStatus,
+      });
+      markSharedDataUpdated();
+      showNotification("Fulfillment updated successfully", "success");
+      await fetchOrderDetails();
+    } catch (error) {
+      console.error("Error updating fulfillment:", error);
+      showNotification(
+        error?.response?.data?.error || "Failed to update fulfillment",
+        "error",
+      );
+    } finally {
+      setUpdatingFulfillment(false);
     }
   };
 
@@ -332,7 +481,7 @@ export default function OrderDetails() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full md:w-auto md:min-w-[440px]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 w-full md:w-auto md:min-w-[680px]">
               <div className="min-w-[210px]">
                 <label className="block text-xs text-gray-500 mb-1">
                   Payment Method
@@ -392,6 +541,36 @@ export default function OrderDetails() {
                     )}`}
                   >
                     {getOrderFinancialStatus(order) || "unknown"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="min-w-[210px]">
+                <label className="block text-xs text-gray-500 mb-1">
+                  Fulfillment
+                </label>
+                <select
+                  value={getOrderFulfillmentStatus(order)}
+                  onChange={(e) => handleFulfillmentChange(e.target.value)}
+                  disabled={!canEditOrders || updatingFulfillment}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                >
+                  {getFulfillmentOptions(order).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getFulfillmentStatusColor(
+                      getOrderFulfillmentStatus(order),
+                    )}`}
+                  >
+                    {getFulfillmentStatusLabel(getOrderFulfillmentStatus(order))}
+                  </span>
+                  <span className="text-[11px] text-gray-500">
+                    {getFulfillmentHelperText(order)}
                   </span>
                 </div>
               </div>
@@ -877,16 +1056,29 @@ export default function OrderDetails() {
                 </h2>
                 <div className="space-y-3">
                   <span
-                    className={`inline-block px-4 py-2 rounded-full text-sm font-semibold ${
-                      order.fulfillment_status === "fulfilled"
-                        ? "bg-green-100 text-green-800"
-                        : order.fulfillment_status === "partial"
-                          ? "bg-yellow-100 text-yellow-800"
-                          : "bg-gray-100 text-gray-800"
-                    }`}
+                    className={`inline-block px-4 py-2 rounded-full text-sm font-semibold ${getFulfillmentStatusColor(
+                      getOrderFulfillmentStatus(order),
+                    )}`}
                   >
-                    {order.fulfillment_status || "pending"}
+                    {getFulfillmentStatusLabel(getOrderFulfillmentStatus(order))}
                   </span>
+                  <p className="text-sm text-gray-600">
+                    {getFulfillmentHelperText(order)}
+                  </p>
+                  <div className="text-sm text-gray-700 space-y-1">
+                    <p>
+                      Fulfillable items:{" "}
+                      <span className="font-semibold">
+                        {getFulfillableQuantity(order)}
+                      </span>
+                    </p>
+                    <p>
+                      Shopify fulfillments:{" "}
+                      <span className="font-semibold">
+                        {Array.isArray(order.fulfillments) ? order.fulfillments.length : 0}
+                      </span>
+                    </p>
+                  </div>
                   {order.fulfillments && order.fulfillments.length > 0 && (
                     <div className="mt-3 space-y-2">
                       <p className="text-sm text-gray-600 font-medium">

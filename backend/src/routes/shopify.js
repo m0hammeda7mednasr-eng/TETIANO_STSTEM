@@ -1373,6 +1373,11 @@ router.post(
       }
 
       const { products, orders, customers } = syncResult;
+      const persistedCounts = syncResult?.persisted || {
+        products: products?.length || 0,
+        orders: orders?.length || 0,
+        customers: customers?.length || 0,
+      };
 
       console.log(
         `✅ Sync completed: ${products?.length || 0} products, ${orders?.length || 0} orders, ${customers?.length || 0} customers`,
@@ -1414,6 +1419,7 @@ router.post(
           orders: orders?.length || 0,
           customers: customers?.length || 0,
         },
+        persisted_counts: persistedCounts,
         latest_order: latestSyncedOrder
           ? {
             shopify_id: latestSyncedOrder.shopify_id || null,

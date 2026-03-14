@@ -270,42 +270,77 @@ export class ShopifyService {
       }));
 
       console.log("Starting database update...");
-      let syncResults = {
-        products: [],
-        orders: [],
-        customers: [],
+      const syncResults = {
+        products: {
+          fetched: products,
+          persisted: [],
+        },
+        orders: {
+          fetched: orders,
+          persisted: [],
+        },
+        customers: {
+          fetched: customers,
+          persisted: [],
+        },
       };
 
       if (productsWithUser.length > 0) {
         console.log(`Syncing ${productsWithUser.length} products...`);
         const productResult = await Product.updateMultiple(productsWithUser);
-        syncResults.products = productResult?.data || [];
-        console.log(`Synced ${syncResults.products.length} products to DB.`);
+        if (productResult?.error) {
+          throw new Error(
+            `Failed to persist Shopify products: ${productResult.error.message}`,
+          );
+        }
+        syncResults.products.persisted = productResult?.data || [];
+        console.log(
+          `Synced ${productsWithUser.length} products to DB. Persisted rows returned: ${syncResults.products.persisted.length}`,
+        );
       }
 
       if (ordersWithUser.length > 0) {
         console.log(`Syncing ${ordersWithUser.length} orders...`);
         const orderResult = await Order.updateMultiple(ordersWithUser);
-        syncResults.orders = orderResult?.data || [];
-        console.log(`Synced ${syncResults.orders.length} orders to DB.`);
+        if (orderResult?.error) {
+          throw new Error(
+            `Failed to persist Shopify orders: ${orderResult.error.message}`,
+          );
+        }
+        syncResults.orders.persisted = orderResult?.data || [];
+        console.log(
+          `Synced ${ordersWithUser.length} orders to DB. Persisted rows returned: ${syncResults.orders.persisted.length}`,
+        );
       }
 
       if (customersWithUser.length > 0) {
         console.log(`Syncing ${customersWithUser.length} customers...`);
         const customerResult = await Customer.updateMultiple(customersWithUser);
-        syncResults.customers = customerResult?.data || [];
-        console.log(`Synced ${syncResults.customers.length} customers to DB.`);
+        if (customerResult?.error) {
+          throw new Error(
+            `Failed to persist Shopify customers: ${customerResult.error.message}`,
+          );
+        }
+        syncResults.customers.persisted = customerResult?.data || [];
+        console.log(
+          `Synced ${customersWithUser.length} customers to DB. Persisted rows returned: ${syncResults.customers.persisted.length}`,
+        );
       }
 
       console.log("Database update complete.");
       console.log(
-        `Final sync results: ${syncResults.products.length} products, ${syncResults.orders.length} orders, ${syncResults.customers.length} customers`,
+        `Final sync results: ${syncResults.products.fetched.length} products, ${syncResults.orders.fetched.length} orders, ${syncResults.customers.fetched.length} customers`,
       );
 
       return {
-        products: syncResults.products,
-        orders: syncResults.orders,
-        customers: syncResults.customers,
+        products: syncResults.products.fetched,
+        orders: syncResults.orders.fetched,
+        customers: syncResults.customers.fetched,
+        persisted: {
+          products: syncResults.products.persisted.length,
+          orders: syncResults.orders.persisted.length,
+          customers: syncResults.customers.persisted.length,
+        },
       };
     } catch (error) {
       console.error("Critical error during Shopify data sync:", error.message);

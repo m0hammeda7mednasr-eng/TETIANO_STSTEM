@@ -70,7 +70,7 @@ describe("ShopifyService", () => {
       });
 
       // --- RUN THE SYNC ---
-      await ShopifyService.syncAllData(userId, shop, accessToken);
+      const result = await ShopifyService.syncAllData(userId, shop, accessToken);
 
       // --- ASSERTIONS ---
       
@@ -114,6 +114,24 @@ describe("ShopifyService", () => {
         ])
       );
       expect(Customer.updateMultiple).toHaveBeenCalledTimes(1);
+
+      expect(result).toMatchObject({
+        products: expect.arrayContaining([
+          expect.objectContaining({ shopify_id: "p1" }),
+          expect.objectContaining({ shopify_id: "p2" }),
+        ]),
+        orders: expect.arrayContaining([
+          expect.objectContaining({ shopify_id: "o1" }),
+        ]),
+        customers: expect.arrayContaining([
+          expect.objectContaining({ shopify_id: "c1" }),
+        ]),
+        persisted: {
+          products: 0,
+          orders: 0,
+          customers: 0,
+        },
+      });
     });
 
     it("should throw an error if API fetch fails", async () => {
@@ -141,6 +159,42 @@ describe("ShopifyService", () => {
       expect(Product.updateMultiple).not.toHaveBeenCalled();
       expect(Order.updateMultiple).not.toHaveBeenCalled();
       expect(Customer.updateMultiple).not.toHaveBeenCalled();
+    });
+
+    it("should throw when database persistence returns an error", async () => {
+      const getSpy = jest.spyOn(axios, 'get');
+      getSpy.mockImplementation((url) => {
+        if (url.includes("products.json")) {
+          return Promise.resolve({
+            data: { products: [{ id: "p1", title: "Product 1", variants: [{}] }] },
+            headers: {},
+          });
+        }
+        if (url.includes("orders.json")) {
+          return Promise.resolve({
+            data: { orders: [] },
+            headers: {},
+          });
+        }
+        if (url.includes("customers.json")) {
+          return Promise.resolve({
+            data: { customers: [] },
+            headers: {},
+          });
+        }
+        return Promise.resolve({ data: {} });
+      });
+
+      Product.updateMultiple.mockResolvedValue({
+        data: [],
+        error: { message: "there is no unique or exclusion constraint matching the ON CONFLICT specification" },
+      });
+
+      await expect(
+        ShopifyService.syncAllData(userId, shop, accessToken),
+      ).rejects.toThrow(
+        "Failed to persist Shopify products: there is no unique or exclusion constraint matching the ON CONFLICT specification",
+      );
     });
   });
 });

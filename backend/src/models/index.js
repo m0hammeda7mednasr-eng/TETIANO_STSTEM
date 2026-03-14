@@ -186,6 +186,107 @@ const upsertWithFallback = async (tableName, rows, conflictCandidates = []) => {
   return await executeWithSchemaFallback(builders);
 };
 
+const buildShopifyRowLookupQuery = (tableName, row) => {
+  let query = supabase
+    .from(tableName)
+    .select("id")
+    .eq("shopify_id", row.shopify_id);
+
+  if (row.store_id) {
+    query = query.eq("store_id", row.store_id);
+  } else if (row.user_id) {
+    query = query.eq("user_id", row.user_id);
+  }
+
+  return query;
+};
+
+const syncRowsIndividually = async (tableName, rows, itemLabel) => {
+  const results = [];
+  const failures = [];
+
+  for (const row of rows) {
+    try {
+      const { data: existing, error: lookupError } =
+        await buildShopifyRowLookupQuery(tableName, row).maybeSingle();
+
+      if (lookupError) {
+        failures.push(
+          `${row.shopify_id}: lookup failed (${lookupError.message})`,
+        );
+        continue;
+      }
+
+      if (existing?.id) {
+        const { data: updated, error: updateError } = await supabase
+          .from(tableName)
+          .update(row)
+          .eq("id", existing.id)
+          .select()
+          .single();
+
+        if (updateError) {
+          failures.push(
+            `${row.shopify_id}: update failed (${updateError.message})`,
+          );
+          continue;
+        }
+
+        results.push(updated);
+        continue;
+      }
+
+      const { data: inserted, error: insertError } = await supabase
+        .from(tableName)
+        .insert([row])
+        .select()
+        .single();
+
+      if (insertError) {
+        failures.push(
+          `${row.shopify_id}: insert failed (${insertError.message})`,
+        );
+        continue;
+      }
+
+      results.push(inserted);
+    } catch (itemError) {
+      failures.push(`${row.shopify_id}: ${itemError.message}`);
+    }
+  }
+
+  return {
+    data: results,
+    error:
+      failures.length > 0
+        ? {
+          message: `Failed to sync ${failures.length} ${itemLabel} rows`,
+          details: failures,
+        }
+        : null,
+  };
+};
+
+const upsertRowsWithManualFallback = async (tableName, rows, itemLabel) => {
+  const upsertResult = await supabase
+    .from(tableName)
+    .upsert(rows, {
+      onConflict: "shopify_id",
+      ignoreDuplicates: false,
+    })
+    .select();
+
+  if (!upsertResult.error) {
+    return upsertResult;
+  }
+
+  console.warn(
+    `Upsert failed for ${tableName}, falling back to per-row sync: ${upsertResult.error.message}`,
+  );
+
+  return await syncRowsIndividually(tableName, rows, itemLabel);
+};
+
 export const getAccessibleStoreIds = async (userId) => {
   if (!userId) return [];
 
@@ -353,59 +454,11 @@ export const Product = {
       updated_at: new Date().toISOString(),
     }));
 
-    // Try simple upsert first, then fallback to individual operations
-    try {
-      return await supabase
-        .from("products")
-        .upsert(upserts, {
-          onConflict: "shopify_id",
-          ignoreDuplicates: false,
-        })
-        .select();
-    } catch (error) {
-      console.log(
-        "Upsert failed, trying individual operations for products...",
-      );
-
-      // Fallback: check and insert/update individually
-      const results = [];
-      for (const product of upserts) {
-        try {
-          // Check if exists
-          const { data: existing } = await supabase
-            .from("products")
-            .select("id")
-            .eq("shopify_id", product.shopify_id)
-            .maybeSingle();
-
-          if (existing) {
-            // Update existing
-            const { data: updated } = await supabase
-              .from("products")
-              .update(product)
-              .eq("shopify_id", product.shopify_id)
-              .select()
-              .single();
-            results.push(updated);
-          } else {
-            // Insert new
-            const { data: inserted } = await supabase
-              .from("products")
-              .insert([product])
-              .select()
-              .single();
-            results.push(inserted);
-          }
-        } catch (itemError) {
-          console.error(
-            `Failed to sync product ${product.shopify_id}:`,
-            itemError,
-          );
-        }
-      }
-
-      return { data: results, error: null };
-    }
+    return await upsertRowsWithManualFallback(
+      "products",
+      upserts,
+      "product",
+    );
   },
 };
 
@@ -441,54 +494,7 @@ export const Order = {
       updated_at: new Date().toISOString(),
     }));
 
-    // Try simple upsert first, then fallback to individual operations
-    try {
-      return await supabase
-        .from("orders")
-        .upsert(upserts, {
-          onConflict: "shopify_id",
-          ignoreDuplicates: false,
-        })
-        .select();
-    } catch (error) {
-      console.log("Upsert failed, trying individual operations for orders...");
-
-      // Fallback: check and insert/update individually
-      const results = [];
-      for (const order of upserts) {
-        try {
-          // Check if exists
-          const { data: existing } = await supabase
-            .from("orders")
-            .select("id")
-            .eq("shopify_id", order.shopify_id)
-            .maybeSingle();
-
-          if (existing) {
-            // Update existing
-            const { data: updated } = await supabase
-              .from("orders")
-              .update(order)
-              .eq("shopify_id", order.shopify_id)
-              .select()
-              .single();
-            results.push(updated);
-          } else {
-            // Insert new
-            const { data: inserted } = await supabase
-              .from("orders")
-              .insert([order])
-              .select()
-              .single();
-            results.push(inserted);
-          }
-        } catch (itemError) {
-          console.error(`Failed to sync order ${order.shopify_id}:`, itemError);
-        }
-      }
-
-      return { data: results, error: null };
-    }
+    return await upsertRowsWithManualFallback("orders", upserts, "order");
   },
 };
 
@@ -516,59 +522,11 @@ export const Customer = {
       updated_at: new Date().toISOString(),
     }));
 
-    // Try simple upsert first, then fallback to individual operations
-    try {
-      return await supabase
-        .from("customers")
-        .upsert(upserts, {
-          onConflict: "shopify_id",
-          ignoreDuplicates: false,
-        })
-        .select();
-    } catch (error) {
-      console.log(
-        "Upsert failed, trying individual operations for customers...",
-      );
-
-      // Fallback: check and insert/update individually
-      const results = [];
-      for (const customer of upserts) {
-        try {
-          // Check if exists
-          const { data: existing } = await supabase
-            .from("customers")
-            .select("id")
-            .eq("shopify_id", customer.shopify_id)
-            .maybeSingle();
-
-          if (existing) {
-            // Update existing
-            const { data: updated } = await supabase
-              .from("customers")
-              .update(customer)
-              .eq("shopify_id", customer.shopify_id)
-              .select()
-              .single();
-            results.push(updated);
-          } else {
-            // Insert new
-            const { data: inserted } = await supabase
-              .from("customers")
-              .insert([customer])
-              .select()
-              .single();
-            results.push(inserted);
-          }
-        } catch (itemError) {
-          console.error(
-            `Failed to sync customer ${customer.shopify_id}:`,
-            itemError,
-          );
-        }
-      }
-
-      return { data: results, error: null };
-    }
+    return await upsertRowsWithManualFallback(
+      "customers",
+      upserts,
+      "customer",
+    );
   },
 };
 

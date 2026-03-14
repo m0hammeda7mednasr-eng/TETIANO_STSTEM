@@ -326,14 +326,62 @@ export const Product = {
     const upserts = products.map((p) => ({
       ...p,
       created_at: p.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }));
 
-    return await upsertWithFallback("products", upserts, [
-      "shopify_id,user_id,store_id",
-      "shopify_id,user_id",
-      "shopify_id",
-      null,
-    ]);
+    // Try simple upsert first, then fallback to individual operations
+    try {
+      return await supabase
+        .from("products")
+        .upsert(upserts, {
+          onConflict: "shopify_id",
+          ignoreDuplicates: false,
+        })
+        .select();
+    } catch (error) {
+      console.log(
+        "Upsert failed, trying individual operations for products...",
+      );
+
+      // Fallback: check and insert/update individually
+      const results = [];
+      for (const product of upserts) {
+        try {
+          // Check if exists
+          const { data: existing } = await supabase
+            .from("products")
+            .select("id")
+            .eq("shopify_id", product.shopify_id)
+            .maybeSingle();
+
+          if (existing) {
+            // Update existing
+            const { data: updated } = await supabase
+              .from("products")
+              .update(product)
+              .eq("shopify_id", product.shopify_id)
+              .select()
+              .single();
+            results.push(updated);
+          } else {
+            // Insert new
+            const { data: inserted } = await supabase
+              .from("products")
+              .insert([product])
+              .select()
+              .single();
+            results.push(inserted);
+          }
+        } catch (itemError) {
+          console.error(
+            `Failed to sync product ${product.shopify_id}:`,
+            itemError,
+          );
+        }
+      }
+
+      return { data: results, error: null };
+    }
   },
 };
 
@@ -366,13 +414,57 @@ export const Order = {
     const upserts = orders.map((o) => ({
       ...o,
       created_at: o.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }));
-    return await upsertWithFallback("orders", upserts, [
-      "shopify_id,user_id,store_id",
-      "shopify_id,user_id",
-      "shopify_id",
-      null,
-    ]);
+
+    // Try simple upsert first, then fallback to individual operations
+    try {
+      return await supabase
+        .from("orders")
+        .upsert(upserts, {
+          onConflict: "shopify_id",
+          ignoreDuplicates: false,
+        })
+        .select();
+    } catch (error) {
+      console.log("Upsert failed, trying individual operations for orders...");
+
+      // Fallback: check and insert/update individually
+      const results = [];
+      for (const order of upserts) {
+        try {
+          // Check if exists
+          const { data: existing } = await supabase
+            .from("orders")
+            .select("id")
+            .eq("shopify_id", order.shopify_id)
+            .maybeSingle();
+
+          if (existing) {
+            // Update existing
+            const { data: updated } = await supabase
+              .from("orders")
+              .update(order)
+              .eq("shopify_id", order.shopify_id)
+              .select()
+              .single();
+            results.push(updated);
+          } else {
+            // Insert new
+            const { data: inserted } = await supabase
+              .from("orders")
+              .insert([order])
+              .select()
+              .single();
+            results.push(inserted);
+          }
+        } catch (itemError) {
+          console.error(`Failed to sync order ${order.shopify_id}:`, itemError);
+        }
+      }
+
+      return { data: results, error: null };
+    }
   },
 };
 
@@ -397,13 +489,62 @@ export const Customer = {
     const upserts = customers.map((c) => ({
       ...c,
       created_at: c.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }));
-    return await upsertWithFallback("customers", upserts, [
-      "shopify_id,user_id,store_id",
-      "shopify_id,user_id",
-      "shopify_id",
-      null,
-    ]);
+
+    // Try simple upsert first, then fallback to individual operations
+    try {
+      return await supabase
+        .from("customers")
+        .upsert(upserts, {
+          onConflict: "shopify_id",
+          ignoreDuplicates: false,
+        })
+        .select();
+    } catch (error) {
+      console.log(
+        "Upsert failed, trying individual operations for customers...",
+      );
+
+      // Fallback: check and insert/update individually
+      const results = [];
+      for (const customer of upserts) {
+        try {
+          // Check if exists
+          const { data: existing } = await supabase
+            .from("customers")
+            .select("id")
+            .eq("shopify_id", customer.shopify_id)
+            .maybeSingle();
+
+          if (existing) {
+            // Update existing
+            const { data: updated } = await supabase
+              .from("customers")
+              .update(customer)
+              .eq("shopify_id", customer.shopify_id)
+              .select()
+              .single();
+            results.push(updated);
+          } else {
+            // Insert new
+            const { data: inserted } = await supabase
+              .from("customers")
+              .insert([customer])
+              .select()
+              .single();
+            results.push(inserted);
+          }
+        } catch (itemError) {
+          console.error(
+            `Failed to sync customer ${customer.shopify_id}:`,
+            itemError,
+          );
+        }
+      }
+
+      return { data: results, error: null };
+    }
   },
 };
 

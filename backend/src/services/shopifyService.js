@@ -189,6 +189,10 @@ export class ShopifyService {
   static async syncAllData(userId, shop, accessToken, storeId) {
     try {
       console.log("Starting Shopify sync process...");
+      console.log(
+        `Syncing for user: ${userId}, shop: ${shop}, store: ${storeId}`,
+      );
+
       const [products, orders, customers] = await Promise.all([
         this.getProductsFromShopify(accessToken, shop),
         this.getOrdersFromShopify(accessToken, shop),
@@ -198,32 +202,66 @@ export class ShopifyService {
         `Fetched from Shopify: ${products.length} products, ${orders.length} orders, ${customers.length} customers.`,
       );
 
-      const productsWithUser = products.map((p) => ({ ...p, user_id: userId, store_id: storeId }));
-      const ordersWithUser = orders.map((o) => ({ ...o, user_id: userId, store_id: storeId }));
+      const productsWithUser = products.map((p) => ({
+        ...p,
+        user_id: userId,
+        store_id: storeId,
+        updated_at: new Date().toISOString(),
+      }));
+      const ordersWithUser = orders.map((o) => ({
+        ...o,
+        user_id: userId,
+        store_id: storeId,
+        updated_at: new Date().toISOString(),
+      }));
       const customersWithUser = customers.map((c) => ({
         ...c,
         user_id: userId,
         store_id: storeId,
+        updated_at: new Date().toISOString(),
       }));
 
       console.log("Starting database update...");
-      if (productsWithUser.length > 0) {
-        await Product.updateMultiple(productsWithUser);
-        console.log("Synced products to DB.");
-      }
-      if (ordersWithUser.length > 0) {
-        await Order.updateMultiple(ordersWithUser);
-        console.log("Synced orders to DB.");
-      }
-      if (customersWithUser.length > 0) {
-        await Customer.updateMultiple(customersWithUser);
-        console.log("Synced customers to DB.");
-      }
-      console.log("Database update complete.");
+      let syncResults = {
+        products: [],
+        orders: [],
+        customers: [],
+      };
 
-      return { products, orders, customers };
+      if (productsWithUser.length > 0) {
+        console.log(`Syncing ${productsWithUser.length} products...`);
+        const productResult = await Product.updateMultiple(productsWithUser);
+        syncResults.products = productResult.data || [];
+        console.log(`Synced ${syncResults.products.length} products to DB.`);
+      }
+
+      if (ordersWithUser.length > 0) {
+        console.log(`Syncing ${ordersWithUser.length} orders...`);
+        const orderResult = await Order.updateMultiple(ordersWithUser);
+        syncResults.orders = orderResult.data || [];
+        console.log(`Synced ${syncResults.orders.length} orders to DB.`);
+      }
+
+      if (customersWithUser.length > 0) {
+        console.log(`Syncing ${customersWithUser.length} customers...`);
+        const customerResult = await Customer.updateMultiple(customersWithUser);
+        syncResults.customers = customerResult.data || [];
+        console.log(`Synced ${syncResults.customers.length} customers to DB.`);
+      }
+
+      console.log("Database update complete.");
+      console.log(
+        `Final sync results: ${syncResults.products.length} products, ${syncResults.orders.length} orders, ${syncResults.customers.length} customers`,
+      );
+
+      return {
+        products: syncResults.products,
+        orders: syncResults.orders,
+        customers: syncResults.customers,
+      };
     } catch (error) {
       console.error("Critical error during Shopify data sync:", error.message);
+      console.error("Error details:", error);
       // Re-throw the error to ensure the calling function knows the sync failed
       throw error;
     }

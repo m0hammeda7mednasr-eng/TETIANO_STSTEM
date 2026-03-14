@@ -40,13 +40,11 @@ const ensureHeartbeat = () => {
   }
 
   heartbeatTimer = setInterval(() => {
-    const now = new Date().toISOString();
     for (const [clientId, client] of clients.entries()) {
       if (client.res.writable) {
         try {
-          writeEvent(client.res, "heartbeat", {
-            at: now,
-          });
+          // Use a simple comment as a more robust keep-alive signal
+          client.res.write(`:ping\n\n`);
         } catch (e) {
           console.error(`Heartbeat: Error writing to client ${clientId}, removing.`, e);
           clients.delete(clientId);

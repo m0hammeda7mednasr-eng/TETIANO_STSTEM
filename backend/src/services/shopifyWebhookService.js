@@ -100,6 +100,23 @@ const parseTagList = (tagsValue) => {
 const serializeTagList = (tags) =>
   Array.from(new Set((tags || []).map((tag) => String(tag || "").trim()).filter(Boolean))).join(", ");
 
+const stripTetianoControlTags = (orderPayload) => {
+  const existingTags = parseTagList(orderPayload?.tags);
+  const filtered = existingTags.filter((tag) => {
+    const normalized = String(tag || "")
+      .toLowerCase()
+      .trim();
+    if (normalized.startsWith(TETIANO_STATUS_TAG_PREFIX)) {
+      return false;
+    }
+    return !TETIANO_PAYMENT_TAG_PREFIXES.some((prefix) =>
+      normalized.startsWith(prefix),
+    );
+  });
+
+  return serializeTagList(filtered);
+};
+
 const extractTagValueByPrefixes = (tags, prefixes = []) => {
   for (const rawTag of tags || []) {
     const tag = String(rawTag || "").trim();
@@ -180,30 +197,7 @@ const extractStatusFromOrderPayload = (orderPayload = {}) => {
 };
 
 const mergeTetianoControlTags = (orderPayload, { status = "", paymentMethod = "" } = {}) => {
-  const existingTags = parseTagList(orderPayload?.tags);
-  const filtered = existingTags.filter((tag) => {
-    const normalized = String(tag || "")
-      .toLowerCase()
-      .trim();
-    if (normalized.startsWith(TETIANO_STATUS_TAG_PREFIX)) {
-      return false;
-    }
-    return !TETIANO_PAYMENT_TAG_PREFIXES.some((prefix) =>
-      normalized.startsWith(prefix),
-    );
-  });
-
-  const normalizedStatus = normalizeOrderStatus(status);
-  if (normalizedStatus) {
-    filtered.push(`${TETIANO_STATUS_TAG_PREFIX}${normalizedStatus}`);
-  }
-
-  const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
-  if (normalizedPaymentMethod && normalizedPaymentMethod !== "none") {
-    filtered.push(`tetiano_pm:${normalizedPaymentMethod}`);
-  }
-
-  return serializeTagList(filtered);
+  return stripTetianoControlTags(orderPayload);
 };
 
 const mergeTetianoControlNoteAttributes = (

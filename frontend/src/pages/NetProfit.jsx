@@ -5,6 +5,7 @@ import { extractArray, extractObject } from "../utils/response";
 import {
   DollarSign,
   Edit,
+  Pencil,
   Package,
   Plus,
   Save,
@@ -24,6 +25,18 @@ const SUMMARY_DEFAULT = {
 };
 
 const CURRENCY_LABEL = "LE";
+const EMPTY_COST_FORM = {
+  cost_name: "",
+  cost_type: "ads",
+  amount: "",
+  apply_to: "per_unit",
+  description: "",
+};
+const FIXED_COST_CONFIGS = [
+  { key: "marketing", cost_name: "Marketing Cost", cost_type: "ads" },
+  { key: "shipping", cost_name: "Shipping Cost", cost_type: "shipping" },
+  { key: "other", cost_name: "Other Fixed Cost", cost_type: "other" },
+];
 
 const formatAmount = (value) => `${Number(value || 0).toFixed(2)} ${CURRENCY_LABEL}`;
 
@@ -40,13 +53,8 @@ export default function NetProfit() {
 
   const [showCostModal, setShowCostModal] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState(null);
-  const [newCost, setNewCost] = useState({
-    cost_name: "",
-    cost_type: "ads",
-    amount: "",
-    apply_to: "per_unit",
-    description: "",
-  });
+  const [editingOperationalCostId, setEditingOperationalCostId] = useState(null);
+  const [newCost, setNewCost] = useState(EMPTY_COST_FORM);
 
   const [fixedCosts, setFixedCosts] = useState({
     marketing: "",
@@ -84,10 +92,27 @@ export default function NetProfit() {
   const fetchOperationalCosts = async () => {
     try {
       const { data } = await api.get("/operational-costs");
-      setOperationalCosts(extractArray(data));
+      const list = extractArray(data);
+      setOperationalCosts(list);
+      setFixedCosts(buildFixedCostsState(list));
     } catch (error) {
       setOperationalCosts([]);
+      setFixedCosts({ marketing: "", shipping: "", other: "" });
     }
+  };
+
+  const buildFixedCostsState = (costs) => {
+    const activeFixedCosts = (costs || []).filter(
+      (cost) => !cost.product_id && cost.apply_to === "fixed" && cost.is_active !== false,
+    );
+
+    return FIXED_COST_CONFIGS.reduce((acc, config) => {
+      const total = activeFixedCosts
+        .filter((cost) => cost.cost_type === config.cost_type)
+        .reduce((sum, cost) => sum + Number(cost.amount || 0), 0);
+      acc[config.key] = total > 0 ? String(total) : "";
+      return acc;
+    }, {});
   };
 
   useEffect(() => {
@@ -138,38 +163,54 @@ export default function NetProfit() {
     }
   };
 
-  const openCostModal = (productId) => {
+  const openCostModal = (productId, cost = null) => {
     setSelectedProductId(productId);
+    setEditingOperationalCostId(cost?.id || null);
+    setNewCost(
+      cost
+        ? {
+            cost_name: cost.cost_name || "",
+            cost_type: cost.cost_type || "ads",
+            amount: String(cost.amount ?? ""),
+            apply_to: cost.apply_to || "per_unit",
+            description: cost.description || "",
+          }
+        : EMPTY_COST_FORM,
+    );
     setShowCostModal(true);
   };
 
   const closeCostModal = () => {
     setShowCostModal(false);
     setSelectedProductId(null);
-    setNewCost({
-      cost_name: "",
-      cost_type: "ads",
-      amount: "",
-      apply_to: "per_unit",
-      description: "",
-    });
+    setEditingOperationalCostId(null);
+    setNewCost(EMPTY_COST_FORM);
   };
 
-  const addOperationalCost = async () => {
+  const saveOperationalCost = async () => {
     if (!newCost.cost_name || !newCost.amount) {
       setMessage({ type: "error", text: "Cost name and amount are required" });
       return;
     }
 
     try {
-      await api.post("/operational-costs", {
+      const payload = {
         ...newCost,
         product_id: selectedProductId,
         amount: parseFloat(newCost.amount),
-      });
+      };
+
+      if (editingOperationalCostId) {
+        await api.put(`/operational-costs/${editingOperationalCostId}`, payload);
+      } else {
+        await api.post("/operational-costs", payload);
+      }
+
       setMessage({
         type: "success",
-        text: "Operational cost added successfully",
+        text: editingOperationalCostId
+          ? "Operational cost updated successfully"
+          : "Operational cost added successfully",
       });
       closeCostModal();
       await Promise.all([fetchProfitability(), fetchOperationalCosts()]);
@@ -182,28 +223,67 @@ export default function NetProfit() {
   };
 
   const saveFixedCosts = async () => {
-    const costs = [
-      { key: "marketing", cost_name: "Marketing Cost", cost_type: "ads" },
-      { key: "shipping", cost_name: "Shipping Cost", cost_type: "shipping" },
-      { key: "other", cost_name: "Other Fixed Cost", cost_type: "other" },
-    ];
-
     try {
-      for (const config of costs) {
-        const rawValue = fixedCosts[config.key];
-        if (!rawValue) continue;
+      for (const config of FIXED_COST_CONFIGS) {
+        const rawValue = String(fixedCosts[config.key] || "").trim();
+        const existingRows = operationalCosts
+          .filter(
+            (cost) =>
+              !cost.product_id &&
+              cost.apply_to === "fixed" &&
+              cost.cost_type === config.cost_type &&
+              cost.is_active !== false,
+          )
+          .sort(
+            (a, b) =>
+              new Date(b.updated_at || b.created_at || 0).getTime() -
+              new Date(a.updated_at || a.created_at || 0).getTime(),
+          );
 
-        await api.post("/operational-costs", {
-          cost_name: config.cost_name,
-          cost_type: config.cost_type,
-          amount: parseFloat(rawValue),
-          apply_to: "fixed",
-          product_id: null,
-        });
+        if (!rawValue) {
+          for (const cost of existingRows) {
+            await api.put(`/operational-costs/${cost.id}`, {
+              is_active: false,
+            });
+          }
+          continue;
+        }
+
+        const parsedAmount = parseFloat(rawValue);
+        if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+          throw new Error(`${config.cost_name} must be a valid number`);
+        }
+
+        const primaryRow = existingRows[0] || null;
+        const duplicateRows = existingRows.slice(1);
+
+        if (primaryRow) {
+          await api.put(`/operational-costs/${primaryRow.id}`, {
+            cost_name: config.cost_name,
+            cost_type: config.cost_type,
+            amount: parsedAmount,
+            apply_to: "fixed",
+            product_id: null,
+            is_active: true,
+          });
+        } else {
+          await api.post("/operational-costs", {
+            cost_name: config.cost_name,
+            cost_type: config.cost_type,
+            amount: parsedAmount,
+            apply_to: "fixed",
+            product_id: null,
+          });
+        }
+
+        for (const duplicateRow of duplicateRows) {
+          await api.put(`/operational-costs/${duplicateRow.id}`, {
+            is_active: false,
+          });
+        }
       }
 
       setMessage({ type: "success", text: "Fixed costs saved successfully" });
-      setFixedCosts({ marketing: "", shipping: "", other: "" });
       await Promise.all([fetchProfitability(), fetchOperationalCosts()]);
     } catch (error) {
       setMessage({
@@ -472,12 +552,19 @@ export default function NetProfit() {
                           )}
                           {opCosts.length > 0 && (
                             <div className="mt-1 text-xs text-gray-500 space-y-1">
-                              {opCosts.slice(0, 2).map((cost) => (
+                              {opCosts.map((cost) => (
                                 <div
                                   key={cost.id}
                                   className="flex items-center gap-1"
                                 >
                                   <span>{cost.cost_name}</span>
+                                  <button
+                                    onClick={() => openCostModal(product.id, cost)}
+                                    className="text-blue-500 hover:text-blue-700"
+                                    title="Edit cost"
+                                  >
+                                    <Pencil size={12} />
+                                  </button>
                                   <button
                                     onClick={() =>
                                       deleteOperationalCost(cost.id)
@@ -563,7 +650,9 @@ export default function NetProfit() {
       {showCostModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Add Product Cost</h2>
+            <h2 className="text-xl font-bold mb-4">
+              {editingOperationalCostId ? "Edit Product Cost" : "Add Product Cost"}
+            </h2>
             <div className="space-y-3">
               <input
                 type="text"
@@ -623,10 +712,10 @@ export default function NetProfit() {
             </div>
             <div className="flex gap-2 mt-4">
               <button
-                onClick={addOperationalCost}
+                onClick={saveOperationalCost}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2"
               >
-                Add
+                {editingOperationalCostId ? "Save Changes" : "Add"}
               </button>
               <button
                 onClick={closeCostModal}

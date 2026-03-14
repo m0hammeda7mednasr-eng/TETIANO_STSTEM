@@ -45,6 +45,9 @@ const parsePositiveAmount = (value) => {
   return parsed;
 };
 
+const sanitizeTextField = (value) => String(value || "").trim();
+const VALID_APPLY_TO_VALUES = new Set(["per_unit", "per_order", "fixed"]);
+
 const handleMappedError = (res, error) => {
   const mapped = mapOperationalCostError(error);
   if (!mapped) return false;
@@ -152,6 +155,22 @@ router.post("/", async (req, res) => {
         .json({ error: "Amount must be a valid number greater than or equal to 0" });
     }
 
+    const normalizedCostName = sanitizeTextField(cost_name);
+    const normalizedCostType = sanitizeTextField(cost_type);
+    const normalizedApplyTo = sanitizeTextField(apply_to || "per_unit");
+
+    if (!normalizedCostName || !normalizedCostType) {
+      return res
+        .status(400)
+        .json({ error: "cost_name and cost_type must not be empty" });
+    }
+
+    if (!VALID_APPLY_TO_VALUES.has(normalizedApplyTo)) {
+      return res.status(400).json({
+        error: "apply_to must be one of: per_unit, per_order, fixed",
+      });
+    }
+
     if (product_id) {
       const { data: existingProduct, error: productError } = await supabase
         .from("products")
@@ -176,11 +195,11 @@ router.post("/", async (req, res) => {
       .insert({
         user_id: userId,
         product_id: product_id || null,
-        cost_name,
-        cost_type,
+        cost_name: normalizedCostName,
+        cost_type: normalizedCostType,
         amount: parsedAmount,
-        apply_to: apply_to || "per_unit",
-        description,
+        apply_to: normalizedApplyTo,
+        description: description === undefined ? null : sanitizeTextField(description),
         is_active: true,
       })
       .select()
@@ -209,8 +228,21 @@ router.put("/:id", async (req, res) => {
       updated_at: new Date().toISOString(),
     };
 
-    if (cost_name !== undefined) updateData.cost_name = cost_name;
-    if (cost_type !== undefined) updateData.cost_type = cost_type;
+    if (cost_name !== undefined) {
+      const normalizedCostName = sanitizeTextField(cost_name);
+      if (!normalizedCostName) {
+        return res.status(400).json({ error: "cost_name must not be empty" });
+      }
+      updateData.cost_name = normalizedCostName;
+    }
+
+    if (cost_type !== undefined) {
+      const normalizedCostType = sanitizeTextField(cost_type);
+      if (!normalizedCostType) {
+        return res.status(400).json({ error: "cost_type must not be empty" });
+      }
+      updateData.cost_type = normalizedCostType;
+    }
 
     if (amount !== undefined) {
       const parsedAmount = parsePositiveAmount(amount);
@@ -222,8 +254,19 @@ router.put("/:id", async (req, res) => {
       updateData.amount = parsedAmount;
     }
 
-    if (apply_to !== undefined) updateData.apply_to = apply_to;
-    if (description !== undefined) updateData.description = description;
+    if (apply_to !== undefined) {
+      const normalizedApplyTo = sanitizeTextField(apply_to);
+      if (!VALID_APPLY_TO_VALUES.has(normalizedApplyTo)) {
+        return res.status(400).json({
+          error: "apply_to must be one of: per_unit, per_order, fixed",
+        });
+      }
+      updateData.apply_to = normalizedApplyTo;
+    }
+
+    if (description !== undefined) {
+      updateData.description = sanitizeTextField(description);
+    }
     if (is_active !== undefined) updateData.is_active = is_active;
 
     let query = supabase

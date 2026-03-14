@@ -103,6 +103,23 @@ const parseTagList = (tagsValue) => {
 const serializeTagList = (tags) =>
   Array.from(new Set((tags || []).map((tag) => String(tag || "").trim()).filter(Boolean))).join(", ");
 
+const stripTetianoControlTags = (orderData) => {
+  const existingTags = parseTagList(orderData?.tags);
+  const filtered = existingTags.filter((tag) => {
+    const normalized = String(tag || "")
+      .toLowerCase()
+      .trim();
+    if (normalized.startsWith(TETIANO_STATUS_TAG_PREFIX)) {
+      return false;
+    }
+    return !TETIANO_PAYMENT_TAG_PREFIXES.some((prefix) =>
+      normalized.startsWith(prefix),
+    );
+  });
+
+  return serializeTagList(filtered);
+};
+
 const extractTagValueByPrefixes = (tags, prefixes = []) => {
   for (const rawTag of tags || []) {
     const tag = String(rawTag || "").trim();
@@ -181,30 +198,7 @@ const extractStatusFromOrderData = (orderData) => {
 };
 
 const mergeTetianoControlTags = (orderData, { status = "", paymentMethod = "" } = {}) => {
-  const existingTags = parseTagList(orderData?.tags);
-  const filtered = existingTags.filter((tag) => {
-    const normalized = String(tag || "")
-      .toLowerCase()
-      .trim();
-    if (normalized.startsWith(TETIANO_STATUS_TAG_PREFIX)) {
-      return false;
-    }
-    return !TETIANO_PAYMENT_TAG_PREFIXES.some((prefix) =>
-      normalized.startsWith(prefix),
-    );
-  });
-
-  const normalizedStatus = normalizeOrderStatus(status);
-  if (normalizedStatus) {
-    filtered.push(`${TETIANO_STATUS_TAG_PREFIX}${normalizedStatus}`);
-  }
-
-  const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
-  if (normalizedPaymentMethod && normalizedPaymentMethod !== "none") {
-    filtered.push(`tetiano_pm:${normalizedPaymentMethod}`);
-  }
-
-  return serializeTagList(filtered);
+  return stripTetianoControlTags(orderData);
 };
 
 const mergeTetianoControlNoteAttributes = (
@@ -301,6 +295,118 @@ const buildShopifyHeaders = (accessToken) => ({
   "Content-Type": "application/json",
 });
 
+const getOrderNumericShopifyId = (order) => {
+  const numericShopifyId = Number.parseInt(String(order?.shopify_id || ""), 10);
+  if (!Number.isFinite(numericShopifyId)) {
+    throw new Error("Invalid Shopify order id");
+  }
+  return numericShopifyId;
+};
+
+const toMoneyString = (value) => parseFloat(value || 0).toFixed(2);
+
+const getOrderCurrency = (order, orderData = {}) =>
+  String(orderData?.currency || order?.currency || "USD").trim() || "USD";
+
+const getOrderOutstandingAmount = (order, orderData = {}) => {
+  const outstanding = parseFloat(orderData?.total_outstanding || 0);
+  if (Number.isFinite(outstanding) && outstanding > 0) {
+    return outstanding;
+  }
+
+  const total = parseFloat(
+    orderData?.current_total_price || orderData?.total_price || order?.total_price || 0,
+  );
+  return Number.isFinite(total) && total > 0 ? total : 0;
+};
+
+const getRefundableAmount = (order, orderData = {}) => {
+  const currentTotal = parseFloat(
+    orderData?.current_total_price || orderData?.total_price || order?.total_price || 0,
+  );
+  const refundedAmount = parseFloat(order?.total_refunded || 0);
+  const refundable = currentTotal - refundedAmount;
+  return Number.isFinite(refundable) && refundable > 0 ? refundable : 0;
+};
+
+const fetchShopifyOrderById = async ({ tokenData, order }) => {
+  const response = await axios.get(
+    `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/orders/${order.shopify_id}.json`,
+    {
+      headers: buildShopifyHeaders(tokenData.access_token),
+    },
+  );
+
+  return getShopifyOrderPayload(response?.data);
+};
+
+const fetchShopifyOrderTransactions = async ({ tokenData, order }) => {
+  const response = await axios.get(
+    `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/orders/${order.shopify_id}/transactions.json`,
+    {
+      headers: buildShopifyHeaders(tokenData.access_token),
+    },
+  );
+
+  return Array.isArray(response?.data?.transactions)
+    ? response.data.transactions
+    : [];
+};
+
+const createShopifyOrderTransaction = async ({
+  tokenData,
+  order,
+  transaction,
+}) => {
+  const response = await axios.post(
+    `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/orders/${order.shopify_id}/transactions.json`,
+    { transaction },
+    {
+      headers: buildShopifyHeaders(tokenData.access_token),
+    },
+  );
+
+  return response?.data || null;
+};
+
+const pickReferenceTransaction = (transactions = []) =>
+  [...(transactions || [])]
+    .filter((transaction) => {
+      const kind = String(transaction?.kind || "")
+        .toLowerCase()
+        .trim();
+      return kind === "sale" || kind === "capture";
+    })
+    .sort(
+      (a, b) =>
+        new Date(b?.processed_at || b?.created_at || 0).getTime() -
+        new Date(a?.processed_at || a?.created_at || 0).getTime(),
+    )[0] || null;
+
+const syncOrderMetadataToShopify = async ({
+  tokenData,
+  order,
+  logLine,
+  status = "",
+  paymentMethod = "",
+}) => {
+  const orderData = parseOrderData(order);
+  const mirroredControlData = applyTetianoControlValuesToOrderData(orderData, {
+    status,
+    paymentMethod,
+  });
+
+  return await updateShopifyOrderNote({
+    tokenData,
+    order,
+    logLine,
+    extraOrderFields: {
+      tags: mirroredControlData.tags,
+      note_attributes: mirroredControlData.note_attributes,
+    },
+  });
+};
+
 const updateShopifyOrderNote = async ({
   tokenData,
   order,
@@ -317,10 +423,7 @@ const updateShopifyOrderNote = async ({
   const parsedOrderData = parseOrderData(order);
   const existingNote = String(parsedOrderData?.note || order?.note || "").trim();
   const nextNote = appendLogLineToNote(existingNote, logLine);
-  const numericShopifyId = Number.parseInt(String(order.shopify_id), 10);
-  if (!Number.isFinite(numericShopifyId)) {
-    throw new Error("Invalid Shopify order id");
-  }
+  const numericShopifyId = getOrderNumericShopifyId(order);
 
   const response = await axios.put(
     `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/orders/${order.shopify_id}.json`,
@@ -938,20 +1041,14 @@ export class OrderManagementService {
         normalizeOrderStatus(order.status) ||
         extractStatusFromOrderData(orderData) ||
         normalizeOrderStatus(orderData?.financial_status);
-      const mirroredControlData = applyTetianoControlValuesToOrderData(orderData, {
-        status: statusForMirror,
-        paymentMethod: methodValue,
-      });
       const paymentMethodLine = `[Tetiano] Payment method changed from "${previousMethod}" to "${methodValue}" at ${new Date().toISOString()}`;
 
-      const responseData = await updateShopifyOrderNote({
+      const responseData = await syncOrderMetadataToShopify({
         tokenData,
         order,
         logLine: paymentMethodLine,
-        extraOrderFields: {
-          tags: mirroredControlData.tags,
-          note_attributes: mirroredControlData.note_attributes,
-        },
+        status: statusForMirror,
+        paymentMethod: methodValue,
       });
 
       const responseOrderPayload = getShopifyOrderPayload(responseData);
@@ -1024,12 +1121,26 @@ export class OrderManagementService {
         throw new Error("Invalid status");
       }
 
+      if (normalizedStatus === "partially_paid") {
+        throw new Error(
+          "Partial payment needs an exact amount and is not supported from this screen yet",
+        );
+      }
+
+      if (normalizedStatus === "partially_refunded") {
+        throw new Error(
+          "Partial refund needs an exact amount and is not supported from this screen yet",
+        );
+      }
+
+      if (normalizedStatus === "pending") {
+        throw new Error(
+          "Moving an order back to pending is not supported by Shopify from this screen",
+        );
+      }
+
       const orderData = parseOrderData(order);
       const paymentMethodForMirror = extractPaymentMethodFromOrderData(orderData);
-      const mirroredControlData = applyTetianoControlValuesToOrderData(orderData, {
-        status: normalizedStatus,
-        paymentMethod: paymentMethodForMirror,
-      });
       const statusLogLine = `[Tetiano] Status changed to "${normalizedStatus}" at ${new Date().toISOString()}${options?.voidReason ? ` (Reason: ${options.voidReason})` : ""}`;
 
       let responseData = null;
@@ -1045,14 +1156,12 @@ export class OrderManagementService {
         responseData = cancelResponse.data;
 
         try {
-          const metadataSyncResponse = await updateShopifyOrderNote({
+          const metadataSyncResponse = await syncOrderMetadataToShopify({
             tokenData,
             order,
             logLine: statusLogLine,
-            extraOrderFields: {
-              tags: mirroredControlData.tags,
-              note_attributes: mirroredControlData.note_attributes,
-            },
+            status: normalizedStatus,
+            paymentMethod: paymentMethodForMirror,
           });
           if (metadataSyncResponse) {
             responseData = metadataSyncResponse;
@@ -1063,23 +1172,155 @@ export class OrderManagementService {
             metadataSyncError?.message || metadataSyncError,
           );
         }
-      } else {
-        responseData = await updateShopifyOrderNote({
+      } else if (normalizedStatus === "paid") {
+        const outstandingAmount = getOrderOutstandingAmount(order, orderData);
+        if (outstandingAmount <= 0) {
+          responseData = await syncOrderMetadataToShopify({
+            tokenData,
+            order,
+            logLine: statusLogLine,
+            status: normalizedStatus,
+            paymentMethod: paymentMethodForMirror,
+          });
+        } else {
+          const transactions = await fetchShopifyOrderTransactions({
+            tokenData,
+            order,
+          });
+          const authorizationTransaction = [...transactions]
+            .filter((transaction) => {
+              const kind = String(transaction?.kind || "")
+                .toLowerCase()
+                .trim();
+              return kind === "authorization";
+            })
+            .sort(
+              (a, b) =>
+                new Date(b?.processed_at || b?.created_at || 0).getTime() -
+                new Date(a?.processed_at || a?.created_at || 0).getTime(),
+            )[0];
+
+          if (authorizationTransaction?.id) {
+            await createShopifyOrderTransaction({
+              tokenData,
+              order,
+              transaction: {
+                kind: "capture",
+                parent_id: authorizationTransaction.id,
+                amount: toMoneyString(outstandingAmount),
+                currency: getOrderCurrency(order, orderData),
+              },
+            });
+          } else {
+            const preferredGateway = String(
+              orderData?.payment_gateway_names?.[0] || "manual",
+            ).trim();
+            await createShopifyOrderTransaction({
+              tokenData,
+              order,
+              transaction: {
+                kind: "sale",
+                amount: toMoneyString(outstandingAmount),
+                currency: getOrderCurrency(order, orderData),
+                gateway: preferredGateway,
+                source: "external",
+              },
+            });
+          }
+
+          responseData = await syncOrderMetadataToShopify({
+            tokenData,
+            order,
+            logLine: statusLogLine,
+            status: normalizedStatus,
+            paymentMethod: paymentMethodForMirror,
+          });
+        }
+      } else if (normalizedStatus === "authorized") {
+        const outstandingAmount = getOrderOutstandingAmount(order, orderData);
+        if (outstandingAmount <= 0) {
+          throw new Error("This order does not have any outstanding amount to authorize");
+        }
+
+        const preferredGateway = String(
+          orderData?.payment_gateway_names?.[0] || "manual",
+        ).trim();
+        await createShopifyOrderTransaction({
+          tokenData,
+          order,
+          transaction: {
+            kind: "authorization",
+            amount: toMoneyString(outstandingAmount),
+            currency: getOrderCurrency(order, orderData),
+            gateway: preferredGateway,
+            source: "external",
+          },
+        });
+
+        responseData = await syncOrderMetadataToShopify({
           tokenData,
           order,
           logLine: statusLogLine,
-          extraOrderFields: {
-            tags: mirroredControlData.tags,
-            note_attributes: mirroredControlData.note_attributes,
+          status: normalizedStatus,
+          paymentMethod: paymentMethodForMirror,
+        });
+      } else if (normalizedStatus === "refunded") {
+        const refundableAmount = getRefundableAmount(order, orderData);
+        if (refundableAmount <= 0) {
+          throw new Error("This order does not have any refundable amount left");
+        }
+
+        const transactions = await fetchShopifyOrderTransactions({
+          tokenData,
+          order,
+        });
+        const referenceTransaction = pickReferenceTransaction(transactions);
+        if (!referenceTransaction?.id) {
+          throw new Error("No captured or sale transaction was found to refund");
+        }
+
+        await createShopifyOrderTransaction({
+          tokenData,
+          order,
+          transaction: {
+            kind: "refund",
+            parent_id: referenceTransaction.id,
+            amount: toMoneyString(refundableAmount),
+            currency: getOrderCurrency(order, orderData),
+            gateway: String(referenceTransaction.gateway || "").trim() || undefined,
           },
+        });
+
+        responseData = await syncOrderMetadataToShopify({
+          tokenData,
+          order,
+          logLine: statusLogLine,
+          status: normalizedStatus,
+          paymentMethod: paymentMethodForMirror,
+        });
+      } else {
+        responseData = await syncOrderMetadataToShopify({
+          tokenData,
+          order,
+          logLine: statusLogLine,
+          status: normalizedStatus,
+          paymentMethod: paymentMethodForMirror,
         });
       }
 
-      const responseOrderPayload = getShopifyOrderPayload(responseData);
+      let responseOrderPayload = getShopifyOrderPayload(responseData);
+      if (!responseOrderPayload) {
+        responseOrderPayload = await fetchShopifyOrderById({ tokenData, order });
+      }
+
+      const resolvedStatus =
+        normalizeOrderStatus(responseOrderPayload?.financial_status) ||
+        normalizeOrderStatus(responseOrderPayload?.tetiano_status) ||
+        normalizedStatus;
       const nextOrderData = applyTetianoControlValuesToOrderData(
         responseOrderPayload || orderData,
         {
-          status: normalizedStatus,
+          status: resolvedStatus,
           paymentMethod: paymentMethodForMirror,
         },
       );
@@ -1088,6 +1329,7 @@ export class OrderManagementService {
       await supabase
         .from("orders")
         .update({
+          status: resolvedStatus,
           data: nextOrderData,
           pending_sync: false,
           last_synced_at: new Date().toISOString(),

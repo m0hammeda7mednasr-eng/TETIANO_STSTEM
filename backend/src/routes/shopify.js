@@ -241,7 +241,10 @@ const isSchemaCompatibilityError = (error) => {
 
 const getSchemaErrorMessage = (error) =>
   String(
-    error?.message || error?.details || error?.hint || "Database schema mismatch",
+    error?.message ||
+      error?.details ||
+      error?.hint ||
+      "Database schema mismatch",
   ).trim();
 
 const getReadableShopifyError = (error) => {
@@ -264,13 +267,14 @@ const getReadableShopifyError = (error) => {
         return value.trim();
       }
       if (Array.isArray(value) && value.length > 0) {
-        return value.map((item) => String(item || "").trim()).filter(Boolean).join(", ");
+        return value
+          .map((item) => String(item || "").trim())
+          .filter(Boolean)
+          .join(", ");
       }
       if (value && typeof value === "object") {
         const flattened = Object.values(value)
-          .flatMap((item) =>
-            Array.isArray(item) ? item : [item],
-          )
+          .flatMap((item) => (Array.isArray(item) ? item : [item]))
           .map((item) => String(item || "").trim())
           .filter(Boolean);
         if (flattened.length > 0) {
@@ -407,10 +411,7 @@ const parseJsonField = (value) => {
   return value;
 };
 
-const TETIANO_PAYMENT_TAG_PREFIXES = [
-  "tetiano_payment_method:",
-  "tetiano_pm:",
-];
+const TETIANO_PAYMENT_TAG_PREFIXES = ["tetiano_payment_method:", "tetiano_pm:"];
 const TETIANO_PAYMENT_NOTE_ATTRIBUTE_NAMES = [
   "tetiano_payment_method",
   "tetiano_pm",
@@ -434,9 +435,7 @@ const normalizePaymentMethod = (value) => {
 
 const parseTagList = (tagsValue) => {
   if (Array.isArray(tagsValue)) {
-    return tagsValue
-      .map((tag) => String(tag || "").trim())
-      .filter(Boolean);
+    return tagsValue.map((tag) => String(tag || "").trim()).filter(Boolean);
   }
 
   return String(tagsValue || "")
@@ -465,7 +464,11 @@ const extractTagValueByPrefixes = (tags, prefixes = []) => {
 const getNoteAttributeValue = (data, keys = []) => {
   const normalizedKeys = new Set(
     (keys || [])
-      .map((key) => String(key || "").toLowerCase().trim())
+      .map((key) =>
+        String(key || "")
+          .toLowerCase()
+          .trim(),
+      )
       .filter(Boolean),
   );
   const attributes = Array.isArray(data?.note_attributes)
@@ -508,7 +511,10 @@ const resolveManualPaymentMethodFromData = (data = {}) => {
   );
 };
 
-const normalizeOrderReference = (value) => String(value || "").trim().toLowerCase();
+const normalizeOrderReference = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
 
 const findOrderByReferenceForUser = async (userId, orderReference) => {
   const normalizedReference = String(orderReference || "").trim();
@@ -617,12 +623,16 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
 
   if (query.min_total !== undefined) {
     const minTotal = toNumber(query.min_total);
-    filtered = filtered.filter((order) => toNumber(order.total_price) >= minTotal);
+    filtered = filtered.filter(
+      (order) => toNumber(order.total_price) >= minTotal,
+    );
   }
 
   if (query.max_total !== undefined) {
     const maxTotal = toNumber(query.max_total);
-    filtered = filtered.filter((order) => toNumber(order.total_price) <= maxTotal);
+    filtered = filtered.filter(
+      (order) => toNumber(order.total_price) <= maxTotal,
+    );
   }
 
   if (query.payment_status && query.payment_status !== "all") {
@@ -649,7 +659,9 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
   if (query.fulfillment_status && query.fulfillment_status !== "all") {
     const fulfillmentStatus = String(query.fulfillment_status).toLowerCase();
     filtered = filtered.filter((order) => {
-      const status = String(order.fulfillment_status || "").toLowerCase().trim();
+      const status = String(order.fulfillment_status || "")
+        .toLowerCase()
+        .trim();
       if (fulfillmentStatus === "unfulfilled") {
         return !status || status === "unfulfilled" || status === "null";
       }
@@ -718,7 +730,8 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
   }
 
   const sortBy = String(query.sort_by || "created_at").toLowerCase();
-  const sortDir = String(query.sort_dir || "desc").toLowerCase() === "asc" ? 1 : -1;
+  const sortDir =
+    String(query.sort_dir || "desc").toLowerCase() === "asc" ? 1 : -1;
   filtered.sort((a, b) => {
     if (sortBy === "total_price") {
       return (toNumber(a.total_price) - toNumber(b.total_price)) * sortDir;
@@ -726,12 +739,16 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
     if (sortBy === "order_number") {
       return (toNumber(a.order_number) - toNumber(b.order_number)) * sortDir;
     }
-    return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * sortDir;
+    return (
+      (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) *
+      sortDir
+    );
   });
 
   const offset = Math.max(0, parseInt(query.offset, 10) || 0);
   const limitValue = parseInt(query.limit, 10);
-  const limit = Number.isFinite(limitValue) && limitValue > 0 ? limitValue : null;
+  const limit =
+    Number.isFinite(limitValue) && limitValue > 0 ? limitValue : null;
   if (limit === null) return filtered;
   return filtered.slice(offset, offset + limit);
 };
@@ -802,7 +819,9 @@ const syncRecentOrdersWithCooldown = async ({
     const latestKnownMs = parseTimestampValue(latestKnownOrderAt);
     const fallbackStart = nowMs - ORDER_BACKGROUND_SYNC_LOOKBACK_MS;
     const updatedAtMin = new Date(
-      latestKnownMs > 0 ? Math.max(fallbackStart, latestKnownMs - 60 * 60 * 1000) : fallbackStart,
+      latestKnownMs > 0
+        ? Math.max(fallbackStart, latestKnownMs - 60 * 60 * 1000)
+        : fallbackStart,
     ).toISOString();
 
     const runSync = async () => {
@@ -907,19 +926,27 @@ const applyProductsQueryFilters = (rows, query = {}) => {
       if (syncStatus === "failed") return Boolean(product.sync_error);
       if (syncStatus === "synced") return Boolean(product.last_synced_at);
       if (syncStatus === "never")
-        return !product.pending_sync && !product.sync_error && !product.last_synced_at;
+        return (
+          !product.pending_sync &&
+          !product.sync_error &&
+          !product.last_synced_at
+        );
       return true;
     });
   }
 
   if (query.min_price !== undefined) {
     const minPrice = toNumber(query.min_price);
-    filtered = filtered.filter((product) => toNumber(product.price) >= minPrice);
+    filtered = filtered.filter(
+      (product) => toNumber(product.price) >= minPrice,
+    );
   }
 
   if (query.max_price !== undefined) {
     const maxPrice = toNumber(query.max_price);
-    filtered = filtered.filter((product) => toNumber(product.price) <= maxPrice);
+    filtered = filtered.filter(
+      (product) => toNumber(product.price) <= maxPrice,
+    );
   }
 
   if (query.min_inventory !== undefined) {
@@ -939,7 +966,9 @@ const applyProductsQueryFilters = (rows, query = {}) => {
   if (query.updated_from) {
     const from = new Date(String(query.updated_from));
     from.setHours(0, 0, 0, 0);
-    filtered = filtered.filter((product) => new Date(product.updated_at) >= from);
+    filtered = filtered.filter(
+      (product) => new Date(product.updated_at) >= from,
+    );
   }
 
   if (query.updated_to) {
@@ -949,21 +978,32 @@ const applyProductsQueryFilters = (rows, query = {}) => {
   }
 
   const sortBy = String(query.sort_by || "updated_at").toLowerCase();
-  const sortDir = String(query.sort_dir || "desc").toLowerCase() === "asc" ? 1 : -1;
+  const sortDir =
+    String(query.sort_dir || "desc").toLowerCase() === "asc" ? 1 : -1;
   filtered.sort((a, b) => {
-    if (sortBy === "price") return (toNumber(a.price) - toNumber(b.price)) * sortDir;
+    if (sortBy === "price")
+      return (toNumber(a.price) - toNumber(b.price)) * sortDir;
     if (sortBy === "inventory_quantity") {
-      return (toNumber(a.inventory_quantity) - toNumber(b.inventory_quantity)) * sortDir;
+      return (
+        (toNumber(a.inventory_quantity) - toNumber(b.inventory_quantity)) *
+        sortDir
+      );
     }
     if (sortBy === "title") {
-      return String(a.title || "").localeCompare(String(b.title || "")) * sortDir;
+      return (
+        String(a.title || "").localeCompare(String(b.title || "")) * sortDir
+      );
     }
-    return (new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()) * sortDir;
+    return (
+      (new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()) *
+      sortDir
+    );
   });
 
   const offset = Math.max(0, parseInt(query.offset, 10) || 0);
   const limitValue = parseInt(query.limit, 10);
-  const limit = Number.isFinite(limitValue) && limitValue > 0 ? limitValue : null;
+  const limit =
+    Number.isFinite(limitValue) && limitValue > 0 ? limitValue : null;
   if (limit === null) return filtered;
   return filtered.slice(offset, offset + limit);
 };
@@ -976,8 +1016,7 @@ router.post("/auth-url", verifyToken, async (req, res) => {
 
     if (!inputShop || !SHOP_DOMAIN_REGEX.test(inputShop)) {
       return res.status(400).json({
-        error:
-          "Invalid shop domain. Use format: your-store.myshopify.com",
+        error: "Invalid shop domain. Use format: your-store.myshopify.com",
       });
     }
 
@@ -1006,7 +1045,9 @@ router.post("/auth-url", verifyToken, async (req, res) => {
 // 2. OAuth Callback
 router.get("/callback", async (req, res) => {
   const { code, state } = req.query;
-  const shop = String(req.query?.shop || "").trim().toLowerCase();
+  const shop = String(req.query?.shop || "")
+    .trim()
+    .toLowerCase();
   const userId = state;
   const frontendUrl = normalizeBaseUrl(
     process.env.FRONTEND_URL || "http://localhost:3000",
@@ -1093,10 +1134,7 @@ router.get("/callback", async (req, res) => {
       callbackParams.set("store_id", storeId);
     }
     if (initialSyncCounts) {
-      callbackParams.set(
-        "sync_counts",
-        JSON.stringify(initialSyncCounts),
-      );
+      callbackParams.set("sync_counts", JSON.stringify(initialSyncCounts));
     }
 
     res.redirect(`${frontendUrl}/settings?${callbackParams.toString()}`);
@@ -1120,77 +1158,85 @@ router.post(
   verifyToken,
   requirePermission("can_manage_settings"),
   async (req, res) => {
-  try {
-    const userId = req.user.id; // Changed from req.user.userId
-    const requestedStoreId = getRequestedStoreId(req);
-    const isAdmin = await resolveIsAdmin(req);
+    try {
+      const userId = req.user.id; // Changed from req.user.userId
+      const requestedStoreId = getRequestedStoreId(req);
+      const isAdmin = await resolveIsAdmin(req);
 
-    const tokenData = await resolveSyncToken({
-      userId,
-      requestedStoreId,
-      isAdmin,
-    });
+      const tokenData = await resolveSyncToken({
+        userId,
+        requestedStoreId,
+        isAdmin,
+      });
 
-    if (!tokenData) {
-      return res
-        .status(400)
-        .json({
+      if (!tokenData) {
+        return res.status(400).json({
           error: "Shopify is not connected for this account/store.",
           code: "SHOPIFY_NOT_CONNECTED",
         });
-    }
+      }
 
-    const syncOwnerUserId = tokenData.user_id || userId;
-    const syncStoreId = requestedStoreId || tokenData.store_id || null;
+      const syncOwnerUserId = tokenData.user_id || userId;
 
-    const { products, orders, customers } = await ShopifyService.syncAllData(
-      syncOwnerUserId,
-      tokenData.shop,
-      tokenData.access_token,
-      syncStoreId,
-    );
-    const latestSyncedOrder = [...(orders || [])].sort(
-      (a, b) =>
-        parseTimestampValue(b?.updated_at) - parseTimestampValue(a?.updated_at),
-    )[0] || null;
-    let webhookSync = null;
-    try {
-      webhookSync = await ensureWebhooksRegistered({
-        shop: tokenData.shop,
-        accessToken: tokenData.access_token,
-        webhookAddress: getWebhookAddress(req),
+      // Force store ID to ensure data linking - line 1144
+      let syncStoreId = requestedStoreId || tokenData.store_id;
+
+      // If no store ID, create/use default store
+      if (!syncStoreId) {
+        syncStoreId = "59b47070-f018-4919-b628-1009af216fd7"; // Default store UUID
+        console.log("Using default store ID for sync:", syncStoreId);
+      }
+
+      const { products, orders, customers } = await ShopifyService.syncAllData(
+        syncOwnerUserId,
+        tokenData.shop,
+        tokenData.access_token,
+        syncStoreId,
+      );
+      const latestSyncedOrder =
+        [...(orders || [])].sort(
+          (a, b) =>
+            parseTimestampValue(b?.updated_at) -
+            parseTimestampValue(a?.updated_at),
+        )[0] || null;
+      let webhookSync = null;
+      try {
+        webhookSync = await ensureWebhooksRegistered({
+          shop: tokenData.shop,
+          accessToken: tokenData.access_token,
+          webhookAddress: getWebhookAddress(req),
+        });
+      } catch (webhookError) {
+        console.error("Webhook registration error during sync:", webhookError);
+        webhookSync = {
+          error: "Webhook registration failed",
+        };
+      }
+
+      res.json({
+        success: true,
+        message: "Data synced successfully",
+        store_id: syncStoreId,
+        webhook_sync: webhookSync,
+        counts: {
+          products: products.length,
+          orders: orders.length,
+          customers: customers.length,
+        },
+        latest_order: latestSyncedOrder
+          ? {
+              shopify_id: latestSyncedOrder.shopify_id || null,
+              order_number: latestSyncedOrder.order_number || null,
+              financial_status: latestSyncedOrder.status || null,
+              created_at: latestSyncedOrder.created_at || null,
+              updated_at: latestSyncedOrder.updated_at || null,
+            }
+          : null,
       });
-    } catch (webhookError) {
-      console.error("Webhook registration error during sync:", webhookError);
-      webhookSync = {
-        error: "Webhook registration failed",
-      };
+    } catch (error) {
+      console.error("Sync error:", error);
+      res.status(500).json({ error: "Failed to sync data from Shopify." });
     }
-
-    res.json({
-      success: true,
-      message: "Data synced successfully",
-      store_id: syncStoreId,
-      webhook_sync: webhookSync,
-      counts: {
-        products: products.length,
-        orders: orders.length,
-        customers: customers.length,
-      },
-      latest_order: latestSyncedOrder
-        ? {
-            shopify_id: latestSyncedOrder.shopify_id || null,
-            order_number: latestSyncedOrder.order_number || null,
-            financial_status: latestSyncedOrder.status || null,
-            created_at: latestSyncedOrder.created_at || null,
-            updated_at: latestSyncedOrder.updated_at || null,
-          }
-        : null,
-    });
-  } catch (error) {
-    console.error("Sync error:", error);
-    res.status(500).json({ error: "Failed to sync data from Shopify." });
-  }
   },
 );
 
@@ -1237,77 +1283,83 @@ router.post(
   verifyToken,
   requirePermission("can_manage_settings"),
   async (req, res) => {
-  try {
-    const requestedStoreId = getRequestedStoreId(req);
-    const isAdmin = await resolveIsAdmin(req);
-    const userId = req.user.id;
+    try {
+      const requestedStoreId = getRequestedStoreId(req);
+      const isAdmin = await resolveIsAdmin(req);
+      const userId = req.user.id;
 
-    const tokenData = await resolveSyncToken({
-      userId,
-      requestedStoreId,
-      isAdmin,
-    });
-
-    if (!tokenData) {
-      return res.status(400).json({
-        error: "Shopify is not connected for this account/store.",
-        code: "SHOPIFY_NOT_CONNECTED",
+      const tokenData = await resolveSyncToken({
+        userId,
+        requestedStoreId,
+        isAdmin,
       });
-    }
 
-    const isConnectionOwner = String(tokenData.user_id || "") === String(userId || "");
-    const webhookAddress = getWebhookAddress(req);
-    if (isConnectionOwner && webhookAddress) {
-      try {
-        await removeManagedWebhooks({
-          shop: tokenData.shop,
-          accessToken: tokenData.access_token,
-          webhookAddress,
+      if (!tokenData) {
+        return res.status(400).json({
+          error: "Shopify is not connected for this account/store.",
+          code: "SHOPIFY_NOT_CONNECTED",
         });
-      } catch (webhookError) {
-        console.error("Failed to remove Shopify webhooks during disconnect:", webhookError);
       }
-    }
 
-    const { supabase } = await import("../supabaseClient.js");
-    const storeId = requestedStoreId || tokenData.store_id || null;
+      const isConnectionOwner =
+        String(tokenData.user_id || "") === String(userId || "");
+      const webhookAddress = getWebhookAddress(req);
+      if (isConnectionOwner && webhookAddress) {
+        try {
+          await removeManagedWebhooks({
+            shop: tokenData.shop,
+            accessToken: tokenData.access_token,
+            webhookAddress,
+          });
+        } catch (webhookError) {
+          console.error(
+            "Failed to remove Shopify webhooks during disconnect:",
+            webhookError,
+          );
+        }
+      }
 
-    if (isConnectionOwner) {
-      let deleteTokensQuery = supabase
-        .from("shopify_tokens")
-        .delete()
-        .eq("user_id", userId)
-        .eq("shop", tokenData.shop);
+      const { supabase } = await import("../supabaseClient.js");
+      const storeId = requestedStoreId || tokenData.store_id || null;
+
+      if (isConnectionOwner) {
+        let deleteTokensQuery = supabase
+          .from("shopify_tokens")
+          .delete()
+          .eq("user_id", userId)
+          .eq("shop", tokenData.shop);
+        if (storeId) {
+          deleteTokensQuery = deleteTokensQuery.eq("store_id", storeId);
+        }
+        const { error: deleteTokensError } = await deleteTokensQuery;
+        if (deleteTokensError) {
+          return res.status(500).json({ error: deleteTokensError.message });
+        }
+      }
+
       if (storeId) {
-        deleteTokensQuery = deleteTokensQuery.eq("store_id", storeId);
+        await supabase
+          .from("user_stores")
+          .delete()
+          .eq("user_id", userId)
+          .eq("store_id", storeId);
       }
-      const { error: deleteTokensError } = await deleteTokensQuery;
-      if (deleteTokensError) {
-        return res.status(500).json({ error: deleteTokensError.message });
-      }
-    }
 
-    if (storeId) {
-      await supabase
-        .from("user_stores")
-        .delete()
-        .eq("user_id", userId)
-        .eq("store_id", storeId);
+      res.json({
+        success: true,
+        message: isConnectionOwner
+          ? "Shopify disconnected successfully."
+          : "Your access to this Shopify store has been removed.",
+        shop: tokenData.shop,
+        store_id: storeId,
+        disconnected_scope: isConnectionOwner
+          ? "store_connection"
+          : "user_access",
+      });
+    } catch (error) {
+      console.error("Disconnect Shopify error:", error);
+      res.status(500).json({ error: "Failed to disconnect Shopify." });
     }
-
-    res.json({
-      success: true,
-      message: isConnectionOwner
-        ? "Shopify disconnected successfully."
-        : "Your access to this Shopify store has been removed.",
-      shop: tokenData.shop,
-      store_id: storeId,
-      disconnected_scope: isConnectionOwner ? "store_connection" : "user_access",
-    });
-  } catch (error) {
-    console.error("Disconnect Shopify error:", error);
-    res.status(500).json({ error: "Failed to disconnect Shopify." });
-  }
   },
 );
 
@@ -1371,25 +1423,28 @@ router.get(
   verifyToken,
   requirePermission("can_view_products"),
   async (req, res) => {
-  try {
-    const isAdmin = await resolveIsAdmin(req);
-    const { data, error } = await Product.findByUser(req.user.id);
-    if (error) {
-      console.error("Error fetching products:", error);
-      return res.status(500).json({ error: error.message });
+    try {
+      const isAdmin = await resolveIsAdmin(req);
+      const { data, error } = await Product.findByUser(req.user.id);
+      if (error) {
+        console.error("Error fetching products:", error);
+        return res.status(500).json({ error: error.message });
+      }
+      console.log(
+        `Returning ${data?.length || 0} products for user ${req.user.id}`,
+      );
+      const sanitizedProducts = (data || []).map((product) =>
+        sanitizeProductForRole(product, isAdmin),
+      );
+      const filteredProducts = applyProductsQueryFilters(
+        sanitizedProducts,
+        req.query,
+      );
+      res.json(filteredProducts);
+    } catch (e) {
+      console.error("Exception fetching products:", e);
+      res.status(500).json({ error: e.message });
     }
-    console.log(
-      `Returning ${data?.length || 0} products for user ${req.user.id}`,
-    );
-    const sanitizedProducts = (data || []).map((product) =>
-      sanitizeProductForRole(product, isAdmin),
-    );
-    const filteredProducts = applyProductsQueryFilters(sanitizedProducts, req.query);
-    res.json(filteredProducts);
-  } catch (e) {
-    console.error("Exception fetching products:", e);
-    res.status(500).json({ error: e.message });
-  }
   },
 );
 router.get(
@@ -1397,53 +1452,63 @@ router.get(
   verifyToken,
   requirePermission("can_view_orders"),
   async (req, res) => {
-  try {
-    const isAdmin = await resolveIsAdmin(req);
-    const syncRecentParam = String(req.query.sync_recent || "").toLowerCase().trim();
-    const shouldSyncRecent = syncRecentParam !== "false";
-    const forceSyncRecent = syncRecentParam === "force";
-    let liveSyncResult = null;
+    try {
+      const isAdmin = await resolveIsAdmin(req);
+      const syncRecentParam = String(req.query.sync_recent || "")
+        .toLowerCase()
+        .trim();
+      const shouldSyncRecent = syncRecentParam !== "false";
+      const forceSyncRecent = syncRecentParam === "force";
+      let liveSyncResult = null;
 
-    if (shouldSyncRecent) {
-      // We need to check the latest order timestamp before attempting the sync
-      const { data: existingOrders } = await Order.findByUser(req.user.id);
-      const latestKnownOrderAt = getLatestOrderTimestamp(existingOrders || []);
+      if (shouldSyncRecent) {
+        // We need to check the latest order timestamp before attempting the sync
+        const { data: existingOrders } = await Order.findByUser(req.user.id);
+        const latestKnownOrderAt = getLatestOrderTimestamp(
+          existingOrders || [],
+        );
 
-      liveSyncResult = await syncRecentOrdersWithCooldown({
-        userId: req.user.id,
-        requestedStoreId: getRequestedStoreId(req),
-        isAdmin,
-        latestKnownOrderAt,
-        waitForCompletion: true,
-        forceRun: forceSyncRecent,
-      });
+        liveSyncResult = await syncRecentOrdersWithCooldown({
+          userId: req.user.id,
+          requestedStoreId: getRequestedStoreId(req),
+          isAdmin,
+          latestKnownOrderAt,
+          waitForCompletion: true,
+          forceRun: forceSyncRecent,
+        });
+      }
+
+      // After any potential sync, ALWAYS fetch the latest data from the DB.
+      // This ensures that data from a full sync is also reflected.
+      const { data, error } = await Order.findByUser(req.user.id);
+      if (error) {
+        console.error("Error fetching orders:", error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      console.log(
+        `Returning ${data?.length || 0} orders for user ${req.user.id}`,
+      );
+      const normalizedOrders = (data || []).map((order) => ({
+        ...order,
+        financial_status: getOrderFinancialStatus(order),
+        payment_method: resolveOrderPaymentMethod(order),
+      }));
+      const filteredOrders = applyOrdersQueryFilters(
+        normalizedOrders,
+        req.query,
+      );
+      if (liveSyncResult) {
+        res.setHeader(
+          "X-Orders-Live-Sync",
+          liveSyncResult.reason || "attempted",
+        );
+      }
+      res.json(filteredOrders);
+    } catch (e) {
+      console.error("Exception fetching orders:", e);
+      res.status(500).json({ error: e.message });
     }
-
-    // After any potential sync, ALWAYS fetch the latest data from the DB.
-    // This ensures that data from a full sync is also reflected.
-    const { data, error } = await Order.findByUser(req.user.id);
-    if (error) {
-      console.error("Error fetching orders:", error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    console.log(
-      `Returning ${data?.length || 0} orders for user ${req.user.id}`,
-    );
-    const normalizedOrders = (data || []).map((order) => ({
-      ...order,
-      financial_status: getOrderFinancialStatus(order),
-      payment_method: resolveOrderPaymentMethod(order),
-    }));
-    const filteredOrders = applyOrdersQueryFilters(normalizedOrders, req.query);
-    if (liveSyncResult) {
-      res.setHeader("X-Orders-Live-Sync", liveSyncResult.reason || "attempted");
-    }
-    res.json(filteredOrders);
-  } catch (e) {
-    console.error("Exception fetching orders:", e);
-    res.status(500).json({ error: e.message });
-  }
   },
 );
 router.get(
@@ -1451,20 +1516,20 @@ router.get(
   verifyToken,
   requirePermission("can_view_customers"),
   async (req, res) => {
-  try {
-    const { data, error } = await Customer.findByUser(req.user.id);
-    if (error) {
-      console.error("Error fetching customers:", error);
-      return res.status(500).json({ error: error.message });
-    }
-    console.log(
-      `Returning ${data?.length || 0} customers for user ${req.user.id}`,
-    );
+    try {
+      const { data, error } = await Customer.findByUser(req.user.id);
+      if (error) {
+        console.error("Error fetching customers:", error);
+        return res.status(500).json({ error: error.message });
+      }
+      console.log(
+        `Returning ${data?.length || 0} customers for user ${req.user.id}`,
+      );
       res.json(data || []);
-  } catch (e) {
-    console.error("Exception fetching customers:", e);
-    res.status(500).json({ error: e.message });
-  }
+    } catch (e) {
+      console.error("Exception fetching customers:", e);
+      res.status(500).json({ error: e.message });
+    }
   },
 );
 router.get(
@@ -1472,20 +1537,20 @@ router.get(
   verifyToken,
   requirePermission("can_view_products"),
   async (req, res) => {
-  try {
-    const isAdmin = await resolveIsAdmin(req);
-    const { data, error } = await Product.findByIdForUser(
-      req.user.id,
-      req.params.id,
-    );
-    if (error) return res.status(500).json({ error: error.message });
-    if (!data) {
-      return res.status(404).json({ error: "Product not found" });
+    try {
+      const isAdmin = await resolveIsAdmin(req);
+      const { data, error } = await Product.findByIdForUser(
+        req.user.id,
+        req.params.id,
+      );
+      if (error) return res.status(500).json({ error: error.message });
+      if (!data) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      res.json(sanitizeProductForRole(data, isAdmin));
+    } catch (e) {
+      res.status(500).json({ error: e.message });
     }
-    res.json(sanitizeProductForRole(data, isAdmin));
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
   },
 );
 
@@ -1494,21 +1559,21 @@ router.get(
   verifyToken,
   requirePermission("can_view_products"),
   async (req, res) => {
-  try {
-    const productId = req.params.id;
-    const userId = req.user.id;
-    const isAdmin = await resolveIsAdmin(req);
+    try {
+      const productId = req.params.id;
+      const userId = req.user.id;
+      const isAdmin = await resolveIsAdmin(req);
 
-    const product = await ProductManagementService.getProductDetails(
-      userId,
-      productId,
-    );
+      const product = await ProductManagementService.getProductDetails(
+        userId,
+        productId,
+      );
 
       res.json(sanitizeProductForRole(product, isAdmin));
-  } catch (error) {
-    console.error("Get product details error:", error);
-    res.status(500).json({ error: error.message });
-  }
+    } catch (error) {
+      console.error("Get product details error:", error);
+      res.status(500).json({ error: error.message });
+    }
   },
 );
 router.get(
@@ -1516,19 +1581,19 @@ router.get(
   verifyToken,
   requirePermission("can_view_orders"),
   async (req, res) => {
-  try {
-    const { data, error } = await Order.findByIdForUser(
-      req.user.id,
-      req.params.id,
-    );
-    if (error) return res.status(500).json({ error: error.message });
-    if (!data) {
-      return res.status(404).json({ error: "Order not found" });
+    try {
+      const { data, error } = await Order.findByIdForUser(
+        req.user.id,
+        req.params.id,
+      );
+      if (error) return res.status(500).json({ error: error.message });
+      if (!data) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
     }
-    res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
   },
 );
 
@@ -1539,25 +1604,27 @@ router.post(
   verifyToken,
   requirePermission("can_edit_products"),
   async (req, res) => {
-  try {
-    const { price } = req.body;
-    const productId = req.params.id;
-    const userId = req.user.id;
+    try {
+      const { price } = req.body;
+      const productId = req.params.id;
+      const userId = req.user.id;
 
-    if (price === undefined || price === null) {
-      return res.status(400).json({ error: "Price is required" });
+      if (price === undefined || price === null) {
+        return res.status(400).json({ error: "Price is required" });
+      }
+
+      const result = await ProductUpdateService.updatePrice(
+        userId,
+        productId,
+        parseFloat(price),
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Update price error:", error);
+      res
+        .status(resolveUpdateErrorStatusCode(error.message))
+        .json({ error: error.message });
     }
-
-    const result = await ProductUpdateService.updatePrice(
-      userId,
-      productId,
-      parseFloat(price),
-    );
-    res.json(result);
-  } catch (error) {
-    console.error("Update price error:", error);
-    res.status(resolveUpdateErrorStatusCode(error.message)).json({ error: error.message });
-  }
   },
 );
 
@@ -1566,25 +1633,27 @@ router.post(
   verifyToken,
   requirePermission("can_edit_products"),
   async (req, res) => {
-  try {
-    const { inventory } = req.body;
-    const productId = req.params.id;
-    const userId = req.user.id;
+    try {
+      const { inventory } = req.body;
+      const productId = req.params.id;
+      const userId = req.user.id;
 
-    if (inventory === undefined || inventory === null) {
-      return res.status(400).json({ error: "Inventory is required" });
+      if (inventory === undefined || inventory === null) {
+        return res.status(400).json({ error: "Inventory is required" });
+      }
+
+      const result = await ProductUpdateService.updateInventory(
+        userId,
+        productId,
+        parseInt(inventory),
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Update inventory error:", error);
+      res
+        .status(resolveUpdateErrorStatusCode(error.message))
+        .json({ error: error.message });
     }
-
-    const result = await ProductUpdateService.updateInventory(
-      userId,
-      productId,
-      parseInt(inventory),
-    );
-    res.json(result);
-  } catch (error) {
-    console.error("Update inventory error:", error);
-    res.status(resolveUpdateErrorStatusCode(error.message)).json({ error: error.message });
-  }
   },
 );
 
@@ -1593,43 +1662,42 @@ router.post(
   verifyToken,
   requirePermission("can_edit_products"),
   async (req, res) => {
-  try {
-    const isAdmin = await resolveIsAdmin(req);
-    const { price, cost_price, inventory } = req.body;
-    const productId = req.params.id;
-    const userId = req.user.id;
+    try {
+      const isAdmin = await resolveIsAdmin(req);
+      const { price, cost_price, inventory } = req.body;
+      const productId = req.params.id;
+      const userId = req.user.id;
 
-    if (
-      (cost_price !== undefined && cost_price !== null) &&
-      !isAdmin
-    ) {
-      return res.status(403).json({
-        error: "Access denied: admin access required for cost price updates",
-      });
+      if (cost_price !== undefined && cost_price !== null && !isAdmin) {
+        return res.status(403).json({
+          error: "Access denied: admin access required for cost price updates",
+        });
+      }
+
+      const updates = {};
+      if (price !== undefined && price !== null)
+        updates.price = parseFloat(price);
+      if (cost_price !== undefined && cost_price !== null)
+        updates.cost_price = parseFloat(cost_price);
+      if (inventory !== undefined && inventory !== null)
+        updates.inventory = parseInt(inventory);
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No updates provided" });
+      }
+
+      const result = await ProductUpdateService.updateProduct(
+        userId,
+        productId,
+        updates,
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Update product error:", error);
+      res
+        .status(resolveUpdateErrorStatusCode(error.message))
+        .json({ error: error.message });
     }
-
-    const updates = {};
-    if (price !== undefined && price !== null)
-      updates.price = parseFloat(price);
-    if (cost_price !== undefined && cost_price !== null)
-      updates.cost_price = parseFloat(cost_price);
-    if (inventory !== undefined && inventory !== null)
-      updates.inventory = parseInt(inventory);
-
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ error: "No updates provided" });
-    }
-
-    const result = await ProductUpdateService.updateProduct(
-      userId,
-      productId,
-      updates,
-    );
-    res.json(result);
-  } catch (error) {
-    console.error("Update product error:", error);
-    res.status(resolveUpdateErrorStatusCode(error.message)).json({ error: error.message });
-  }
   },
 );
 
@@ -1640,17 +1708,20 @@ router.get(
   verifyToken,
   requirePermission("can_view_orders"),
   async (req, res) => {
-  try {
-    const orderId = req.params.id;
-    const userId = req.user.id;
+    try {
+      const orderId = req.params.id;
+      const userId = req.user.id;
 
-    const order = await OrderManagementService.getOrderDetails(userId, orderId);
+      const order = await OrderManagementService.getOrderDetails(
+        userId,
+        orderId,
+      );
 
       res.json(order);
-  } catch (error) {
-    console.error("Get order details error:", error);
-    res.status(500).json({ error: error.message });
-  }
+    } catch (error) {
+      console.error("Get order details error:", error);
+      res.status(500).json({ error: error.message });
+    }
   },
 );
 
@@ -1659,36 +1730,36 @@ router.post(
   verifyToken,
   requirePermission("can_view_orders"),
   async (req, res) => {
-  try {
-    const { content } = req.body;
-    const orderId = req.params.id;
-    const userId = req.user.id;
+    try {
+      const { content } = req.body;
+      const orderId = req.params.id;
+      const userId = req.user.id;
 
-    if (!content || !content.trim()) {
-      return res.status(400).json({ error: "Note content is required" });
-    }
+      if (!content || !content.trim()) {
+        return res.status(400).json({ error: "Note content is required" });
+      }
 
-    // Get user info for author name
-    const { supabase } = await import("../supabaseClient.js");
-    const { data: userData } = await supabase
-      .from("users")
-      .select("name, email")
-      .eq("id", userId)
-      .single();
+      // Get user info for author name
+      const { supabase } = await import("../supabaseClient.js");
+      const { data: userData } = await supabase
+        .from("users")
+        .select("name, email")
+        .eq("id", userId)
+        .single();
 
-    const author = userData?.name || userData?.email || "مستخدم";
+      const author = userData?.name || userData?.email || "مستخدم";
 
-    const result = await OrderManagementService.addOrderNote(
-      userId,
-      orderId,
-      content,
-      author,
-    );
+      const result = await OrderManagementService.addOrderNote(
+        userId,
+        orderId,
+        content,
+        author,
+      );
       res.json(result);
-  } catch (error) {
-    console.error("Add order note error:", error);
-    res.status(500).json({ error: error.message });
-  }
+    } catch (error) {
+      console.error("Add order note error:", error);
+      res.status(500).json({ error: error.message });
+    }
   },
 );
 
@@ -1697,124 +1768,129 @@ router.post(
   verifyToken,
   requirePermission("can_edit_orders"),
   async (req, res) => {
-  try {
-    const allowedMethods = new Set(["none", "shopify", "instapay", "wallet"]);
-    const requestedMethod = String(req.body?.payment_method || "")
-      .toLowerCase()
-      .trim();
-    const orderId = req.params.id;
-    const userId = req.user.id;
-
-    if (!allowedMethods.has(requestedMethod)) {
-      return res.status(400).json({
-        error: "payment_method must be one of: none, shopify, instapay, wallet",
-      });
-    }
-
-    const { data: order, error } = await findOrderByReferenceForUser(
-      userId,
-      orderId,
-    );
-    if (error) {
-      return res.status(500).json({ error: error.message });
-    }
-    if (!order) {
-      return res.status(404).json({ error: "Order not found" });
-    }
-
-    const isShopifyPaid = isShopifyPaidOrder(order);
-    if (isShopifyPaid && requestedMethod !== "shopify") {
-      return res.status(400).json({
-        error: "This order is already paid on Shopify and must stay on Shopify payment method",
-      });
-    }
-    if (!isShopifyPaid && requestedMethod === "shopify") {
-      return res.status(400).json({
-        error: "Shopify payment method can only be selected for paid Shopify orders",
-      });
-    }
-
-    const currentData = parseJsonField(order.data);
-    const updatedData = { ...currentData };
-    if (requestedMethod === "none") {
-      delete updatedData.tetiano_payment_method;
-    } else {
-      updatedData.tetiano_payment_method = requestedMethod;
-    }
-
-    const { supabase } = await import("../supabaseClient.js");
-    const previousPaymentMethod = resolveOrderPaymentMethod(order);
-    const { data: updatedOrder, error: updateError } = await supabase
-      .from("orders")
-      .update({
-        data: updatedData,
-        pending_sync: true,
-        sync_error: null,
-        local_updated_at: new Date().toISOString(),
-      })
-      .eq("id", order.id)
-      .select()
-      .single();
-
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message });
-    }
-
-    await OrderManagementService.logSyncOperation(
-      userId,
-      order.id,
-      "order_payment_method_update",
-      {
-        old_payment_method: previousPaymentMethod,
-        new_payment_method: requestedMethod,
-      },
-    );
-
     try {
-      await OrderManagementService.syncPaymentMethodToShopify(
+      const allowedMethods = new Set(["none", "shopify", "instapay", "wallet"]);
+      const requestedMethod = String(req.body?.payment_method || "")
+        .toLowerCase()
+        .trim();
+      const orderId = req.params.id;
+      const userId = req.user.id;
+
+      if (!allowedMethods.has(requestedMethod)) {
+        return res.status(400).json({
+          error:
+            "payment_method must be one of: none, shopify, instapay, wallet",
+        });
+      }
+
+      const { data: order, error } = await findOrderByReferenceForUser(
         userId,
-        order.id,
-        requestedMethod,
-        {
-          previousMethod: previousPaymentMethod,
-        },
+        orderId,
       );
-    } catch (syncError) {
-      await supabase
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      const isShopifyPaid = isShopifyPaidOrder(order);
+      if (isShopifyPaid && requestedMethod !== "shopify") {
+        return res.status(400).json({
+          error:
+            "This order is already paid on Shopify and must stay on Shopify payment method",
+        });
+      }
+      if (!isShopifyPaid && requestedMethod === "shopify") {
+        return res.status(400).json({
+          error:
+            "Shopify payment method can only be selected for paid Shopify orders",
+        });
+      }
+
+      const currentData = parseJsonField(order.data);
+      const updatedData = { ...currentData };
+      if (requestedMethod === "none") {
+        delete updatedData.tetiano_payment_method;
+      } else {
+        updatedData.tetiano_payment_method = requestedMethod;
+      }
+
+      const { supabase } = await import("../supabaseClient.js");
+      const previousPaymentMethod = resolveOrderPaymentMethod(order);
+      const { data: updatedOrder, error: updateError } = await supabase
         .from("orders")
         .update({
-          data: currentData,
-          pending_sync: false,
-          sync_error: syncError.message,
+          data: updatedData,
+          pending_sync: true,
+          sync_error: null,
           local_updated_at: new Date().toISOString(),
         })
-        .eq("id", order.id);
+        .eq("id", order.id)
+        .select()
+        .single();
 
-      return res.status(502).json({
-        error: `Shopify sync failed. Payment method rolled back: ${syncError.message}`,
-      });
-    }
+      if (updateError) {
+        return res.status(500).json({ error: updateError.message });
+      }
 
-    const { data: refreshedOrder } = await supabase
-      .from("orders")
-      .select("*")
-      .eq("id", order.id)
-      .maybeSingle();
+      await OrderManagementService.logSyncOperation(
+        userId,
+        order.id,
+        "order_payment_method_update",
+        {
+          old_payment_method: previousPaymentMethod,
+          new_payment_method: requestedMethod,
+        },
+      );
 
-    const finalOrder = refreshedOrder || updatedOrder;
-    const paymentMethod = resolveOrderPaymentMethod(finalOrder);
-    res.json({
-      success: true,
-      payment_method: paymentMethod,
-      order: {
-        ...finalOrder,
+      try {
+        await OrderManagementService.syncPaymentMethodToShopify(
+          userId,
+          order.id,
+          requestedMethod,
+          {
+            previousMethod: previousPaymentMethod,
+          },
+        );
+      } catch (syncError) {
+        await supabase
+          .from("orders")
+          .update({
+            data: currentData,
+            pending_sync: false,
+            sync_error: syncError.message,
+            local_updated_at: new Date().toISOString(),
+          })
+          .eq("id", order.id);
+
+        return res.status(502).json({
+          error: `Shopify sync failed. Payment method rolled back: ${syncError.message}`,
+        });
+      }
+
+      const { data: refreshedOrder } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", order.id)
+        .maybeSingle();
+
+      const finalOrder = refreshedOrder || updatedOrder;
+      const paymentMethod = resolveOrderPaymentMethod(finalOrder);
+      res.json({
+        success: true,
         payment_method: paymentMethod,
-      },
-    });
-  } catch (error) {
-    console.error("Update order payment method error:", error);
-    res.status(resolveUpdateErrorStatusCode(error.message)).json({ error: error.message });
-  }
+        order: {
+          ...finalOrder,
+          payment_method: paymentMethod,
+        },
+      });
+    } catch (error) {
+      console.error("Update order payment method error:", error);
+      res
+        .status(resolveUpdateErrorStatusCode(error.message))
+        .json({ error: error.message });
+    }
   },
 );
 
@@ -1823,80 +1899,87 @@ router.post(
   verifyToken,
   requirePermission("can_edit_orders"),
   async (req, res) => {
-  try {
-    const { status, void_reason } = req.body;
-    const orderId = req.params.id;
-    const userId = req.user.id;
+    try {
+      const { status, void_reason } = req.body;
+      const orderId = req.params.id;
+      const userId = req.user.id;
 
-    if (!status) {
-      return res.status(400).json({ error: "Status is required" });
-    }
-    if (status === "voided" && !String(void_reason || "").trim()) {
-      return res.status(400).json({ error: "Void reason is required" });
-    }
+      if (!status) {
+        return res.status(400).json({ error: "Status is required" });
+      }
+      if (status === "voided" && !String(void_reason || "").trim()) {
+        return res.status(400).json({ error: "Void reason is required" });
+      }
 
-    const result = await OrderManagementService.updateOrderStatus(
-      userId,
-      orderId,
-      status,
-      {
-        voidReason: void_reason,
-      },
-    );
-    res.json(result);
-  } catch (error) {
-    console.error("Update order status error:", error);
-    res.status(resolveUpdateErrorStatusCode(error.message)).json({ error: error.message });
-  }
+      const result = await OrderManagementService.updateOrderStatus(
+        userId,
+        orderId,
+        status,
+        {
+          voidReason: void_reason,
+        },
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Update order status error:", error);
+      res
+        .status(resolveUpdateErrorStatusCode(error.message))
+        .json({ error: error.message });
+    }
   },
 );
 
-router.get("/orders/:id/profit", verifyToken, requireAdminRole, async (req, res) => {
-  try {
-    const orderId = req.params.id;
+router.get(
+  "/orders/:id/profit",
+  verifyToken,
+  requireAdminRole,
+  async (req, res) => {
+    try {
+      const orderId = req.params.id;
 
-    // Get order
-    const { data: order } = await Order.findById(orderId);
-    if (!order) {
-      return res.status(404).json({ error: "Order not found" });
+      // Get order
+      const { data: order } = await Order.findById(orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      // Calculate profit using the database function (includes operational costs)
+      const { supabase } = await import("../supabaseClient.js");
+      const { data: profitData, error } = await supabase.rpc(
+        "calculate_order_net_profit",
+        { order_id_param: orderId },
+      );
+
+      if (error) {
+        console.error("Calculate profit error:", error);
+        return res.status(500).json({ error: "Failed to calculate profit" });
+      }
+
+      const result =
+        profitData && profitData.length > 0
+          ? profitData[0]
+          : {
+              total_revenue: 0,
+              total_cost: 0,
+              total_operational_costs: 0,
+              gross_profit: 0,
+              net_profit: 0,
+              profit_margin: 0,
+            };
+
+      res.json({
+        total_revenue: result.total_revenue || 0,
+        total_cost: result.total_cost || 0,
+        total_operational_costs: result.total_operational_costs || 0,
+        gross_profit: result.gross_profit || 0,
+        net_profit: result.net_profit || 0,
+        profit_margin: result.profit_margin || 0,
+      });
+    } catch (error) {
+      console.error("Get order profit error:", error);
+      res.status(500).json({ error: error.message });
     }
-
-    // Calculate profit using the database function (includes operational costs)
-    const { supabase } = await import("../supabaseClient.js");
-    const { data: profitData, error } = await supabase.rpc(
-      "calculate_order_net_profit",
-      { order_id_param: orderId },
-    );
-
-    if (error) {
-      console.error("Calculate profit error:", error);
-      return res.status(500).json({ error: "Failed to calculate profit" });
-    }
-
-    const result =
-      profitData && profitData.length > 0
-        ? profitData[0]
-        : {
-          total_revenue: 0,
-          total_cost: 0,
-          total_operational_costs: 0,
-          gross_profit: 0,
-          net_profit: 0,
-          profit_margin: 0,
-        };
-
-    res.json({
-      total_revenue: result.total_revenue || 0,
-      total_cost: result.total_cost || 0,
-      total_operational_costs: result.total_operational_costs || 0,
-      gross_profit: result.gross_profit || 0,
-      net_profit: result.net_profit || 0,
-      profit_margin: result.profit_margin || 0,
-    });
-  } catch (error) {
-    console.error("Get order profit error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
+  },
+);
 
 export default router;

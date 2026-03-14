@@ -17,6 +17,9 @@ export class ShopifyService {
           },
         });
 
+        console.log('Shopify Response Body:', JSON.stringify(response.data, null, 2));
+        console.log('Shopify Response Headers:', JSON.stringify(response.headers, null, 2));
+
         const responseDataKey = Object.keys(response.data)[0];
         if (response.data && response.data[responseDataKey]) {
           const newItems = response.data[responseDataKey];

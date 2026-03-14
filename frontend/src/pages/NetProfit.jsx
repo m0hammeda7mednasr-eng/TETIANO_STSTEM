@@ -451,40 +451,53 @@ export default function NetProfit() {
 
           <div className="bg-white rounded-lg shadow-lg overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="data-table w-full">
+              <table className="data-table table-auto w-full min-w-[1480px]">
+                <colgroup>
+                  <col className="w-[320px]" />
+                  <col className="w-[90px]" />
+                  <col className="w-[90px]" />
+                  <col className="w-[120px]" />
+                  <col className="w-[120px]" />
+                  <col className="w-[140px]" />
+                  <col className="w-[140px]" />
+                  <col className="w-[220px]" />
+                  <col className="w-[150px]" />
+                  <col className="w-[100px]" />
+                  <col className="w-[110px]" />
+                </colgroup>
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-5 py-4 text-right text-sm font-semibold text-gray-700">
                       Product
                     </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-4 py-4 text-center text-sm font-semibold text-gray-700">
                       Sold
                     </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-4 py-4 text-center text-sm font-semibold text-gray-700">
                       Orders
                     </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
                       Avg Sell
                     </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
                       Cost
                     </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
                       Unit Profit
                     </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
                       Revenue
                     </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
                       Op. Costs
                     </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
                       Net Profit
                     </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-4 py-4 text-center text-sm font-semibold text-gray-700">
                       Margin
                     </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <th className="px-4 py-4 text-center text-sm font-semibold text-gray-700">
                       Actions
                     </th>
                   </tr>
@@ -495,35 +508,39 @@ export default function NetProfit() {
                     const opCosts = getProductCosts(product.id);
                     return (
                       <tr key={product.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
+                        <td className="px-5 py-4">
+                          <div className="flex items-start gap-3 min-w-0">
                             {product.image_url ? (
                               <img
                                 src={product.image_url}
                                 alt={product.title}
-                                className="w-10 h-10 object-cover rounded"
+                                className="w-12 h-12 object-cover rounded-lg border border-gray-200 flex-none"
                               />
                             ) : (
-                              <Package size={20} className="text-gray-400" />
+                              <div className="w-12 h-12 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center flex-none">
+                                <Package size={20} className="text-gray-400" />
+                              </div>
                             )}
-                            <div>
-                              <p className="font-medium">{product.title}</p>
-                              <p className="text-xs text-gray-500">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-gray-900 leading-6 break-normal whitespace-normal">
+                                {product.title}
+                              </p>
+                              <p className="text-xs text-gray-500 truncate mt-1">
                                 {product.id}
                               </p>
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-sm">
+                        <td className="px-4 py-4 text-sm text-center text-gray-700">
                           {product.sold_quantity || 0}
                         </td>
-                        <td className="px-4 py-3 text-sm">
+                        <td className="px-4 py-4 text-sm text-center text-gray-700">
                           {product.orders_count || 0}
                         </td>
-                        <td className="px-4 py-3 text-sm">
+                        <td className="px-4 py-4 text-sm text-right font-medium text-gray-800">
                           {formatAmount(product.avg_selling_price)}
                         </td>
-                        <td className="px-4 py-3 text-sm">
+                        <td className="px-4 py-4 text-sm text-right">
                           {isEditing ? (
                             <input
                               type="number"
@@ -532,29 +549,32 @@ export default function NetProfit() {
                               onChange={(e) =>
                                 setEditingCostPrice(e.target.value)
                               }
-                              className="w-24 px-2 py-1 border rounded"
+                              className="w-28 px-2 py-1 border rounded ml-auto block"
                             />
                           ) : (
                             formatAmount(product.cost_price)
                           )}
                         </td>
-                        <td className="px-4 py-3 text-sm">
+                        <td className="px-4 py-4 text-sm text-right text-gray-800">
                           {formatAmount(product.profit_per_unit)}
                         </td>
-                        <td className="px-4 py-3 text-sm text-blue-700 font-semibold">
+                        <td className="px-4 py-4 text-sm text-right text-blue-700 font-semibold">
                           {formatAmount(product.total_revenue)}
                         </td>
-                        <td className="px-4 py-3 text-sm text-yellow-700">
-                          {formatAmount(
-                            Number(product.operational_costs_total || 0) +
-                              Number(product.fixed_cost_share || 0),
-                          )}
+                        <td className="px-4 py-4 text-sm text-right text-amber-700">
+                          <div className="space-y-2">
+                            <p className="font-medium">
+                              {formatAmount(
+                                Number(product.operational_costs_total || 0) +
+                                  Number(product.fixed_cost_share || 0),
+                              )}
+                            </p>
                           {opCosts.length > 0 && (
-                            <div className="mt-1 text-xs text-gray-500 space-y-1">
+                            <div className="text-xs text-gray-500 space-y-1">
                               {opCosts.map((cost) => (
                                 <div
                                   key={cost.id}
-                                  className="flex items-center gap-1"
+                                  className="flex items-center justify-end gap-1"
                                 >
                                   <span>{cost.cost_name}</span>
                                   <button
@@ -577,9 +597,10 @@ export default function NetProfit() {
                               ))}
                             </div>
                           )}
+                          </div>
                         </td>
                         <td
-                          className={`px-4 py-3 text-sm font-semibold ${
+                          className={`px-4 py-4 text-sm text-right font-semibold ${
                             Number(product.net_profit || 0) >= 0
                               ? "text-emerald-700"
                               : "text-red-700"
@@ -587,11 +608,11 @@ export default function NetProfit() {
                         >
                           {formatAmount(product.net_profit)}
                         </td>
-                        <td className="px-4 py-3 text-sm">
+                        <td className="px-4 py-4 text-sm text-center font-medium text-gray-700">
                           {Number(product.profit_margin || 0).toFixed(2)}%
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1">
+                        <td className="px-4 py-4">
+                          <div className="flex items-center justify-center gap-1">
                             {isEditing ? (
                               <>
                                 <button

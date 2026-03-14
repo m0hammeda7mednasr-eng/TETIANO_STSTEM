@@ -38,6 +38,7 @@ const TETIANO_PAYMENT_NOTE_ATTRIBUTE_NAMES = [
   "tetiano_pm",
 ];
 const TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES = ["tetiano_status"];
+const TETIANO_VOID_REASON_NOTE_ATTRIBUTE_NAMES = ["tetiano_void_reason"];
 const VALID_PAYMENT_METHODS = new Set(["none", "shopify", "instapay", "wallet"]);
 const VALID_ORDER_STATUSES = new Set([
   "pending",
@@ -210,13 +211,24 @@ const extractStatusFromOrderData = (orderData) => {
   return normalizeOrderStatus(extractTagValueByPrefixes(tags, [TETIANO_STATUS_TAG_PREFIX]));
 };
 
+const extractVoidReasonFromOrderData = (orderData) => {
+  const directReason = String(orderData?.tetiano_void_reason || "").trim();
+  if (directReason) {
+    return directReason;
+  }
+
+  return String(
+    getNoteAttributeValue(orderData, TETIANO_VOID_REASON_NOTE_ATTRIBUTE_NAMES),
+  ).trim();
+};
+
 const mergeTetianoControlTags = (orderData, { status = "", paymentMethod = "" } = {}) => {
   return stripTetianoControlTags(orderData);
 };
 
 const mergeTetianoControlNoteAttributes = (
   orderData,
-  { status = "", paymentMethod = "" } = {},
+  { status = "", paymentMethod = "", voidReason = "" } = {},
 ) => {
   const existingAttributes = Array.isArray(orderData?.note_attributes)
     ? orderData.note_attributes
@@ -228,6 +240,9 @@ const mergeTetianoControlNoteAttributes = (
       return true;
     }
     if (TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES.includes(name)) {
+      return false;
+    }
+    if (TETIANO_VOID_REASON_NOTE_ATTRIBUTE_NAMES.includes(name)) {
       return false;
     }
     return !TETIANO_PAYMENT_NOTE_ATTRIBUTE_NAMES.includes(name);
@@ -249,12 +264,20 @@ const mergeTetianoControlNoteAttributes = (
     });
   }
 
+  const normalizedVoidReason = String(voidReason || "").trim();
+  if (normalizedStatus === "voided" && normalizedVoidReason) {
+    filtered.push({
+      name: "tetiano_void_reason",
+      value: normalizedVoidReason,
+    });
+  }
+
   return filtered;
 };
 
 const applyTetianoControlValuesToOrderData = (
   orderData,
-  { status = "", paymentMethod = "" } = {},
+  { status = "", paymentMethod = "", voidReason = "" } = {},
 ) => {
   const next = {
     ...(orderData && typeof orderData === "object" ? orderData : {}),
@@ -274,6 +297,13 @@ const applyTetianoControlValuesToOrderData = (
     delete next.tetiano_payment_method;
   }
 
+  const normalizedVoidReason = String(voidReason || "").trim();
+  if (normalizedStatus === "voided" && normalizedVoidReason) {
+    next.tetiano_void_reason = normalizedVoidReason;
+  } else {
+    delete next.tetiano_void_reason;
+  }
+
   next.tags = mergeTetianoControlTags(next, {
     status: normalizedStatus,
     paymentMethod: normalizedPaymentMethod,
@@ -281,6 +311,7 @@ const applyTetianoControlValuesToOrderData = (
   next.note_attributes = mergeTetianoControlNoteAttributes(next, {
     status: normalizedStatus,
     paymentMethod: normalizedPaymentMethod,
+    voidReason: normalizedVoidReason,
   });
 
   return next;
@@ -431,6 +462,29 @@ const cancelShopifyFulfillment = async ({
   return response?.data || null;
 };
 
+const isMissingOrderCommentsTableError = (error) => {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    String(error?.code || "") === "42P01" ||
+    message.includes("order_comments") ||
+    message.includes("order_comments_with_user")
+  );
+};
+
+const getUserDisplayInfo = async (userId) => {
+  const { supabase } = await import("../supabaseClient.js");
+  const { data } = await supabase
+    .from("users")
+    .select("name, email, role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  return {
+    name: data?.name || data?.email || "User",
+    role: data?.role || "user",
+  };
+};
+
 const createShopifyOrderTransaction = async ({
   tokenData,
   order,
@@ -467,11 +521,13 @@ const syncOrderMetadataToShopify = async ({
   logLine,
   status = "",
   paymentMethod = "",
+  voidReason = "",
 }) => {
   const orderData = parseOrderData(order);
   const mirroredControlData = applyTetianoControlValuesToOrderData(orderData, {
     status,
     paymentMethod,
+    voidReason,
   });
 
   return await updateShopifyOrderNote({
@@ -521,6 +577,82 @@ const updateShopifyOrderNote = async ({
 };
 
 export class OrderManagementService {
+  static async recordVoidReasonComment(userId, orderId, voidReason) {
+    const trimmedReason = String(voidReason || "").trim();
+    if (!trimmedReason) {
+      return;
+    }
+
+    const { data: order, error } = await Order.findByIdForUser(userId, orderId);
+    if (error || !order) {
+      throw new Error("Order not found");
+    }
+
+    const { supabase } = await import("../supabaseClient.js");
+    const userInfo = await getUserDisplayInfo(userId);
+    const commentText = `Order was voided on Shopify. Reason: ${trimmedReason}`;
+    const normalizedShopifyOrderId = String(order.shopify_id || "").trim();
+
+    if (normalizedShopifyOrderId) {
+      const { error: insertError } = await supabase.from("order_comments").insert([
+        {
+          order_id: normalizedShopifyOrderId,
+          user_id: userId,
+          comment_text: commentText,
+          comment_type: "status_change",
+          is_internal: false,
+          is_pinned: true,
+        },
+      ]);
+
+      if (!insertError) {
+        return;
+      }
+
+      if (!isMissingOrderCommentsTableError(insertError)) {
+        throw insertError;
+      }
+    }
+
+    let existingNotes = [];
+    if (typeof order.notes === "string") {
+      try {
+        existingNotes = JSON.parse(order.notes) || [];
+      } catch {
+        existingNotes = [];
+      }
+    } else if (Array.isArray(order.notes)) {
+      existingNotes = order.notes;
+    }
+
+    const nextNotes = [
+      {
+        id: `legacy-void-${Date.now()}`,
+        content: commentText,
+        author: userInfo.name,
+        user_id: userId,
+        role: userInfo.role,
+        created_at: new Date().toISOString(),
+        is_pinned: true,
+        synced_to_shopify: true,
+        source: "void_reason",
+      },
+      ...existingNotes,
+    ];
+
+    const { error: updateError } = await supabase
+      .from("orders")
+      .update({
+        notes: JSON.stringify(nextNotes),
+        local_updated_at: new Date().toISOString(),
+      })
+      .eq("id", order.id);
+
+    if (updateError) {
+      throw updateError;
+    }
+  }
+
   /**
    * Get complete order details with all related data
    */
@@ -739,6 +871,7 @@ export class OrderManagementService {
       // Extract cancel information
       order.cancelled_at = orderData?.cancelled_at || null;
       order.cancel_reason = orderData?.cancel_reason || null;
+      order.void_reason = extractVoidReasonFromOrderData(orderData) || null;
 
       // Extract closed information
       order.closed_at = orderData?.closed_at || null;
@@ -995,6 +1128,14 @@ export class OrderManagementService {
         );
       }
 
+      if (newStatus === "voided") {
+        try {
+          await this.recordVoidReasonComment(userId, orderId, voidReason);
+        } catch (commentError) {
+          console.error("Void reason comment error:", commentError);
+        }
+      }
+
       return {
         success: true,
         localUpdate: true,
@@ -1240,6 +1381,7 @@ export class OrderManagementService {
             logLine: statusLogLine,
             status: normalizedStatus,
             paymentMethod: paymentMethodForMirror,
+            voidReason: options?.voidReason,
           });
           if (metadataSyncResponse) {
             responseData = metadataSyncResponse;
@@ -1393,13 +1535,14 @@ export class OrderManagementService {
 
       const resolvedStatus =
         normalizeOrderStatus(responseOrderPayload?.financial_status) ||
-        normalizeOrderStatus(responseOrderPayload?.tetiano_status) ||
+        extractStatusFromOrderData(responseOrderPayload) ||
         normalizedStatus;
       const nextOrderData = applyTetianoControlValuesToOrderData(
         responseOrderPayload || orderData,
         {
           status: resolvedStatus,
           paymentMethod: paymentMethodForMirror,
+          voidReason: options?.voidReason,
         },
       );
 

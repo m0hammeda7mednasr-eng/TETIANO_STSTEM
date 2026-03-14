@@ -134,7 +134,12 @@ export default function OrderDetails() {
         void_reason: voidReason,
       });
       markSharedDataUpdated();
-      showNotification("Order status updated successfully", "success");
+      showNotification(
+        newStatus === "voided"
+          ? "Order voided on Shopify successfully"
+          : "Order status updated successfully",
+        "success",
+      );
       fetchOrderDetails();
     } catch (error) {
       console.error("Error updating status:", error);
@@ -744,10 +749,10 @@ export default function OrderDetails() {
                           <span className="font-medium">تاريخ الإلغاء:</span>{" "}
                           {formatDate(order.cancelled_at)}
                         </p>
-                        {order.cancel_reason && (
+                        {(order.void_reason || order.cancel_reason) && (
                           <p className="text-gray-700">
                             <span className="font-medium">السبب:</span>{" "}
-                            {order.cancel_reason}
+                            {order.void_reason || order.cancel_reason}
                           </p>
                         )}
                       </div>

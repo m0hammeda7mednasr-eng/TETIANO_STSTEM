@@ -50,6 +50,14 @@ const PAYMENT_METHOD_LABELS = {
   wallet: "Wallet",
   none: "None",
 };
+const TETIANO_STATUS_TAG_PREFIXES = ["tetiano_status:"];
+const TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES = ["tetiano_status", "status"];
+const PAID_LIKE_STATUSES = new Set([
+  "paid",
+  "partially_paid",
+  "partially_refunded",
+  "refunded",
+]);
 
 const parseOrderData = (order) => {
   if (!order) return {};
@@ -63,13 +71,85 @@ const parseOrderData = (order) => {
   return order.data || {};
 };
 
-const getOrderMeta = (order) => {
-  const data = parseOrderData(order);
-  const paymentStatus = String(
-    data.financial_status || order.financial_status || order.status || "",
+const parseTagList = (tagsValue) => {
+  if (Array.isArray(tagsValue)) {
+    return tagsValue.map((tag) => String(tag || "").trim()).filter(Boolean);
+  }
+
+  return String(tagsValue || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+};
+
+const extractTagValueByPrefixes = (tags, prefixes = []) => {
+  for (const rawTag of tags || []) {
+    const tag = String(rawTag || "").trim();
+    const lowerTag = tag.toLowerCase();
+
+    for (const prefix of prefixes) {
+      const normalizedPrefix = String(prefix || "").toLowerCase();
+      if (!lowerTag.startsWith(normalizedPrefix)) {
+        continue;
+      }
+
+      const rawValue = tag.slice(prefix.length).trim();
+      if (rawValue) {
+        return rawValue;
+      }
+    }
+  }
+
+  return "";
+};
+
+const getNoteAttributeValue = (data, keys = []) => {
+  const normalizedKeys = new Set(
+    (keys || [])
+      .map((key) =>
+        String(key || "")
+          .toLowerCase()
+          .trim(),
+      )
+      .filter(Boolean),
+  );
+  const attributes = Array.isArray(data?.note_attributes)
+    ? data.note_attributes
+    : [];
+
+  for (const attribute of attributes) {
+    const name = String(attribute?.name || "")
+      .toLowerCase()
+      .trim();
+    if (!normalizedKeys.has(name)) {
+      continue;
+    }
+
+    const value = String(attribute?.value || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+};
+
+const resolveOrderStatus = (order, data) =>
+  String(
+    data?.tetiano_status ||
+      getNoteAttributeValue(data, TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES) ||
+      extractTagValueByPrefixes(parseTagList(data?.tags), TETIANO_STATUS_TAG_PREFIXES) ||
+      data?.financial_status ||
+      order?.financial_status ||
+      order?.status ||
+      "",
   )
     .toLowerCase()
     .trim();
+
+const getOrderMeta = (order) => {
+  const data = parseOrderData(order);
+  const paymentStatus = resolveOrderStatus(order, data);
   const fulfillmentStatus = String(
     order.fulfillment_status || data.fulfillment_status || "",
   )
@@ -112,6 +192,7 @@ const getOrderMeta = (order) => {
     paymentStatus === "refunded" ||
     (hasAnyRefund && totalPrice > 0 && refundedAmount >= totalPrice);
   const isPaid = paymentStatus === "paid" || paymentStatus === "partially_paid";
+  const isPaidLike = PAID_LIKE_STATUSES.has(paymentStatus);
   const isFulfilled = fulfillmentStatus === "fulfilled";
   const manualPaymentMethod = String(
     order.payment_method || order.manual_payment_method || data.tetiano_payment_method || "",
@@ -123,6 +204,10 @@ const getOrderMeta = (order) => {
     : manualPaymentMethod === "instapay" || manualPaymentMethod === "wallet"
       ? manualPaymentMethod
       : "none";
+  const netSalesAmount =
+    isCancelled || !isPaidLike
+      ? 0
+      : Math.max(0, totalPrice - refundedAmount);
 
   return {
     paymentStatus,
@@ -134,8 +219,10 @@ const getOrderMeta = (order) => {
     isPartialRefund,
     isFullRefund,
     isPaid,
+    isPaidLike,
     isFulfilled,
     paymentMethod,
+    netSalesAmount,
     orderNumberNumeric: toNumber(order.order_number),
     createdAtDate: new Date(order.created_at),
   };
@@ -368,8 +455,12 @@ export default function Orders() {
   }, [filters, ordersWithMeta]);
 
   const summary = useMemo(() => {
-    const totalAmount = filteredOrders.reduce(
+    const totalOrderValue = filteredOrders.reduce(
       (sum, order) => sum + order._meta.totalPrice,
+      0,
+    );
+    const netSales = filteredOrders.reduce(
+      (sum, order) => sum + order._meta.netSalesAmount,
       0,
     );
     const paidCount = filteredOrders.filter((order) => order._meta.isPaid).length;
@@ -382,7 +473,8 @@ export default function Orders() {
 
     return {
       totalOrders: filteredOrders.length,
-      totalAmount,
+      totalOrderValue,
+      netSales,
       paidCount,
       fulfilledCount,
       refundedCount,
@@ -487,7 +579,7 @@ export default function Orders() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <SummaryCard
               label="Orders"
               value={summary.totalOrders.toLocaleString()}
@@ -495,8 +587,16 @@ export default function Orders() {
               color="from-blue-500 to-blue-700"
             />
             <SummaryCard
-              label="Total Value"
-              value={formatAmount(summary.totalAmount)}
+              label="Order Value"
+              value={formatAmount(summary.totalOrderValue)}
+              subtitle="All filtered orders"
+              icon={TrendingUp}
+              color="from-amber-500 to-amber-700"
+            />
+            <SummaryCard
+              label="Net Sales"
+              value={formatAmount(summary.netSales)}
+              subtitle="Paid after refunds"
               icon={TrendingUp}
               color="from-emerald-500 to-emerald-700"
             />
@@ -964,13 +1064,16 @@ export default function Orders() {
   );
 }
 
-function SummaryCard({ label, value, icon: Icon, color }) {
+function SummaryCard({ label, value, subtitle = "", icon: Icon, color }) {
   return (
     <div className={`bg-gradient-to-r ${color} rounded-xl text-white p-4`}>
       <div className="flex justify-between items-center">
         <div>
           <p className="text-sm text-white/90">{label}</p>
           <p className="text-2xl font-bold mt-1">{value}</p>
+          {subtitle ? (
+            <p className="text-xs text-white/80 mt-1">{subtitle}</p>
+          ) : null}
         </div>
         <Icon size={24} />
       </div>

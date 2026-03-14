@@ -103,6 +103,8 @@ export default function Dashboard() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [stats, setStats] = useState({
     total_sales: 0,
+    total_order_value: 0,
+    pending_order_value: 0,
     total_orders: 0,
     total_products: 0,
     total_customers: 0,
@@ -149,6 +151,8 @@ export default function Dashboard() {
         } else {
           setStats({
             total_sales: 0,
+            total_order_value: 0,
+            pending_order_value: 0,
             total_orders: 0,
             total_products: 0,
             total_customers: 0,
@@ -375,12 +379,20 @@ export default function Dashboard() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <StatCard
-              title="Total Sales"
+              title="Net Sales"
               value={formatCurrency(stats.total_sales)}
+              subtitle="Paid after refunds"
               icon={TrendingUp}
               color="from-emerald-500 to-emerald-700"
+            />
+            <StatCard
+              title="Order Value"
+              value={formatCurrency(stats.total_order_value)}
+              subtitle="All synced orders"
+              icon={TrendingUp}
+              color="from-amber-500 to-amber-700"
             />
             <StatCard
               title="Orders"
@@ -403,6 +415,7 @@ export default function Dashboard() {
             <StatCard
               title="Avg Order"
               value={formatCurrency(stats.avg_order_value)}
+              subtitle="Net sales average"
               icon={TrendingUp}
               color="from-violet-500 to-violet-700"
             />
@@ -565,13 +578,16 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ title, value, icon: Icon, color }) {
+function StatCard({ title, value, subtitle = "", icon: Icon, color }) {
   return (
     <div className={`bg-gradient-to-r ${color} rounded-xl text-white p-5`}>
       <div className="flex justify-between items-center gap-3">
         <div>
           <p className="text-sm text-white/90">{title}</p>
           <p className="text-2xl font-bold mt-2">{value}</p>
+          {subtitle ? (
+            <p className="text-xs text-white/80 mt-1">{subtitle}</p>
+          ) : null}
         </div>
         <Icon size={28} />
       </div>

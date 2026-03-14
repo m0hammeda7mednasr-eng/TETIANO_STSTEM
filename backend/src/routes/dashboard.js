@@ -52,6 +52,96 @@ const parseOrderData = (order) => {
   return order.data || {};
 };
 
+const TETIANO_STATUS_TAG_PREFIXES = ["tetiano_status:"];
+const TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES = ["tetiano_status", "status"];
+
+const parseTagList = (tagsValue) => {
+  if (Array.isArray(tagsValue)) {
+    return tagsValue.map((tag) => String(tag || "").trim()).filter(Boolean);
+  }
+
+  return String(tagsValue || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+};
+
+const extractTagValueByPrefixes = (tags, prefixes = []) => {
+  for (const rawTag of tags || []) {
+    const tag = String(rawTag || "").trim();
+    const lowerTag = tag.toLowerCase();
+
+    for (const prefix of prefixes) {
+      const normalizedPrefix = String(prefix || "").toLowerCase();
+      if (!lowerTag.startsWith(normalizedPrefix)) {
+        continue;
+      }
+
+      const rawValue = tag.slice(prefix.length).trim();
+      if (rawValue) {
+        return rawValue;
+      }
+    }
+  }
+
+  return "";
+};
+
+const getNoteAttributeValue = (data, keys = []) => {
+  const normalizedKeys = new Set(
+    (keys || [])
+      .map((key) =>
+        String(key || "")
+          .toLowerCase()
+          .trim(),
+      )
+      .filter(Boolean),
+  );
+  const attributes = Array.isArray(data?.note_attributes)
+    ? data.note_attributes
+    : [];
+
+  for (const attribute of attributes) {
+    const name = String(attribute?.name || "")
+      .toLowerCase()
+      .trim();
+    if (!normalizedKeys.has(name)) {
+      continue;
+    }
+
+    const value = String(attribute?.value || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+};
+
+const getTetianoStatus = (data = {}) => {
+  const directStatus = String(data?.tetiano_status || "")
+    .toLowerCase()
+    .trim();
+  if (directStatus) {
+    return directStatus;
+  }
+
+  const noteAttributeStatus = String(
+    getNoteAttributeValue(data, TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES),
+  )
+    .toLowerCase()
+    .trim();
+  if (noteAttributeStatus) {
+    return noteAttributeStatus;
+  }
+
+  return String(
+    extractTagValueByPrefixes(parseTagList(data?.tags), TETIANO_STATUS_TAG_PREFIXES),
+  )
+    .toLowerCase()
+    .trim();
+};
+
 const parseLineItems = (order) => {
   if (Array.isArray(order?.line_items)) return order.line_items;
 
@@ -75,7 +165,11 @@ const parseLineItems = (order) => {
 const getOrderFinancialStatus = (order) => {
   const data = parseOrderData(order);
   return String(
-    data?.financial_status || order?.financial_status || order?.status || "",
+    getTetianoStatus(data) ||
+      data?.financial_status ||
+      order?.financial_status ||
+      order?.status ||
+      "",
   )
     .toLowerCase()
     .trim();
@@ -277,13 +371,22 @@ router.get("/stats", authenticateToken, async (req, res) => {
     const saleOrders = orders.filter(
       (order) => getOrderNetSalesAmount(order) > 0,
     );
+    const totalOrderValue = orders.reduce(
+      (sum, order) => sum + getOrderGrossAmount(order),
+      0,
+    );
     const totalSales = saleOrders.reduce(
       (sum, order) => sum + getOrderNetSalesAmount(order),
       0,
     );
+    const pendingOrderValue = orders
+      .filter((order) => isPendingOrder(order))
+      .reduce((sum, order) => sum + getOrderGrossAmount(order), 0);
 
     res.json({
       total_sales: parseFloat(totalSales.toFixed(2)),
+      total_order_value: parseFloat(totalOrderValue.toFixed(2)),
+      pending_order_value: parseFloat(pendingOrderValue.toFixed(2)),
       total_orders: orders.length,
       total_products: products.length,
       total_customers: customers.length,

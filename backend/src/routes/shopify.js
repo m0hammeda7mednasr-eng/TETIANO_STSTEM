@@ -477,6 +477,8 @@ const TETIANO_PAYMENT_NOTE_ATTRIBUTE_NAMES = [
   "tetiano_pm",
   "payment_method",
 ];
+const TETIANO_STATUS_TAG_PREFIXES = ["tetiano_status:"];
+const TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES = ["tetiano_status", "status"];
 
 const normalizePaymentMethod = (value) => {
   const normalized = String(value || "")
@@ -571,6 +573,30 @@ const resolveManualPaymentMethodFromData = (data = {}) => {
   );
 };
 
+const resolveOrderStatusFromData = (data = {}) => {
+  const directStatus = String(data?.tetiano_status || "")
+    .toLowerCase()
+    .trim();
+  if (directStatus) {
+    return directStatus;
+  }
+
+  const noteAttributeStatus = String(
+    getNoteAttributeValue(data, TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES),
+  )
+    .toLowerCase()
+    .trim();
+  if (noteAttributeStatus) {
+    return noteAttributeStatus;
+  }
+
+  return String(
+    extractTagValueByPrefixes(parseTagList(data?.tags), TETIANO_STATUS_TAG_PREFIXES),
+  )
+    .toLowerCase()
+    .trim();
+};
+
 const normalizeOrderReference = (value) =>
   String(value || "")
     .trim()
@@ -609,7 +635,13 @@ const findOrderByReferenceForUser = async (userId, orderReference) => {
 
 const getOrderFinancialStatus = (order) => {
   const data = parseJsonField(order?.data);
-  return String(data?.financial_status || order?.financial_status || "")
+  return String(
+    resolveOrderStatusFromData(data) ||
+      data?.financial_status ||
+      order?.financial_status ||
+      order?.status ||
+      "",
+  )
     .toLowerCase()
     .trim();
 };

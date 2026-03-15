@@ -26,6 +26,67 @@ const REFUNDED_STATUSES = new Set(["refunded", "partially_refunded"]);
 const PENDING_STATUSES = new Set(["pending", "authorized"]);
 const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
 const DASHBOARD_BATCH_SIZE = 200;
+const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
+const DASHBOARD_PRODUCT_COUNT_SELECT = "id,store_id,user_id";
+const DASHBOARD_CUSTOMER_COUNT_SELECT = "id,shopify_id,store_id,user_id,name,email";
+const DASHBOARD_ORDER_STATS_SELECT = [
+  "id",
+  "store_id",
+  "user_id",
+  "total_price",
+  "total_refunded",
+  "financial_status",
+  "status",
+  "cancelled_at",
+  "created_at",
+  "data",
+].join(",");
+const DASHBOARD_ORDER_STATS_SELECTS = [
+  DASHBOARD_ORDER_STATS_SELECT,
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "total_price",
+    "financial_status",
+    "status",
+    "cancelled_at",
+    "created_at",
+    "data",
+  ].join(","),
+];
+const DASHBOARD_ORDER_ANALYTICS_SELECT = [
+  "id",
+  "store_id",
+  "user_id",
+  "customer_name",
+  "customer_email",
+  "fulfillment_status",
+  "total_price",
+  "total_refunded",
+  "financial_status",
+  "status",
+  "cancelled_at",
+  "created_at",
+  "data",
+].join(",");
+const DASHBOARD_ORDER_ANALYTICS_SELECTS = [
+  DASHBOARD_ORDER_ANALYTICS_SELECT,
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "customer_name",
+    "customer_email",
+    "fulfillment_status",
+    "total_price",
+    "financial_status",
+    "status",
+    "cancelled_at",
+    "created_at",
+    "data",
+  ].join(","),
+];
 
 const toNumber = (value) => {
   if (value === null || value === undefined || value === "") {
@@ -42,6 +103,24 @@ const toNumber = (value) => {
     .replace(/[^\d.-]/g, "");
   const parsed = parseFloat(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const isSchemaCompatibilityError = (error) => {
+  if (!error) return false;
+
+  const code = String(error.code || "");
+  if (SCHEMA_ERROR_CODES.has(code)) {
+    return true;
+  }
+
+  const text =
+    `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+  return (
+    text.includes("does not exist") ||
+    text.includes("could not find the") ||
+    text.includes("relation") ||
+    text.includes("column")
+  );
 };
 
 const parseOrderData = (order) => {
@@ -339,7 +418,11 @@ const getScopedRows = async (req, entityModel) => {
   return applyStoreFilter(sourceResult.data || [], requestedStoreId);
 };
 
-const getScopedRowsBatched = async (req, entityModel) => {
+const getScopedRowsBatched = async (
+  req,
+  entityModel,
+  { select = "*", selects = null, orderField = "created_at" } = {},
+) => {
   const tableName =
     entityModel === Product
       ? "products"
@@ -360,11 +443,11 @@ const getScopedRowsBatched = async (req, entityModel) => {
     : await getAccessibleStoreIds(req.user.id);
   const rows = [];
 
-  const loadBatch = async (offset, useLegacyUserScope) => {
+  const loadBatch = async (selectedColumns, offset, useLegacyUserScope) => {
     let query = supabase
       .from(tableName)
-      .select("*")
-      .order("created_at", { ascending: false })
+      .select(selectedColumns)
+      .order(orderField, { ascending: false })
       .range(offset, offset + DASHBOARD_BATCH_SIZE - 1);
 
     if (!isAdmin) {
@@ -383,30 +466,55 @@ const getScopedRowsBatched = async (req, entityModel) => {
     return data || [];
   };
 
-  let offset = 0;
-  let useLegacyUserScope = false;
+  const selectCandidates = [
+    ...(Array.isArray(selects) ? selects : []),
+    ...(select ? [select] : []),
+  ].filter(Boolean);
 
-  while (true) {
-    const batch = await loadBatch(offset, useLegacyUserScope);
+  let lastError = null;
 
-    if (
-      !isAdmin &&
-      accessibleStoreIds.length > 0 &&
-      offset === 0 &&
-      batch.length === 0 &&
-      !useLegacyUserScope
-    ) {
-      useLegacyUserScope = true;
-      continue;
+  for (const selectedColumns of selectCandidates) {
+    rows.length = 0;
+    let offset = 0;
+    let useLegacyUserScope = false;
+
+    try {
+      while (true) {
+        const batch = await loadBatch(
+          selectedColumns,
+          offset,
+          useLegacyUserScope,
+        );
+
+        if (
+          !isAdmin &&
+          accessibleStoreIds.length > 0 &&
+          offset === 0 &&
+          batch.length === 0 &&
+          !useLegacyUserScope
+        ) {
+          useLegacyUserScope = true;
+          continue;
+        }
+
+        rows.push(...batch);
+
+        if (batch.length < DASHBOARD_BATCH_SIZE) {
+          return applyStoreFilter(rows, requestedStoreId);
+        }
+
+        offset += batch.length;
+      }
+    } catch (error) {
+      lastError = error;
+      if (!isSchemaCompatibilityError(error)) {
+        throw error;
+      }
     }
+  }
 
-    rows.push(...batch);
-
-    if (batch.length < DASHBOARD_BATCH_SIZE) {
-      break;
-    }
-
-    offset += batch.length;
+  if (lastError) {
+    throw lastError;
   }
 
   return applyStoreFilter(rows, requestedStoreId);
@@ -459,9 +567,15 @@ const getGlobalOperationalCosts = async (userId) => {
 router.get("/stats", authenticateToken, async (req, res) => {
   try {
     const [products, orders, customers] = await Promise.all([
-      getScopedRowsBatched(req, Product),
-      getScopedRowsBatched(req, Order),
-      getScopedRowsBatched(req, Customer),
+      getScopedRowsBatched(req, Product, {
+        select: DASHBOARD_PRODUCT_COUNT_SELECT,
+      }),
+      getScopedRowsBatched(req, Order, {
+        selects: DASHBOARD_ORDER_STATS_SELECTS,
+      }),
+      getScopedRowsBatched(req, Customer, {
+        select: DASHBOARD_CUSTOMER_COUNT_SELECT,
+      }),
     ]);
 
     const saleOrders = orders.filter(
@@ -505,8 +619,12 @@ router.get(
   async (req, res) => {
     try {
       const [orders, customers] = await Promise.all([
-        getScopedRowsBatched(req, Order),
-        getScopedRowsBatched(req, Customer),
+        getScopedRowsBatched(req, Order, {
+          selects: DASHBOARD_ORDER_ANALYTICS_SELECTS,
+        }),
+        getScopedRowsBatched(req, Customer, {
+          select: DASHBOARD_CUSTOMER_COUNT_SELECT,
+        }),
       ]);
 
       const allOrders = orders || [];

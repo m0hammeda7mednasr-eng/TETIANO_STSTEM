@@ -32,6 +32,12 @@ const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 250;
+const PAID_LIKE_STATUSES = new Set([
+  "paid",
+  "partially_paid",
+  "partially_refunded",
+  "refunded",
+]);
 const PRODUCT_LIST_SELECT = [
   "id",
   "shopify_id",
@@ -51,6 +57,24 @@ const PRODUCT_LIST_SELECT = [
   "updated_at",
   "data",
 ].join(",");
+const PRODUCT_LIST_SELECTS = [
+  PRODUCT_LIST_SELECT,
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "title",
+    "vendor",
+    "product_type",
+    "price",
+    "sku",
+    "inventory_quantity",
+    "last_synced_at",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+];
 const ORDER_LIST_SELECT = [
   "id",
   "shopify_id",
@@ -69,6 +93,40 @@ const ORDER_LIST_SELECT = [
   "updated_at",
   "data",
 ].join(",");
+const ORDER_LIST_SELECTS = [
+  ORDER_LIST_SELECT,
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "total_price",
+    "total_refunded",
+    "financial_status",
+    "fulfillment_status",
+    "cancelled_at",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "total_price",
+    "financial_status",
+    "fulfillment_status",
+    "cancelled_at",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+];
 const CUSTOMER_LIST_SELECT = [
   "id",
   "shopify_id",
@@ -85,6 +143,24 @@ const CUSTOMER_LIST_SELECT = [
   "updated_at",
   "data",
 ].join(",");
+const CUSTOMER_LIST_SELECTS = [
+  CUSTOMER_LIST_SELECT,
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "name",
+    "email",
+    "phone",
+    "city",
+    "country",
+    "orders_count",
+    "total_spent",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+];
 const PRODUCT_SORT_FIELDS = new Set([
   "created_at",
   "updated_at",
@@ -275,6 +351,7 @@ const getScopedEntityPage = async ({
   req,
   tableName,
   select,
+  selects,
   pagination,
   sortOptions,
 }) => {
@@ -301,10 +378,10 @@ const getScopedEntityPage = async ({
   const { limit, offset } = pagination;
   const { sortBy, ascending } = sortOptions;
 
-  const buildQuery = (useLegacyUserScope = false) => {
+  const buildQuery = (selectedColumns, useLegacyUserScope = false) => {
     let query = db
       .from(tableName)
-      .select(select)
+      .select(selectedColumns)
       .order(sortBy, { ascending })
       .range(offset, offset + limit - 1);
 
@@ -323,22 +400,45 @@ const getScopedEntityPage = async ({
     return query.eq("user_id", req.user.id);
   };
 
-  let result = await buildQuery(false);
+  const selectCandidates = [
+    ...(Array.isArray(selects) ? selects : []),
+    ...(select ? [select] : []),
+  ].filter(Boolean);
 
-  if (
-    !isAdmin &&
-    !requestedStoreId &&
-    accessibleStoreIds.length > 0 &&
-    offset === 0 &&
-    !result.error &&
-    (!Array.isArray(result.data) || result.data.length === 0)
-  ) {
-    result = await buildQuery(true);
+  let lastError = null;
+
+  for (const selectedColumns of selectCandidates) {
+    let result = await buildQuery(selectedColumns, false);
+
+    if (
+      !isAdmin &&
+      !requestedStoreId &&
+      accessibleStoreIds.length > 0 &&
+      offset === 0 &&
+      !result.error &&
+      (!Array.isArray(result.data) || result.data.length === 0)
+    ) {
+      result = await buildQuery(selectedColumns, true);
+    }
+
+    if (!result?.error) {
+      return {
+        data: result?.data || [],
+        error: null,
+        isAdmin,
+        requestedStoreId,
+      };
+    }
+
+    lastError = result.error;
+    if (!isSchemaCompatibilityError(result.error)) {
+      break;
+    }
   }
 
   return {
-    data: result?.data || [],
-    error: result?.error || null,
+    data: [],
+    error: lastError,
     isAdmin,
     requestedStoreId,
   };
@@ -1995,7 +2095,7 @@ router.get(
       const { data, error, isAdmin } = await getScopedEntityPage({
         req,
         tableName: "products",
-        select: PRODUCT_LIST_SELECT,
+        selects: PRODUCT_LIST_SELECTS,
         pagination,
         sortOptions,
       });
@@ -2053,7 +2153,7 @@ router.get(
       const { data, error } = await getScopedEntityPage({
         req,
         tableName: "orders",
-        select: ORDER_LIST_SELECT,
+        selects: ORDER_LIST_SELECTS,
         pagination,
         sortOptions,
       });
@@ -2097,7 +2197,7 @@ router.get(
       const { data, error } = await getScopedEntityPage({
         req,
         tableName: "customers",
-        select: CUSTOMER_LIST_SELECT,
+        selects: CUSTOMER_LIST_SELECTS,
         pagination,
         sortOptions,
       });

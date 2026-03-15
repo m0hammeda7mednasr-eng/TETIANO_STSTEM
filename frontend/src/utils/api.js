@@ -5,13 +5,14 @@ const API_BASE =
   process.env.REACT_APP_API_BASE_URL ||
   process.env.REACT_APP_API_URL ||
   "http://localhost:5000/api";
+const DEFAULT_API_TIMEOUT_MS = 60 * 1000;
 const SHOPIFY_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 20000,
+  timeout: DEFAULT_API_TIMEOUT_MS,
   headers: {
     "Content-Type": "application/json",
   },

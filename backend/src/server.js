@@ -36,6 +36,8 @@ app.use(
       "http://localhost:3002",
       "http://localhost:3003",
       process.env.FRONTEND_URL,
+      "https://tetiano.me",
+      "https://www.tetiano.me",
       // Vercel domains
       /^https:\/\/.*\.vercel\.app$/,
       // Railway domains (for testing)

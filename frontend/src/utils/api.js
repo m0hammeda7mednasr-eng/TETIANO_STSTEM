@@ -4,7 +4,9 @@ import { markSharedDataUpdated } from "./realtime";
 const API_BASE =
   process.env.REACT_APP_API_BASE_URL ||
   process.env.REACT_APP_API_URL ||
-  "http://localhost:5000/api";
+  (process.env.NODE_ENV === "production"
+    ? "https://api.tetiano.me/api"
+    : "http://localhost:5000/api");
 const DEFAULT_API_TIMEOUT_MS = 60 * 1000;
 const SHOPIFY_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
 const UUID_REGEX =

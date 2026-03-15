@@ -25,10 +25,14 @@ const PAID_LIKE_STATUSES = new Set([
 const REFUNDED_STATUSES = new Set(["refunded", "partially_refunded"]);
 const PENDING_STATUSES = new Set(["pending", "authorized"]);
 const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
-const DASHBOARD_BATCH_SIZE = 200;
+const DASHBOARD_BATCH_SIZE = 50;
+const DASHBOARD_CACHE_TTL_MS = 60 * 1000;
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
+const QUERY_RETRYABLE_ERROR_CODES = new Set(["57014"]);
+const dashboardStatsCache = new Map();
+const dashboardAnalyticsCache = new Map();
 const DASHBOARD_PRODUCT_COUNT_SELECT = "id,store_id,user_id";
-const DASHBOARD_CUSTOMER_COUNT_SELECT = "id,shopify_id,store_id,user_id,name,email";
+const DASHBOARD_CUSTOMER_COUNT_SELECT = "id,store_id,user_id";
 const DASHBOARD_ORDER_STATS_SELECT = [
   "id",
   "store_id",
@@ -41,6 +45,23 @@ const DASHBOARD_ORDER_STATS_SELECT = [
   "created_at",
 ].join(",");
 const DASHBOARD_ORDER_STATS_SELECTS = [
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "total_price",
+    "status",
+    "created_at",
+  ].join(","),
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "total_price",
+    "status",
+    "created_at",
+    "data",
+  ].join(","),
   DASHBOARD_ORDER_STATS_SELECT,
   [
     "id",
@@ -81,6 +102,29 @@ const DASHBOARD_ORDER_ANALYTICS_SELECT = [
   "data",
 ].join(",");
 const DASHBOARD_ORDER_ANALYTICS_SELECTS = [
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "customer_name",
+    "customer_email",
+    "fulfillment_status",
+    "total_price",
+    "status",
+    "created_at",
+  ].join(","),
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "customer_name",
+    "customer_email",
+    "fulfillment_status",
+    "total_price",
+    "status",
+    "created_at",
+    "data",
+  ].join(","),
   DASHBOARD_ORDER_ANALYTICS_SELECT,
   [
     "id",
@@ -131,6 +175,77 @@ const isSchemaCompatibilityError = (error) => {
     text.includes("relation") ||
     text.includes("column")
   );
+};
+
+const isQueryRetryableError = (error) => {
+  if (!error) return false;
+  if (isSchemaCompatibilityError(error)) {
+    return true;
+  }
+
+  const code = String(error.code || "");
+  if (QUERY_RETRYABLE_ERROR_CODES.has(code)) {
+    return true;
+  }
+
+  const text =
+    `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+  return text.includes("statement timeout") || text.includes("timeout");
+};
+
+const getOrderFieldFallbacks = (primaryField, { allowUnordered = false } = {}) => {
+  const candidates = [
+    primaryField,
+    primaryField !== "created_at" ? "created_at" : null,
+    primaryField !== "updated_at" ? "updated_at" : null,
+    allowUnordered ? null : undefined,
+    primaryField !== "id" ? "id" : null,
+  ];
+
+  return candidates.filter(
+    (candidate, index) =>
+      candidate !== undefined && candidates.indexOf(candidate) === index,
+  );
+};
+
+const getDashboardCacheKey = (req) =>
+  `${String(req.user?.id || "").trim()}::${String(getRequestedStoreId(req) || "all").trim()}`;
+
+const getFreshCacheEntry = (cache, key) => {
+  const entry = cache.get(key);
+  if (!entry) {
+    return null;
+  }
+
+  if (Date.now() - entry.updatedAt > DASHBOARD_CACHE_TTL_MS) {
+    return null;
+  }
+
+  return entry;
+};
+
+const rememberCacheEntry = (cache, key, payload) => {
+  cache.set(key, {
+    payload,
+    updatedAt: Date.now(),
+  });
+};
+
+const dedupeRowsById = (rows = []) => {
+  const seen = new Set();
+  const uniqueRows = [];
+
+  for (const row of rows || []) {
+    const key = String(row?.id || "");
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    uniqueRows.push(row);
+  }
+
+  return uniqueRows;
 };
 
 const parseOrderData = (order) => {
@@ -431,7 +546,12 @@ const getScopedRows = async (req, entityModel) => {
 const getScopedRowsBatched = async (
   req,
   entityModel,
-  { select = "*", selects = null, orderField = "created_at" } = {},
+  {
+    select = "*",
+    selects = null,
+    orderField = "created_at",
+    allowUnorderedFallback = false,
+  } = {},
 ) => {
   const tableName =
     entityModel === Product
@@ -453,12 +573,19 @@ const getScopedRowsBatched = async (
     : await getAccessibleStoreIds(req.user.id);
   const rows = [];
 
-  const loadBatch = async (selectedColumns, offset, useLegacyUserScope) => {
-    let query = supabase
-      .from(tableName)
-      .select(selectedColumns)
-      .order(orderField, { ascending: false })
-      .range(offset, offset + DASHBOARD_BATCH_SIZE - 1);
+  const loadBatch = async (
+    selectedColumns,
+    currentOrderField,
+    offset,
+    useLegacyUserScope,
+  ) => {
+    let query = supabase.from(tableName).select(selectedColumns);
+
+    if (currentOrderField) {
+      query = query.order(currentOrderField, { ascending: false });
+    }
+
+    query = query.range(offset, offset + DASHBOARD_BATCH_SIZE - 1);
 
     if (!isAdmin) {
       if (!useLegacyUserScope && accessibleStoreIds.length > 0) {
@@ -480,44 +607,56 @@ const getScopedRowsBatched = async (
     ...(Array.isArray(selects) ? selects : []),
     ...(select ? [select] : []),
   ].filter(Boolean);
+  const orderFieldCandidates = getOrderFieldFallbacks(orderField, {
+    allowUnordered: allowUnorderedFallback,
+  });
 
   let lastError = null;
 
   for (const selectedColumns of selectCandidates) {
-    rows.length = 0;
-    let offset = 0;
-    let useLegacyUserScope = false;
+    for (const currentOrderField of orderFieldCandidates) {
+      rows.length = 0;
+      let offset = 0;
+      let useLegacyUserScope = false;
 
-    try {
-      while (true) {
-        const batch = await loadBatch(
-          selectedColumns,
-          offset,
-          useLegacyUserScope,
-        );
+      try {
+        while (true) {
+          const batch = await loadBatch(
+            selectedColumns,
+            currentOrderField,
+            offset,
+            useLegacyUserScope,
+          );
 
-        if (
-          !isAdmin &&
-          accessibleStoreIds.length > 0 &&
-          offset === 0 &&
-          batch.length === 0 &&
-          !useLegacyUserScope
-        ) {
-          useLegacyUserScope = true;
+          if (
+            !isAdmin &&
+            accessibleStoreIds.length > 0 &&
+            offset === 0 &&
+            batch.length === 0 &&
+            !useLegacyUserScope
+          ) {
+            useLegacyUserScope = true;
+            continue;
+          }
+
+          rows.push(...batch);
+
+          if (batch.length < DASHBOARD_BATCH_SIZE) {
+            return applyStoreFilter(dedupeRowsById(rows), requestedStoreId);
+          }
+
+          offset += batch.length;
+        }
+      } catch (error) {
+        lastError = error;
+        if (isSchemaCompatibilityError(error)) {
+          break;
+        }
+
+        if (isQueryRetryableError(error)) {
           continue;
         }
 
-        rows.push(...batch);
-
-        if (batch.length < DASHBOARD_BATCH_SIZE) {
-          return applyStoreFilter(rows, requestedStoreId);
-        }
-
-        offset += batch.length;
-      }
-    } catch (error) {
-      lastError = error;
-      if (!isSchemaCompatibilityError(error)) {
         throw error;
       }
     }
@@ -527,7 +666,7 @@ const getScopedRowsBatched = async (
     throw lastError;
   }
 
-  return applyStoreFilter(rows, requestedStoreId);
+  return applyStoreFilter(dedupeRowsById(rows), requestedStoreId);
 };
 
 const getOperationalCostsByProduct = async (productIds, userId) => {
@@ -575,16 +714,26 @@ const getGlobalOperationalCosts = async (userId) => {
 
 // Dashboard summary cards
 router.get("/stats", authenticateToken, async (req, res) => {
+  const cacheKey = getDashboardCacheKey(req);
+  const cachedEntry = getFreshCacheEntry(dashboardStatsCache, cacheKey);
+  if (cachedEntry) {
+    res.setHeader("X-Dashboard-Cache", "hit");
+    return res.json(cachedEntry.payload);
+  }
+
   try {
     const [products, orders, customers] = await Promise.all([
       getScopedRowsBatched(req, Product, {
         select: DASHBOARD_PRODUCT_COUNT_SELECT,
+        allowUnorderedFallback: true,
       }),
       getScopedRowsBatched(req, Order, {
         selects: DASHBOARD_ORDER_STATS_SELECTS,
+        allowUnorderedFallback: true,
       }),
       getScopedRowsBatched(req, Customer, {
         select: DASHBOARD_CUSTOMER_COUNT_SELECT,
+        allowUnorderedFallback: true,
       }),
     ]);
 
@@ -603,7 +752,7 @@ router.get("/stats", authenticateToken, async (req, res) => {
       .filter((order) => isPendingOrder(order))
       .reduce((sum, order) => sum + getOrderGrossAmount(order), 0);
 
-    res.json({
+    const payload = {
       total_sales: parseFloat(totalSales.toFixed(2)),
       total_order_value: parseFloat(totalOrderValue.toFixed(2)),
       pending_order_value: parseFloat(pendingOrderValue.toFixed(2)),
@@ -614,9 +763,17 @@ router.get("/stats", authenticateToken, async (req, res) => {
         saleOrders.length > 0
           ? parseFloat((totalSales / saleOrders.length).toFixed(2))
           : 0,
-    });
+    };
+
+    rememberCacheEntry(dashboardStatsCache, cacheKey, payload);
+    res.json(payload);
   } catch (error) {
     console.error("Dashboard stats error:", error);
+    const staleEntry = dashboardStatsCache.get(cacheKey);
+    if (staleEntry?.payload) {
+      res.setHeader("X-Dashboard-Cache", "stale");
+      return res.json(staleEntry.payload);
+    }
     res.status(500).json({ error: "Failed to fetch dashboard stats" });
   }
 });
@@ -627,13 +784,22 @@ router.get(
   authenticateToken,
   requireAdminRole,
   async (req, res) => {
+    const cacheKey = getDashboardCacheKey(req);
+    const cachedEntry = getFreshCacheEntry(dashboardAnalyticsCache, cacheKey);
+    if (cachedEntry) {
+      res.setHeader("X-Dashboard-Cache", "hit");
+      return res.json(cachedEntry.payload);
+    }
+
     try {
       const [orders, customers] = await Promise.all([
         getScopedRowsBatched(req, Order, {
           selects: DASHBOARD_ORDER_ANALYTICS_SELECTS,
+          allowUnorderedFallback: true,
         }),
         getScopedRowsBatched(req, Customer, {
           select: DASHBOARD_CUSTOMER_COUNT_SELECT,
+          allowUnorderedFallback: true,
         }),
       ]);
 
@@ -793,7 +959,7 @@ router.get(
         });
 
       const totalOrders = allOrders.length;
-      res.json({
+      const payload = {
         ordersByStatus,
         financial: {
           totalRevenue: parseFloat(totalRevenue.toFixed(2)),
@@ -825,9 +991,17 @@ router.get(
               )
               : 0,
         },
-      });
+      };
+
+      rememberCacheEntry(dashboardAnalyticsCache, cacheKey, payload);
+      res.json(payload);
     } catch (error) {
       console.error("Analytics error:", error);
+      const staleEntry = dashboardAnalyticsCache.get(cacheKey);
+      if (staleEntry?.payload) {
+        res.setHeader("X-Dashboard-Cache", "stale");
+        return res.json(staleEntry.payload);
+      }
       res.status(500).json({ error: "Failed to fetch analytics" });
     }
   },

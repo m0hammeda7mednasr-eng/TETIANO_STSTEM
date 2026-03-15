@@ -31,8 +31,8 @@ const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
-const DEFAULT_LIST_LIMIT = 200;
-const MAX_LIST_LIMIT = 250;
+const DEFAULT_LIST_LIMIT = 100;
+const MAX_LIST_LIMIT = 100;
 const PAID_LIKE_STATUSES = new Set([
   "paid",
   "partially_paid",
@@ -94,6 +94,33 @@ const ORDER_LIST_SELECT = [
   "updated_at",
 ].join(",");
 const ORDER_LIST_SELECTS = [
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "total_price",
+    "status",
+    "fulfillment_status",
+    "created_at",
+    "updated_at",
+  ].join(","),
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "total_price",
+    "status",
+    "fulfillment_status",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
   ORDER_LIST_SELECT,
   [
     "id",
@@ -187,6 +214,18 @@ const CUSTOMER_LIST_SELECTS = [
     "orders_count",
     "total_spent",
     "default_address",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "name",
+    "email",
+    "orders_count",
+    "total_spent",
     "created_at",
     "updated_at",
     "data",
@@ -378,6 +417,42 @@ const buildPaginatedCollection = (rows, { limit, offset }) => {
   };
 };
 
+const QUERY_RETRYABLE_ERROR_CODES = new Set(["57014"]);
+
+const isQueryRetryableError = (error) => {
+  if (!error) {
+    return false;
+  }
+
+  if (isSchemaCompatibilityError(error)) {
+    return true;
+  }
+
+  const code = String(error.code || "");
+  if (QUERY_RETRYABLE_ERROR_CODES.has(code)) {
+    return true;
+  }
+
+  const text =
+    `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+  return text.includes("statement timeout") || text.includes("timeout");
+};
+
+const getOrderFieldFallbacks = (primaryField, { allowUnordered = false } = {}) => {
+  const candidates = [
+    primaryField,
+    primaryField !== "created_at" ? "created_at" : null,
+    primaryField !== "updated_at" ? "updated_at" : null,
+    allowUnordered ? null : undefined,
+    primaryField !== "id" ? "id" : null,
+  ];
+
+  return candidates.filter(
+    (candidate, index) =>
+      candidate !== undefined && candidates.indexOf(candidate) === index,
+  );
+};
+
 const getScopedEntityPage = async ({
   req,
   tableName,
@@ -409,12 +484,18 @@ const getScopedEntityPage = async ({
   const { limit, offset } = pagination;
   const { sortBy, ascending } = sortOptions;
 
-  const buildQuery = (selectedColumns, useLegacyUserScope = false) => {
-    let query = db
-      .from(tableName)
-      .select(selectedColumns)
-      .order(sortBy, { ascending })
-      .range(offset, offset + limit - 1);
+  const buildQuery = (
+    selectedColumns,
+    orderField,
+    useLegacyUserScope = false,
+  ) => {
+    let query = db.from(tableName).select(selectedColumns);
+
+    if (orderField) {
+      query = query.order(orderField, { ascending });
+    }
+
+    query = query.range(offset, offset + limit - 1);
 
     if (requestedStoreId) {
       return query.eq("store_id", requestedStoreId);
@@ -435,35 +516,51 @@ const getScopedEntityPage = async ({
     ...(Array.isArray(selects) ? selects : []),
     ...(select ? [select] : []),
   ].filter(Boolean);
+  const orderFieldCandidates = getOrderFieldFallbacks(sortBy, {
+    allowUnordered: true,
+  });
 
   let lastError = null;
 
   for (const selectedColumns of selectCandidates) {
-    let result = await buildQuery(selectedColumns, false);
+    for (const orderField of orderFieldCandidates) {
+      let result = await buildQuery(selectedColumns, orderField, false);
 
-    if (
-      !isAdmin &&
-      !requestedStoreId &&
-      accessibleStoreIds.length > 0 &&
-      offset === 0 &&
-      !result.error &&
-      (!Array.isArray(result.data) || result.data.length === 0)
-    ) {
-      result = await buildQuery(selectedColumns, true);
-    }
+      if (
+        !isAdmin &&
+        !requestedStoreId &&
+        accessibleStoreIds.length > 0 &&
+        offset === 0 &&
+        !result.error &&
+        (!Array.isArray(result.data) || result.data.length === 0)
+      ) {
+        result = await buildQuery(selectedColumns, orderField, true);
+      }
 
-    if (!result?.error) {
+      if (!result?.error) {
+        return {
+          data: result?.data || [],
+          error: null,
+          isAdmin,
+          requestedStoreId,
+        };
+      }
+
+      lastError = result.error;
+      if (isSchemaCompatibilityError(result.error)) {
+        break;
+      }
+
+      if (isQueryRetryableError(result.error)) {
+        continue;
+      }
+
       return {
-        data: result?.data || [],
-        error: null,
+        data: [],
+        error: result.error,
         isAdmin,
         requestedStoreId,
       };
-    }
-
-    lastError = result.error;
-    if (!isSchemaCompatibilityError(result.error)) {
-      break;
     }
   }
 

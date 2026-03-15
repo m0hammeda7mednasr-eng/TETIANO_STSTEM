@@ -16,9 +16,9 @@ const getPaginationMeta = (payload) => {
   return {};
 };
 
-export const fetchAllPages = async (
+export const fetchAllPagesProgressively = async (
   requestPage,
-  { limit = 200, maxPages = 500 } = {},
+  { limit = 200, maxPages = 500, onPage = null } = {},
 ) => {
   const rows = [];
   let offset = 0;
@@ -31,14 +31,24 @@ export const fetchAllPages = async (
 
     rows.push(...batch);
 
-    if (batch.length === 0) {
-      break;
-    }
-
     const hasMore =
       typeof pagination.has_more === "boolean"
         ? pagination.has_more
         : batch.length === limit;
+
+    if (typeof onPage === "function" && batch.length > 0) {
+      await onPage({
+        batch,
+        rows: [...rows],
+        pageIndex,
+        pagination,
+        hasMore,
+      });
+    }
+
+    if (batch.length === 0) {
+      break;
+    }
 
     if (!hasMore) {
       break;
@@ -52,3 +62,6 @@ export const fetchAllPages = async (
 
   return rows;
 };
+
+export const fetchAllPages = async (requestPage, options = {}) =>
+  await fetchAllPagesProgressively(requestPage, options);

@@ -13,7 +13,12 @@ import {
 import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
-import { fetchAllPages } from "../utils/pagination";
+import { fetchAllPagesProgressively } from "../utils/pagination";
+import {
+  buildStoreScopedCacheKey,
+  readCachedView,
+  writeCachedView,
+} from "../utils/viewCache";
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
 const ORDERS_PAGE_SIZE = 200;
@@ -132,8 +137,42 @@ export default function Orders() {
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [lastLiveEventAt, setLastLiveEventAt] = useState(null);
+  const [loadStatus, setLoadStatus] = useState({
+    active: false,
+    message: "",
+  });
   const refreshTimeoutRef = useRef(null);
   const fetchPromiseRef = useRef(null);
+  const ordersRef = useRef([]);
+  const cacheKey = useMemo(() => buildStoreScopedCacheKey("orders:list"), []);
+
+  useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
+
+  useEffect(() => {
+    let active = true;
+
+    readCachedView(cacheKey).then((cached) => {
+      const cachedRows = Array.isArray(cached?.value?.rows) ? cached.value.rows : [];
+      if (!active || cachedRows.length === 0) {
+        return;
+      }
+
+      setOrders(cachedRows);
+      setLastUpdatedAt(
+        cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
+      );
+      setLoadStatus({
+        active: false,
+        message: `Showing ${cachedRows.length.toLocaleString()} cached orders`,
+      });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [cacheKey]);
 
   const fetchOrders = useCallback(async ({ silent = false, forceSync = false } = {}) => {
     if (fetchPromiseRef.current) {
@@ -141,13 +180,22 @@ export default function Orders() {
     }
 
     const request = (async () => {
+      const hasVisibleOrders = ordersRef.current.length > 0;
+
       if (!silent) {
-        setLoading(true);
+        setLoading(!hasVisibleOrders);
         setError("");
       }
 
+      setLoadStatus({
+        active: true,
+        message: forceSync
+          ? "Refreshing Shopify orders and loading saved data..."
+          : "Loading orders in batches...",
+      });
+
       try {
-        const rows = await fetchAllPages(
+        const rows = await fetchAllPagesProgressively(
           ({ limit, offset, pageIndex }) =>
             api.get("/shopify/orders", {
               params: {
@@ -159,17 +207,49 @@ export default function Orders() {
                   forceSync && pageIndex === 0 ? "force" : "false",
               },
             }),
-          { limit: ORDERS_PAGE_SIZE },
+          {
+            limit: ORDERS_PAGE_SIZE,
+            onPage: ({ rows: accumulatedRows, hasMore }) => {
+              setOrders(accumulatedRows);
+              setLastUpdatedAt(new Date());
+              setLoadStatus({
+                active: hasMore,
+                message: hasMore
+                  ? `Loaded ${accumulatedRows.length.toLocaleString()} orders so far...`
+                  : `Loaded ${accumulatedRows.length.toLocaleString()} orders`,
+              });
+              if (!silent) {
+                setLoading(false);
+              }
+            },
+          },
         );
 
         setOrders(rows);
         setLastUpdatedAt(new Date());
+        setLoadStatus({
+          active: false,
+          message:
+            rows.length > 0
+              ? `Loaded ${rows.length.toLocaleString()} orders`
+              : "No orders found",
+        });
+        await writeCachedView(cacheKey, { rows });
       } catch (requestError) {
         console.error("Error fetching orders:", requestError);
         if (!silent) {
-          setOrders([]);
-          setError("Failed to load orders");
+          if (ordersRef.current.length === 0) {
+            setOrders([]);
+            setError("Failed to load orders");
+          } else {
+            setError("Showing saved orders while refresh failed");
+          }
         }
+        setLoadStatus((current) =>
+          current.message && ordersRef.current.length > 0
+            ? { active: false, message: current.message }
+            : { active: false, message: "" },
+        );
       } finally {
         if (!silent) {
           setLoading(false);
@@ -184,7 +264,7 @@ export default function Orders() {
     } finally {
       fetchPromiseRef.current = null;
     }
-  }, []);
+  }, [cacheKey]);
 
   const scheduleSilentRefresh = useCallback(() => {
     if (refreshTimeoutRef.current) {
@@ -466,15 +546,27 @@ export default function Orders() {
                       Event {lastLiveEventAt.toLocaleTimeString("ar-EG")}
                     </span>
                   )}
+                  {loadStatus.message && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                      <RefreshCw
+                        size={12}
+                        className={loadStatus.active ? "animate-spin" : ""}
+                      />
+                      {loadStatus.message}
+                    </span>
+                  )}
                 </div>
               </div>
               <button
                 onClick={() => fetchOrders({ forceSync: true })}
-                disabled={loading}
+                disabled={loading || loadStatus.active}
                 className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-60"
               >
-                <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-                {loading ? "Refreshing..." : "Refresh"}
+                <RefreshCw
+                  size={18}
+                  className={loading || loadStatus.active ? "animate-spin" : ""}
+                />
+                {loading || loadStatus.active ? "Refreshing..." : "Refresh"}
               </button>
             </div>
           </div>

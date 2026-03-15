@@ -20,9 +20,13 @@ import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
-import { fetchAllPages } from "../utils/pagination";
+import { fetchAllPagesProgressively } from "../utils/pagination";
+import {
+  buildStoreScopedCacheKey,
+  readCachedView,
+  writeCachedView,
+} from "../utils/viewCache";
 
-const POLLING_INTERVAL_MS = 120000;
 const PRODUCTS_PAGE_SIZE = 200;
 const CURRENCY_LABEL = "LE";
 
@@ -106,7 +110,44 @@ export default function Products() {
   const [notification, setNotification] = useState(null);
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [loadStatus, setLoadStatus] = useState({
+    active: false,
+    message: "",
+  });
   const fetchPromiseRef = useRef(null);
+  const productsRef = useRef([]);
+  const cacheKey = useMemo(
+    () => buildStoreScopedCacheKey("products:list"),
+    [],
+  );
+
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
+
+  useEffect(() => {
+    let active = true;
+
+    readCachedView(cacheKey).then((cached) => {
+      const cachedRows = Array.isArray(cached?.value?.rows) ? cached.value.rows : [];
+      if (!active || cachedRows.length === 0) {
+        return;
+      }
+
+      setProducts(cachedRows);
+      setLastUpdatedAt(
+        cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
+      );
+      setLoadStatus({
+        active: false,
+        message: `Showing ${cachedRows.length.toLocaleString()} cached products`,
+      });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [cacheKey]);
 
   const showNotification = useCallback((message, type = "info") => {
     setNotification({ message, type });
@@ -120,13 +161,20 @@ export default function Products() {
       }
 
       const request = (async () => {
+        const hasVisibleProducts = productsRef.current.length > 0;
+
         if (!silent) {
-          setLoading(true);
+          setLoading(!hasVisibleProducts);
           setError("");
         }
 
+        setLoadStatus({
+          active: true,
+          message: "Loading products in batches...",
+        });
+
         try {
-          const rows = await fetchAllPages(
+          const rows = await fetchAllPagesProgressively(
             ({ limit, offset }) =>
               api.get("/shopify/products", {
                 params: {
@@ -136,18 +184,50 @@ export default function Products() {
                   sort_dir: "desc",
                 },
               }),
-            { limit: PRODUCTS_PAGE_SIZE },
+            {
+              limit: PRODUCTS_PAGE_SIZE,
+              onPage: ({ rows: accumulatedRows, hasMore }) => {
+                setProducts(accumulatedRows);
+                setLastUpdatedAt(new Date());
+                setLoadStatus({
+                  active: hasMore,
+                  message: hasMore
+                    ? `Loaded ${accumulatedRows.length.toLocaleString()} products so far...`
+                    : `Loaded ${accumulatedRows.length.toLocaleString()} products`,
+                });
+                if (!silent) {
+                  setLoading(false);
+                }
+              },
+            },
           );
 
           setProducts(rows);
           setLastUpdatedAt(new Date());
+          setLoadStatus({
+            active: false,
+            message:
+              rows.length > 0
+                ? `Loaded ${rows.length.toLocaleString()} products`
+                : "No products found",
+          });
+          await writeCachedView(cacheKey, { rows });
         } catch (requestError) {
           console.error("Error fetching products:", requestError);
           if (!silent) {
-            setProducts([]);
-            setError("Failed to load products");
+            if (productsRef.current.length === 0) {
+              setProducts([]);
+              setError("Failed to load products");
+            } else {
+              setError("Showing saved products while refresh failed");
+            }
             showNotification("Failed to load products", "error");
           }
+          setLoadStatus((current) =>
+            current.message && productsRef.current.length > 0
+              ? { active: false, message: current.message }
+              : { active: false, message: "" },
+          );
         } finally {
           if (!silent) {
             setLoading(false);
@@ -163,15 +243,11 @@ export default function Products() {
         fetchPromiseRef.current = null;
       }
     },
-    [showNotification],
+    [cacheKey, showNotification],
   );
 
   useEffect(() => {
     fetchProducts();
-
-    const interval = setInterval(() => {
-      fetchProducts({ silent: true });
-    }, POLLING_INTERVAL_MS);
 
     const unsubscribe = subscribeToSharedDataUpdates(() => {
       fetchProducts({ silent: true });
@@ -181,7 +257,6 @@ export default function Products() {
     window.addEventListener("focus", onFocus);
 
     return () => {
-      clearInterval(interval);
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };
@@ -471,14 +546,26 @@ export default function Products() {
                   Last refresh: {lastUpdatedAt.toLocaleTimeString("ar-EG")}
                 </p>
               )}
+              {loadStatus.message && (
+                <p className="mt-2 text-xs text-amber-700 flex items-center gap-1">
+                  <RefreshCw
+                    size={12}
+                    className={loadStatus.active ? "animate-spin" : ""}
+                  />
+                  {loadStatus.message}
+                </p>
+              )}
             </div>
             <button
               onClick={() => fetchProducts()}
-              disabled={loading}
+              disabled={loading || loadStatus.active}
               className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-60"
             >
-              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-              {loading ? "Refreshing..." : "Refresh"}
+              <RefreshCw
+                size={18}
+                className={loading || loadStatus.active ? "animate-spin" : ""}
+              />
+              {loading || loadStatus.active ? "Refreshing..." : "Refresh"}
             </button>
           </div>
 

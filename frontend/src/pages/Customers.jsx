@@ -14,7 +14,12 @@ import api from "../utils/api";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
-import { fetchAllPages } from "../utils/pagination";
+import { fetchAllPages, fetchAllPagesProgressively } from "../utils/pagination";
+import {
+  buildStoreScopedCacheKey,
+  readCachedView,
+  writeCachedView,
+} from "../utils/viewCache";
 
 const CUSTOMERS_PAGE_SIZE = 200;
 const ORDERS_PAGE_SIZE = 200;
@@ -65,7 +70,56 @@ export default function Customers() {
   const [countryFilter, setCountryFilter] = useState("all");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [loadStatus, setLoadStatus] = useState({
+    active: false,
+    message: "",
+  });
   const fetchPromiseRef = useRef(null);
+  const customersRef = useRef([]);
+  const ordersRef = useRef([]);
+  const cacheKey = useMemo(
+    () => buildStoreScopedCacheKey("customers:list"),
+    [],
+  );
+
+  useEffect(() => {
+    customersRef.current = customers;
+  }, [customers]);
+
+  useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
+
+  useEffect(() => {
+    let active = true;
+
+    readCachedView(cacheKey).then((cached) => {
+      const cachedCustomers = Array.isArray(cached?.value?.customers)
+        ? cached.value.customers
+        : [];
+      const cachedOrders = Array.isArray(cached?.value?.orders)
+        ? cached.value.orders
+        : [];
+
+      if (!active || cachedCustomers.length === 0) {
+        return;
+      }
+
+      setCustomers(cachedCustomers);
+      setOrders(canViewOrders ? cachedOrders : []);
+      setLastUpdatedAt(
+        cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
+      );
+      setLoadStatus({
+        active: false,
+        message: `Showing ${cachedCustomers.length.toLocaleString()} cached customers`,
+      });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [cacheKey, canViewOrders]);
 
   const fetchData = useCallback(
     async ({ silent = false } = {}) => {
@@ -74,52 +128,95 @@ export default function Customers() {
       }
 
       const request = (async () => {
+        const hasVisibleCustomers = customersRef.current.length > 0;
+
         if (!silent) {
-          setLoading(true);
+          setLoading(!hasVisibleCustomers);
           setError("");
         }
 
+        setLoadStatus({
+          active: true,
+          message: "Loading customers in batches...",
+        });
+
         try {
-          const [customersData, ordersData] = await Promise.all([
-            fetchAllPages(
-              ({ limit, offset }) =>
-                api.get("/shopify/customers", {
-                  params: {
-                    limit,
-                    offset,
-                    sort_by: "created_at",
-                    sort_dir: "desc",
-                  },
-                }),
-              { limit: CUSTOMERS_PAGE_SIZE },
-            ),
-            canViewOrders
-              ? fetchAllPages(
-                  ({ limit, offset }) =>
-                    api.get("/shopify/orders", {
-                      params: {
-                        limit,
-                        offset,
-                        sort_by: "created_at",
-                        sort_dir: "desc",
-                        sync_recent: "false",
-                      },
-                    }),
-                  { limit: ORDERS_PAGE_SIZE },
-                )
-              : Promise.resolve([]),
-          ]);
+          const customersData = await fetchAllPagesProgressively(
+            ({ limit, offset }) =>
+              api.get("/shopify/customers", {
+                params: {
+                  limit,
+                  offset,
+                  sort_by: "created_at",
+                  sort_dir: "desc",
+                },
+              }),
+            {
+              limit: CUSTOMERS_PAGE_SIZE,
+              onPage: ({ rows: accumulatedRows, hasMore }) => {
+                setCustomers(accumulatedRows);
+                setLastUpdatedAt(new Date());
+                setLoadStatus({
+                  active: hasMore || canViewOrders,
+                  message: hasMore
+                    ? `Loaded ${accumulatedRows.length.toLocaleString()} customers so far...`
+                    : canViewOrders
+                      ? `Loaded ${accumulatedRows.length.toLocaleString()} customers. Loading linked orders...`
+                      : `Loaded ${accumulatedRows.length.toLocaleString()} customers`,
+                });
+                if (!silent) {
+                  setLoading(false);
+                }
+              },
+            },
+          );
+
+          const ordersData = canViewOrders
+            ? await fetchAllPages(
+                ({ limit, offset }) =>
+                  api.get("/shopify/orders", {
+                    params: {
+                      limit,
+                      offset,
+                      sort_by: "created_at",
+                      sort_dir: "desc",
+                      sync_recent: "false",
+                    },
+                  }),
+                { limit: ORDERS_PAGE_SIZE },
+              )
+            : [];
 
           setCustomers(customersData);
           setOrders(ordersData);
           setLastUpdatedAt(new Date());
+          setLoadStatus({
+            active: false,
+            message:
+              customersData.length > 0
+                ? `Loaded ${customersData.length.toLocaleString()} customers`
+                : "No customers found",
+          });
+          await writeCachedView(cacheKey, {
+            customers: customersData,
+            orders: ordersData,
+          });
         } catch (requestError) {
           console.error("Failed to fetch customers:", requestError);
           if (!silent) {
-            setCustomers([]);
-            setOrders([]);
-            setError("Failed to load customers");
+            if (customersRef.current.length === 0) {
+              setCustomers([]);
+              setOrders([]);
+              setError("Failed to load customers");
+            } else {
+              setError("Showing saved customers while refresh failed");
+            }
           }
+          setLoadStatus((current) =>
+            current.message && customersRef.current.length > 0
+              ? { active: false, message: current.message }
+              : { active: false, message: "" },
+          );
         } finally {
           if (!silent) {
             setLoading(false);
@@ -135,7 +232,7 @@ export default function Customers() {
         fetchPromiseRef.current = null;
       }
     },
-    [canViewOrders],
+    [cacheKey, canViewOrders],
   );
 
   useEffect(() => {
@@ -283,14 +380,26 @@ export default function Customers() {
                   Last refresh: {lastUpdatedAt.toLocaleTimeString("ar-EG")}
                 </p>
               )}
+              {loadStatus.message && (
+                <p className="mt-2 text-xs text-amber-700 flex items-center gap-1">
+                  <RefreshCw
+                    size={12}
+                    className={loadStatus.active ? "animate-spin" : ""}
+                  />
+                  {loadStatus.message}
+                </p>
+              )}
             </div>
             <button
               onClick={() => fetchData()}
-              disabled={loading}
+              disabled={loading || loadStatus.active}
               className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-60"
             >
-              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-              {loading ? "Refreshing..." : "Refresh"}
+              <RefreshCw
+                size={18}
+                className={loading || loadStatus.active ? "animate-spin" : ""}
+              />
+              {loading || loadStatus.active ? "Refreshing..." : "Refresh"}
             </button>
           </div>
 

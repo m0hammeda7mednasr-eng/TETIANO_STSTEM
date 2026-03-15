@@ -20,6 +20,11 @@ import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
+import {
+  buildStoreScopedCacheKey,
+  readCachedView,
+  writeCachedView,
+} from "../utils/viewCache";
 
 const CURRENCY_LABEL = "LE";
 
@@ -99,6 +104,10 @@ export default function Dashboard() {
   const [pendingRequests, setPendingRequests] = useState([]);
   const [recentReports, setRecentReports] = useState([]);
   const [recentOrders, setRecentOrders] = useState([]);
+  const cacheKey = useMemo(
+    () => buildStoreScopedCacheKey("dashboard:summary"),
+    [],
+  );
 
   const loadData = useCallback(
     async ({ silent = false } = {}) => {
@@ -174,6 +183,27 @@ export default function Dashboard() {
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
             .slice(0, 5),
         );
+        await writeCachedView(cacheKey, {
+          stats:
+            statsResult.status === "fulfilled"
+              ? extractObject(statsResult.value.data)
+              : {
+                  total_sales: 0,
+                  total_order_value: 0,
+                  pending_order_value: 0,
+                  total_orders: 0,
+                  total_products: 0,
+                  total_customers: 0,
+                  avg_order_value: 0,
+                },
+          recentOrders: sortedOrders.slice(0, 6),
+          pendingRequests: requestsData.filter(
+            (item) => String(item.status) === "pending",
+          ),
+          recentReports: reportsData
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+            .slice(0, 5),
+        });
 
         if (!silent) {
           const firstFailure = [statsResult, ordersResult, requestsResult, reportsResult]
@@ -195,13 +225,50 @@ export default function Dashboard() {
         }
       }
     },
-    [canManageUsers, canViewAllReports, canViewOrders, isAdmin],
+    [cacheKey, canManageUsers, canViewAllReports, canViewOrders, isAdmin],
   );
 
   useEffect(() => {
     if (authLoading) return;
-    loadData();
-  }, [authLoading, loadData]);
+
+    let active = true;
+
+    (async () => {
+      const cached = await readCachedView(cacheKey);
+      const snapshot = cached?.value;
+
+      if (active && snapshot) {
+        setStats(snapshot.stats || {
+          total_sales: 0,
+          total_order_value: 0,
+          pending_order_value: 0,
+          total_orders: 0,
+          total_products: 0,
+          total_customers: 0,
+          avg_order_value: 0,
+        });
+        setRecentOrders(Array.isArray(snapshot.recentOrders) ? snapshot.recentOrders : []);
+        setPendingRequests(
+          Array.isArray(snapshot.pendingRequests) ? snapshot.pendingRequests : [],
+        );
+        setRecentReports(Array.isArray(snapshot.recentReports) ? snapshot.recentReports : []);
+        setLastUpdatedAt(
+          cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
+        );
+        setLoading(false);
+      }
+
+      if (!active) {
+        return;
+      }
+
+      await loadData({ silent: Boolean(snapshot) });
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [authLoading, cacheKey, loadData]);
 
   useEffect(() => {
     if (authLoading) return;

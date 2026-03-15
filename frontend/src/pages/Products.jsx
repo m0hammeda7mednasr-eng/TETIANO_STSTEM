@@ -14,6 +14,10 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import ProductEditModal from "../components/ProductEditModal";
+import {
+  ProgressiveCardsSkeleton,
+  ProgressiveLoadBanner,
+} from "../components/ProgressiveLoadState";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -577,15 +581,6 @@ export default function Products() {
                   Last refresh: {lastUpdatedAt.toLocaleTimeString("ar-EG")}
                 </p>
               )}
-              {loadStatus.message && (
-                <p className="mt-2 text-xs text-amber-700 flex items-center gap-1">
-                  <RefreshCw
-                    size={12}
-                    className={loadStatus.active ? "animate-spin" : ""}
-                  />
-                  {loadStatus.message}
-                </p>
-              )}
             </div>
             <button
               onClick={() => fetchProducts()}
@@ -606,6 +601,15 @@ export default function Products() {
               {error || notification?.message}
             </div>
           )}
+
+          <ProgressiveLoadBanner
+            active={loadStatus.active}
+            loadedCount={products.length}
+            batchSize={PRODUCTS_PAGE_SIZE}
+            itemLabel="products"
+            message={loadStatus.message}
+            lastUpdatedAt={lastUpdatedAt}
+          />
 
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <SummaryCard
@@ -844,9 +848,9 @@ export default function Products() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-            {loading ? (
-              <div className="col-span-full bg-white rounded-xl shadow p-8 text-center text-slate-500">
-                Loading products...
+            {loading && products.length === 0 ? (
+              <div className="col-span-full">
+                <ProgressiveCardsSkeleton cards={8} />
               </div>
             ) : filteredProducts.length > 0 ? (
               filteredProducts.map((product) => (

@@ -11,6 +11,10 @@ import {
   Users,
 } from "lucide-react";
 import api from "../utils/api";
+import {
+  ProgressiveLoadBanner,
+  ProgressiveTableSkeleton,
+} from "../components/ProgressiveLoadState";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
@@ -447,15 +451,6 @@ export default function Customers() {
                   Last refresh: {lastUpdatedAt.toLocaleTimeString("ar-EG")}
                 </p>
               )}
-              {loadStatus.message && (
-                <p className="mt-2 text-xs text-amber-700 flex items-center gap-1">
-                  <RefreshCw
-                    size={12}
-                    className={loadStatus.active ? "animate-spin" : ""}
-                  />
-                  {loadStatus.message}
-                </p>
-              )}
             </div>
             <button
               onClick={() => fetchData()}
@@ -475,6 +470,15 @@ export default function Customers() {
               {error}
             </div>
           )}
+
+          <ProgressiveLoadBanner
+            active={loadStatus.active}
+            loadedCount={customers.length}
+            batchSize={CUSTOMERS_PAGE_SIZE}
+            itemLabel="customers"
+            message={loadStatus.message}
+            lastUpdatedAt={lastUpdatedAt}
+          />
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <SummaryCard
@@ -549,6 +553,9 @@ export default function Customers() {
             </div>
           </div>
 
+          {loading && customers.length === 0 ? (
+            <ProgressiveTableSkeleton rows={8} columns={5} />
+          ) : (
           <div className="bg-white rounded-xl shadow overflow-hidden">
             <div className="overflow-x-auto">
               <table className="data-table w-full min-w-[980px]">
@@ -578,7 +585,7 @@ export default function Customers() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading ? (
+                  {loading && customers.length === 0 ? (
                     <tr>
                       <td colSpan="7" className="px-6 py-10 text-center text-slate-500">
                         Loading customers...
@@ -629,6 +636,7 @@ export default function Customers() {
               </table>
             </div>
           </div>
+          )}
 
           {selectedCustomer && selectedCustomerMeta && (
             <div className="bg-white rounded-xl shadow p-5 space-y-5">

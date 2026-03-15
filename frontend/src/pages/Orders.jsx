@@ -11,6 +11,10 @@ import {
   TrendingUp,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import {
+  ProgressiveLoadBanner,
+  ProgressiveTableSkeleton,
+} from "../components/ProgressiveLoadState";
 import api from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
@@ -577,15 +581,6 @@ export default function Orders() {
                       Event {lastLiveEventAt.toLocaleTimeString("ar-EG")}
                     </span>
                   )}
-                  {loadStatus.message && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                      <RefreshCw
-                        size={12}
-                        className={loadStatus.active ? "animate-spin" : ""}
-                      />
-                      {loadStatus.message}
-                    </span>
-                  )}
                 </div>
               </div>
               <button
@@ -608,6 +603,15 @@ export default function Orders() {
               {error}
             </div>
           )}
+
+          <ProgressiveLoadBanner
+            active={loadStatus.active}
+            loadedCount={orders.length}
+            batchSize={ORDERS_PAGE_SIZE}
+            itemLabel="orders"
+            message={loadStatus.message}
+            lastUpdatedAt={lastUpdatedAt}
+          />
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <SummaryCard
@@ -864,6 +868,9 @@ export default function Orders() {
             </div>
           </div>
 
+          {loading && orders.length === 0 ? (
+            <ProgressiveTableSkeleton rows={8} columns={6} />
+          ) : (
           <div className="bg-white rounded-xl shadow overflow-hidden border border-slate-200">
             <div className="hidden lg:block overflow-x-auto">
               <table className="data-table w-full min-w-[1220px]">
@@ -902,7 +909,7 @@ export default function Orders() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading ? (
+                  {loading && orders.length === 0 ? (
                     <tr>
                       <td colSpan="10" className="px-6 py-10 text-center text-slate-500">
                         Loading orders...
@@ -1005,7 +1012,7 @@ export default function Orders() {
             </div>
 
             <div className="lg:hidden divide-y divide-slate-100">
-              {loading ? (
+              {loading && orders.length === 0 ? (
                 <div className="px-5 py-10 text-center text-slate-500">Loading orders...</div>
               ) : filteredOrders.length > 0 ? (
                 filteredOrders.map((order) => (
@@ -1088,6 +1095,7 @@ export default function Orders() {
               )}
             </div>
           </div>
+          )}
         </div>
       </main>
     </div>

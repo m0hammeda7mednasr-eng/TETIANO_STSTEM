@@ -104,6 +104,7 @@ export default function Dashboard() {
     avg_order_value: 0,
   });
   const [pendingRequests, setPendingRequests] = useState([]);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [recentReports, setRecentReports] = useState([]);
   const [recentOrders, setRecentOrders] = useState([]);
   const cacheKey = useMemo(
@@ -130,11 +131,21 @@ export default function Dashboard() {
           : Promise.resolve({ data: [] });
         const requestsPromise =
           isAdmin || canManageUsers
-            ? api.get("/access-requests/all")
+            ? api.get("/access-requests/all", {
+                params: {
+                  status: "pending",
+                  limit: 4,
+                  include_count: true,
+                },
+              })
             : Promise.resolve({ data: [] });
         const reportsPromise =
           isAdmin || canViewAllReports
-            ? api.get("/daily-reports/all")
+            ? api.get("/daily-reports/all", {
+                params: {
+                  limit: 5,
+                },
+              })
             : Promise.resolve({ data: [] });
 
         const [statsResult, ordersResult, requestsResult, reportsResult] =
@@ -172,9 +183,17 @@ export default function Dashboard() {
           requestsResult.status === "fulfilled"
             ? extractArray(requestsResult.value.data)
             : [];
+        const nextPendingRequests = requestsData
+          .filter((item) => String(item.status) === "pending")
+          .slice(0, 4);
+        const nextPendingRequestsCount =
+          requestsResult.status === "fulfilled"
+            ? Number(requestsResult.value.data?.total ?? nextPendingRequests.length)
+            : 0;
         setPendingRequests(
-          requestsData.filter((item) => String(item.status) === "pending"),
+          nextPendingRequests,
         );
+        setPendingRequestsCount(nextPendingRequestsCount);
 
         const reportsData =
           reportsResult.status === "fulfilled"
@@ -199,9 +218,8 @@ export default function Dashboard() {
                   avg_order_value: 0,
                 },
           recentOrders: sortedOrders.slice(0, 6),
-          pendingRequests: requestsData.filter(
-            (item) => String(item.status) === "pending",
-          ),
+          pendingRequests: nextPendingRequests,
+          pendingRequestsCount: nextPendingRequestsCount,
           recentReports: reportsData
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
             .slice(0, 5),
@@ -253,6 +271,9 @@ export default function Dashboard() {
         setPendingRequests(
           Array.isArray(snapshot.pendingRequests) ? snapshot.pendingRequests : [],
         );
+        setPendingRequestsCount(
+          Number(snapshot.pendingRequestsCount ?? snapshot.pendingRequests?.length ?? 0),
+        );
         setRecentReports(Array.isArray(snapshot.recentReports) ? snapshot.recentReports : []);
         setLastUpdatedAt(
           cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
@@ -281,7 +302,12 @@ export default function Dashboard() {
       loadData({ silent: true });
     });
 
-    const onFocus = () => {
+    const onFocus = async () => {
+      const cached = await readCachedView(cacheKey);
+      if (isCacheFresh(cached, DASHBOARD_CACHE_FRESH_MS)) {
+        return;
+      }
+
       loadData({ silent: true });
     };
 
@@ -343,7 +369,7 @@ export default function Dashboard() {
       {
         id: "access-requests",
         label: "Access Requests",
-        description: `Pending now: ${pendingRequests.length}`,
+        description: `Pending now: ${pendingRequestsCount}`,
         icon: UserCheck,
         path: "/users?tab=requests",
         visible: isAdmin || canManageUsers,
@@ -352,7 +378,7 @@ export default function Dashboard() {
     ];
 
     return items.filter((item) => item.visible);
-  }, [canManageUsers, hasPermission, isAdmin, pendingRequests.length]);
+  }, [canManageUsers, hasPermission, isAdmin, pendingRequestsCount]);
 
   const handleSync = async () => {
     if (!canManageSettings) return;
@@ -559,7 +585,7 @@ export default function Dashboard() {
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-bold">Pending Access Requests</h2>
                     <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">
-                      {pendingRequests.length}
+                      {pendingRequestsCount}
                     </span>
                   </div>
 

@@ -22,8 +22,9 @@ import {
 } from "../utils/viewCache";
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
-const ORDERS_PAGE_SIZE = 100;
-const ORDERS_CACHE_FRESH_MS = 90 * 1000;
+const ORDERS_PAGE_SIZE = 200;
+const ORDERS_CACHE_FRESH_MS = 2 * 60 * 60 * 1000;
+const ORDERS_BACKGROUND_REFRESH_MS = 2 * 60 * 60 * 1000;
 const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
@@ -307,11 +308,27 @@ export default function Orders() {
       scheduleSilentRefresh();
     });
 
-    const onFocus = () => scheduleSilentRefresh();
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      scheduleSilentRefresh();
+    }, ORDERS_BACKGROUND_REFRESH_MS);
+
+    const onFocus = async () => {
+      const cached = await readCachedView(cacheKey);
+      if (isCacheFresh(cached, ORDERS_CACHE_FRESH_MS)) {
+        return;
+      }
+
+      scheduleSilentRefresh();
+    };
     window.addEventListener("focus", onFocus);
 
     return () => {
       active = false;
+      clearInterval(interval);
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };

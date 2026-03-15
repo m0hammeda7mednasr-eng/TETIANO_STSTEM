@@ -22,10 +22,11 @@ import {
   writeCachedView,
 } from "../utils/viewCache";
 
-const CUSTOMERS_PAGE_SIZE = 100;
-const ORDERS_PAGE_SIZE = 100;
+const CUSTOMERS_PAGE_SIZE = 200;
+const ORDERS_PAGE_SIZE = 200;
 const CUSTOMER_ORDER_SCAN_PAGES = 4;
-const CUSTOMERS_CACHE_FRESH_MS = 90 * 1000;
+const CUSTOMERS_CACHE_FRESH_MS = 2 * 60 * 60 * 1000;
+const CUSTOMERS_BACKGROUND_REFRESH_MS = 2 * 60 * 60 * 1000;
 const CURRENCY_LABEL = "LE";
 
 const toNumber = (value) => {
@@ -230,11 +231,27 @@ export default function Customers() {
       fetchData({ silent: true });
     });
 
-    const onFocus = () => fetchData({ silent: true });
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      fetchData({ silent: true });
+    }, CUSTOMERS_BACKGROUND_REFRESH_MS);
+
+    const onFocus = async () => {
+      const cached = await readCachedView(cacheKey);
+      if (isCacheFresh(cached, CUSTOMERS_CACHE_FRESH_MS)) {
+        return;
+      }
+
+      fetchData({ silent: true });
+    };
     window.addEventListener("focus", onFocus);
 
     return () => {
       active = false;
+      clearInterval(interval);
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };

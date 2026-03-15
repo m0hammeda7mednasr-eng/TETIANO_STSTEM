@@ -5,6 +5,28 @@ import { isAdmin } from "../middleware/permissions.js";
 import { supabase } from "../supabaseClient.js";
 
 const router = express.Router();
+const MAX_ACCESS_REQUESTS_LIST_LIMIT = 100;
+
+const parseListLimit = (value) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return Math.min(MAX_ACCESS_REQUESTS_LIST_LIMIT, parsed);
+};
+
+const parseListOffset = (value) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+
+  return parsed;
+};
+
+const shouldIncludeCount = (value) =>
+  ["1", "true", "yes"].includes(String(value || "").toLowerCase());
 
 // Get my requests
 router.get("/my-requests", authenticateToken, async (req, res) => {
@@ -36,6 +58,11 @@ router.get("/my-requests", authenticateToken, async (req, res) => {
 // Get all requests (Admin only)
 router.get("/all", authenticateToken, isAdmin, async (req, res) => {
   try {
+    const limit = parseListLimit(req.query.limit);
+    const offset = parseListOffset(req.query.offset);
+    const includeCount = shouldIncludeCount(req.query.include_count);
+    const status = String(req.query.status || "").trim().toLowerCase();
+
     let query = supabase
       .from("access_requests")
       .select(
@@ -43,6 +70,7 @@ router.get("/all", authenticateToken, isAdmin, async (req, res) => {
         *,
         users!access_requests_user_id_fkey (name, email)
       `,
+        includeCount ? { count: "exact" } : undefined,
       )
       .order("created_at", { ascending: false });
 
@@ -54,9 +82,26 @@ router.get("/all", authenticateToken, isAdmin, async (req, res) => {
       "access_requests",
     );
 
-    const { data, error } = await query;
+    if (status) {
+      query = query.eq("status", status);
+    }
+
+    if (limit !== null) {
+      query = query.range(offset, offset + limit - 1);
+    }
+
+    const { data, error, count } = await query;
 
     if (error) throw error;
+
+    if (includeCount) {
+      return res.json({
+        data: data || [],
+        total: Number.isFinite(count) ? count : (data || []).length,
+        limit,
+        offset,
+      });
+    }
 
     res.json(data || []);
   } catch (error) {

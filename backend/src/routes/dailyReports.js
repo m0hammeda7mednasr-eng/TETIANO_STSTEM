@@ -55,12 +55,34 @@ const collectUploadedFiles = (req) => {
 
 const MIN_ANALYTICS_DAYS = 7;
 const MAX_ANALYTICS_DAYS = 180;
+const MAX_REPORTS_LIST_LIMIT = 100;
 
 const parseDaysParam = (value) => {
   const parsed = parseInt(value, 10);
   if (!Number.isFinite(parsed)) return 30;
   return Math.min(MAX_ANALYTICS_DAYS, Math.max(MIN_ANALYTICS_DAYS, parsed));
 };
+
+const parseListLimit = (value) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return Math.min(MAX_REPORTS_LIST_LIMIT, parsed);
+};
+
+const parseListOffset = (value) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+
+  return parsed;
+};
+
+const shouldIncludeCount = (value) =>
+  ["1", "true", "yes"].includes(String(value || "").toLowerCase());
 
 const toDayKey = (dateValue) => {
   if (!dateValue) return null;
@@ -196,6 +218,10 @@ router.get(
   requirePermission("can_view_all_reports"),
   async (req, res) => {
   try {
+    const limit = parseListLimit(req.query.limit);
+    const offset = parseListOffset(req.query.offset);
+    const includeCount = shouldIncludeCount(req.query.include_count);
+
     let query = supabase
       .from("daily_reports")
       .select(
@@ -203,10 +229,15 @@ router.get(
         *,
         users!daily_reports_user_id_fkey (name, email)
       `,
+        includeCount ? { count: "exact" } : undefined,
       )
       .order("report_date", { ascending: false });
 
-    const { data, error } = await query;
+    if (limit !== null) {
+      query = query.range(offset, offset + limit - 1);
+    }
+
+    const { data, error, count } = await query;
 
     if (error) throw error;
 
@@ -214,6 +245,15 @@ router.get(
       ...report,
       attachments: normalizeAttachmentsArray(report.attachments),
     }));
+
+    if (includeCount) {
+      return res.json({
+        data: normalizedReports,
+        total: Number.isFinite(count) ? count : normalizedReports.length,
+        limit,
+        offset,
+      });
+    }
 
     res.json(normalizedReports);
   } catch (error) {

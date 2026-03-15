@@ -27,7 +27,8 @@ const RANGE_OPTIONS = [
   { label: "90 Days", value: 90 },
 ];
 
-const POLLING_INTERVAL_MS = 30000;
+const POLLING_INTERVAL_MS = 120000;
+const LATEST_REPORTS_LIMIT = 30;
 let reportsAnalyticsEndpointUnsupported = false;
 let analyticsRequestInFlight = false;
 
@@ -80,7 +81,13 @@ export default function Reports() {
         setMessage({ type: "", text: "" });
       }
 
-      const requests = [api.get("/daily-reports/all")];
+      const requests = [
+        api.get("/daily-reports/all", {
+          params: {
+            limit: LATEST_REPORTS_LIMIT,
+          },
+        }),
+      ];
       if (analyticsApiAvailable && !reportsAnalyticsEndpointUnsupported) {
         requests.push(api.get(`/daily-reports/analytics?days=${selectedDays}`));
       }
@@ -128,6 +135,10 @@ export default function Reports() {
     fetchReportsData(days);
 
     const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
       fetchReportsData(days, { silent: true });
     }, POLLING_INTERVAL_MS);
 

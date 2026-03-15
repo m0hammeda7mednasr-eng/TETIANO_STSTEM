@@ -13,7 +13,13 @@ import {
   Users,
 } from "lucide-react";
 
-const POLLING_INTERVAL_MS = 30000;
+const POLLING_INTERVAL_MS = 120000;
+const ACTIVITY_LOG_PREVIEW_LIMIT = 12;
+
+const getTotalFromResponse = (payload) => {
+  const parsed = Number(payload?.total);
+  return Number.isFinite(parsed) ? parsed : extractArray(payload).length;
+};
 
 const AdminPage = () => {
   const navigate = useNavigate();
@@ -31,9 +37,25 @@ const AdminPage = () => {
       }
 
       const [logsResult, requestsResult, usersResult] = await Promise.allSettled([
-        api.get("/activity-log"),
-        api.get("/access-requests/all"),
-        api.get("/users"),
+        api.get("/activity-log", {
+          params: {
+            limit: ACTIVITY_LOG_PREVIEW_LIMIT,
+          },
+        }),
+        api.get("/access-requests/all", {
+          params: {
+            status: "pending",
+            limit: 1,
+            include_count: true,
+          },
+        }),
+        api.get("/users", {
+          params: {
+            compact: true,
+            limit: 1,
+            include_count: true,
+          },
+        }),
       ]);
 
       if (logsResult.status === "fulfilled") {
@@ -43,14 +65,11 @@ const AdminPage = () => {
       }
 
       if (requestsResult.status === "fulfilled") {
-        const pending = extractArray(requestsResult.value.data).filter(
-          (request) => request.status === "pending",
-        );
-        setPendingRequestsCount(pending.length);
+        setPendingRequestsCount(getTotalFromResponse(requestsResult.value.data));
       }
 
       if (usersResult.status === "fulfilled") {
-        setUsersCount(extractArray(usersResult.value.data).length);
+        setUsersCount(getTotalFromResponse(usersResult.value.data));
       }
     } catch (requestError) {
       if (!silent) {
@@ -68,6 +87,10 @@ const AdminPage = () => {
     fetchAdminData();
 
     const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
       fetchAdminData({ silent: true });
     }, POLLING_INTERVAL_MS);
 

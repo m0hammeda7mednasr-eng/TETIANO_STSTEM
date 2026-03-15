@@ -28,8 +28,9 @@ import {
   writeCachedView,
 } from "../utils/viewCache";
 
-const PRODUCTS_PAGE_SIZE = 100;
-const PRODUCTS_CACHE_FRESH_MS = 90 * 1000;
+const PRODUCTS_PAGE_SIZE = 200;
+const PRODUCTS_CACHE_FRESH_MS = 2 * 60 * 60 * 1000;
+const PRODUCTS_BACKGROUND_REFRESH_MS = 2 * 60 * 60 * 1000;
 const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
@@ -266,11 +267,27 @@ export default function Products() {
       fetchProducts({ silent: true });
     });
 
-    const onFocus = () => fetchProducts({ silent: true });
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      fetchProducts({ silent: true });
+    }, PRODUCTS_BACKGROUND_REFRESH_MS);
+
+    const onFocus = async () => {
+      const cached = await readCachedView(cacheKey);
+      if (isCacheFresh(cached, PRODUCTS_CACHE_FRESH_MS)) {
+        return;
+      }
+
+      fetchProducts({ silent: true });
+    };
     window.addEventListener("focus", onFocus);
 
     return () => {
       active = false;
+      clearInterval(interval);
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };

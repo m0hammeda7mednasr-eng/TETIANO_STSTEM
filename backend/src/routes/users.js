@@ -11,6 +11,31 @@ import {
 import { supabase } from "../supabaseClient.js";
 
 const router = express.Router();
+const MAX_USERS_LIST_LIMIT = 200;
+
+const parseListLimit = (value) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return Math.min(MAX_USERS_LIST_LIMIT, parsed);
+};
+
+const parseListOffset = (value) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+
+  return parsed;
+};
+
+const shouldIncludeCount = (value) =>
+  ["1", "true", "yes"].includes(String(value || "").toLowerCase());
+
+const shouldUseCompactSelect = (value) =>
+  ["1", "true", "yes"].includes(String(value || "").toLowerCase());
 
 // Get all users (Admin only)
 router.get(
@@ -19,10 +44,20 @@ router.get(
   requirePermission("can_manage_users"),
   async (req, res) => {
     try {
-      const { data: users, error } = await supabase
-        .from("users")
-        .select(
-          `
+      const limit = parseListLimit(req.query.limit);
+      const offset = parseListOffset(req.query.offset);
+      const includeCount = shouldIncludeCount(req.query.include_count);
+      const compact = shouldUseCompactSelect(req.query.compact);
+      const selectClause = compact
+        ? `
+        id,
+        email,
+        name,
+        role,
+        is_active,
+        created_at
+      `
+        : `
         id,
         email,
         name,
@@ -30,11 +65,29 @@ router.get(
         is_active,
         created_at,
         permissions (*)
-      `,
-        )
+      `;
+
+      let query = supabase
+        .from("users")
+        .select(selectClause, includeCount ? { count: "exact" } : undefined)
         .order("created_at", { ascending: false });
 
+      if (limit !== null) {
+        query = query.range(offset, offset + limit - 1);
+      }
+
+      const { data: users, error, count } = await query;
+
       if (error) throw error;
+
+      if (includeCount) {
+        return res.json({
+          data: users || [],
+          total: Number.isFinite(count) ? count : (users || []).length,
+          limit,
+          offset,
+        });
+      }
 
       res.json(users || []);
     } catch (error) {

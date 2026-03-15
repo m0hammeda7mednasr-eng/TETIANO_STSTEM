@@ -14,10 +14,6 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import ProductEditModal from "../components/ProductEditModal";
-import {
-  ProgressiveCardsSkeleton,
-  ProgressiveLoadBanner,
-} from "../components/ProgressiveLoadState";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -28,6 +24,7 @@ import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
   buildStoreScopedCacheKey,
   isCacheFresh,
+  peekCachedView,
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
@@ -109,24 +106,33 @@ export default function Products() {
   const navigate = useNavigate();
   const { isAdmin, hasPermission } = useAuth();
   const canEditProducts = hasPermission("can_edit_products");
+  const cacheKey = useMemo(
+    () => buildStoreScopedCacheKey("products:list"),
+    [],
+  );
+  const initialCachedSnapshot = useMemo(() => {
+    const cached = peekCachedView(cacheKey);
+    return {
+      rows: Array.isArray(cached?.value?.rows) ? cached.value.rows : [],
+      updatedAt: cached?.updatedAt ? new Date(cached.updatedAt) : null,
+    };
+  }, [cacheKey]);
 
-  const [products, setProducts] = useState([]);
+  const [products, setProducts] = useState(() => initialCachedSnapshot.rows);
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [loading, setLoading] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [notification, setNotification] = useState(null);
   const [error, setError] = useState("");
-  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(
+    () => initialCachedSnapshot.updatedAt,
+  );
   const [loadStatus, setLoadStatus] = useState({
     active: false,
     message: "",
   });
   const fetchPromiseRef = useRef(null);
   const productsRef = useRef([]);
-  const cacheKey = useMemo(
-    () => buildStoreScopedCacheKey("products:list"),
-    [],
-  );
 
   useEffect(() => {
     productsRef.current = products;
@@ -137,7 +143,7 @@ export default function Products() {
 
     readCachedView(cacheKey).then((cached) => {
       const cachedRows = Array.isArray(cached?.value?.rows) ? cached.value.rows : [];
-      if (!active || cachedRows.length === 0) {
+      if (!active || cachedRows.length === 0 || cachedRows.length <= productsRef.current.length) {
         return;
       }
 
@@ -168,10 +174,8 @@ export default function Products() {
       }
 
       const request = (async () => {
-        const hasVisibleProducts = productsRef.current.length > 0;
-
         if (!silent) {
-          setLoading(!hasVisibleProducts);
+          setLoading(false);
           setError("");
         }
 
@@ -202,9 +206,6 @@ export default function Products() {
                     ? `Loaded ${accumulatedRows.length.toLocaleString()} products so far...`
                     : `Loaded ${accumulatedRows.length.toLocaleString()} products`,
                 });
-                if (!silent) {
-                  setLoading(false);
-                }
               },
             },
           );
@@ -236,9 +237,7 @@ export default function Products() {
               : { active: false, message: "" },
           );
         } finally {
-          if (!silent) {
-            setLoading(false);
-          }
+          setLoading(false);
         }
       })();
 
@@ -263,7 +262,7 @@ export default function Products() {
       }
 
       if (!isCacheFresh(cached, PRODUCTS_CACHE_FRESH_MS)) {
-        await fetchProducts({ silent: Boolean(cached?.value?.rows?.length) });
+        await fetchProducts({ silent: true });
       }
     })();
 
@@ -584,14 +583,10 @@ export default function Products() {
             </div>
             <button
               onClick={() => fetchProducts()}
-              disabled={loading || loadStatus.active}
-              className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-60"
+              className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
             >
-              <RefreshCw
-                size={18}
-                className={loading || loadStatus.active ? "animate-spin" : ""}
-              />
-              {loading || loadStatus.active ? "Refreshing..." : "Refresh"}
+              <RefreshCw size={18} />
+              Refresh
             </button>
           </div>
 
@@ -601,15 +596,6 @@ export default function Products() {
               {error || notification?.message}
             </div>
           )}
-
-          <ProgressiveLoadBanner
-            active={loadStatus.active}
-            loadedCount={products.length}
-            batchSize={PRODUCTS_PAGE_SIZE}
-            itemLabel="products"
-            message={loadStatus.message}
-            lastUpdatedAt={lastUpdatedAt}
-          />
 
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <SummaryCard
@@ -848,9 +834,9 @@ export default function Products() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-            {loading && products.length === 0 ? (
-              <div className="col-span-full">
-                <ProgressiveCardsSkeleton cards={8} />
+            {loadStatus.active && products.length === 0 ? (
+              <div className="col-span-full bg-white rounded-xl shadow p-8 text-center text-slate-500">
+                Saved products will appear here automatically as soon as the first batch is ready.
               </div>
             ) : filteredProducts.length > 0 ? (
               filteredProducts.map((product) => (

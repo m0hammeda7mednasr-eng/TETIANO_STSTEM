@@ -69,6 +69,8 @@ export const buildStoreScopedCacheKey = (scope) => {
   return `${scope}::${currentStoreId}`;
 };
 
+export const peekCachedView = (key) => readFromLocalStorage(key);
+
 export const readCachedView = async (key) => {
   const database = await openDatabase();
   if (!database) {

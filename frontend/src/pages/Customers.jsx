@@ -11,10 +11,6 @@ import {
   Users,
 } from "lucide-react";
 import api from "../utils/api";
-import {
-  ProgressiveLoadBanner,
-  ProgressiveTableSkeleton,
-} from "../components/ProgressiveLoadState";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
@@ -22,6 +18,7 @@ import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
   buildStoreScopedCacheKey,
   isCacheFresh,
+  peekCachedView,
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
@@ -68,27 +65,36 @@ const getOrderFinancialStatus = (order) => {
 export default function Customers() {
   const { hasPermission } = useAuth();
   const canViewOrders = hasPermission("can_view_orders");
+  const cacheKey = useMemo(
+    () => buildStoreScopedCacheKey("customers:list"),
+    [],
+  );
+  const initialCachedSnapshot = useMemo(() => {
+    const cached = peekCachedView(cacheKey);
+    return {
+      rows: Array.isArray(cached?.value?.customers) ? cached.value.customers : [],
+      updatedAt: cached?.updatedAt ? new Date(cached.updatedAt) : null,
+    };
+  }, [cacheKey]);
 
-  const [customers, setCustomers] = useState([]);
+  const [customers, setCustomers] = useState(() => initialCachedSnapshot.rows);
   const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [countryFilter, setCountryFilter] = useState("all");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [relatedOrdersLoading, setRelatedOrdersLoading] = useState(false);
-  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(
+    () => initialCachedSnapshot.updatedAt,
+  );
   const [loadStatus, setLoadStatus] = useState({
     active: false,
     message: "",
   });
   const fetchPromiseRef = useRef(null);
   const customersRef = useRef([]);
-  const cacheKey = useMemo(
-    () => buildStoreScopedCacheKey("customers:list"),
-    [],
-  );
 
   useEffect(() => {
     customersRef.current = customers;
@@ -102,7 +108,7 @@ export default function Customers() {
         ? cached.value.customers
         : [];
 
-      if (!active || cachedCustomers.length === 0) {
+      if (!active || cachedCustomers.length === 0 || cachedCustomers.length <= customersRef.current.length) {
         return;
       }
 
@@ -129,10 +135,8 @@ export default function Customers() {
       }
 
       const request = (async () => {
-        const hasVisibleCustomers = customersRef.current.length > 0;
-
         if (!silent) {
-          setLoading(!hasVisibleCustomers);
+          setLoading(false);
           setError("");
         }
 
@@ -163,9 +167,6 @@ export default function Customers() {
                     ? `Loaded ${accumulatedRows.length.toLocaleString()} customers so far...`
                     : `Loaded ${accumulatedRows.length.toLocaleString()} customers`,
                 });
-                if (!silent) {
-                  setLoading(false);
-                }
               },
             },
           );
@@ -200,9 +201,7 @@ export default function Customers() {
               : { active: false, message: "" },
           );
         } finally {
-          if (!silent) {
-            setLoading(false);
-          }
+          setLoading(false);
         }
       })();
 
@@ -227,7 +226,7 @@ export default function Customers() {
       }
 
       if (!isCacheFresh(cached, CUSTOMERS_CACHE_FRESH_MS)) {
-        await fetchData({ silent: Boolean(cached?.value?.customers?.length) });
+        await fetchData({ silent: true });
       }
     })();
 
@@ -454,14 +453,10 @@ export default function Customers() {
             </div>
             <button
               onClick={() => fetchData()}
-              disabled={loading || loadStatus.active}
-              className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-60"
+              className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
             >
-              <RefreshCw
-                size={18}
-                className={loading || loadStatus.active ? "animate-spin" : ""}
-              />
-              {loading || loadStatus.active ? "Refreshing..." : "Refresh"}
+              <RefreshCw size={18} />
+              Refresh
             </button>
           </div>
 
@@ -470,15 +465,6 @@ export default function Customers() {
               {error}
             </div>
           )}
-
-          <ProgressiveLoadBanner
-            active={loadStatus.active}
-            loadedCount={customers.length}
-            batchSize={CUSTOMERS_PAGE_SIZE}
-            itemLabel="customers"
-            message={loadStatus.message}
-            lastUpdatedAt={lastUpdatedAt}
-          />
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <SummaryCard
@@ -553,9 +539,6 @@ export default function Customers() {
             </div>
           </div>
 
-          {loading && customers.length === 0 ? (
-            <ProgressiveTableSkeleton rows={8} columns={5} />
-          ) : (
           <div className="bg-white rounded-xl shadow overflow-hidden">
             <div className="overflow-x-auto">
               <table className="data-table w-full min-w-[980px]">
@@ -585,10 +568,10 @@ export default function Customers() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && customers.length === 0 ? (
+                  {loadStatus.active && customers.length === 0 ? (
                     <tr>
                       <td colSpan="7" className="px-6 py-10 text-center text-slate-500">
-                        Loading customers...
+                        Saved customers will appear here automatically as soon as the first batch is ready.
                       </td>
                     </tr>
                   ) : filteredCustomers.length > 0 ? (
@@ -636,7 +619,6 @@ export default function Customers() {
               </table>
             </div>
           </div>
-          )}
 
           {selectedCustomer && selectedCustomerMeta && (
             <div className="bg-white rounded-xl shadow p-5 space-y-5">
@@ -715,7 +697,7 @@ export default function Customers() {
                   <h3 className="font-semibold text-slate-900 mb-3">Recent Orders</h3>
                   {relatedOrdersLoading ? (
                     <p className="text-sm text-slate-500">
-                      Loading recent orders for this customer...
+                      Recent orders will appear here automatically.
                     </p>
                   ) : selectedCustomerMeta.relatedOrders.length === 0 ? (
                     <p className="text-sm text-slate-500">

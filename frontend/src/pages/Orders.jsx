@@ -11,16 +11,13 @@ import {
   TrendingUp,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
-import {
-  ProgressiveLoadBanner,
-  ProgressiveTableSkeleton,
-} from "../components/ProgressiveLoadState";
 import api from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
   buildStoreScopedCacheKey,
   isCacheFresh,
+  peekCachedView,
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
@@ -138,11 +135,21 @@ const endOfDay = (dateString) => {
 
 export default function Orders() {
   const navigate = useNavigate();
-  const [orders, setOrders] = useState([]);
+  const cacheKey = useMemo(() => buildStoreScopedCacheKey("orders:list"), []);
+  const initialCachedSnapshot = useMemo(() => {
+    const cached = peekCachedView(cacheKey);
+    return {
+      rows: Array.isArray(cached?.value?.rows) ? cached.value.rows : [],
+      updatedAt: cached?.updatedAt ? new Date(cached.updatedAt) : null,
+    };
+  }, [cacheKey]);
+  const [orders, setOrders] = useState(() => initialCachedSnapshot.rows);
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(
+    () => initialCachedSnapshot.updatedAt,
+  );
   const [lastLiveEventAt, setLastLiveEventAt] = useState(null);
   const [loadStatus, setLoadStatus] = useState({
     active: false,
@@ -151,7 +158,6 @@ export default function Orders() {
   const refreshTimeoutRef = useRef(null);
   const fetchPromiseRef = useRef(null);
   const ordersRef = useRef([]);
-  const cacheKey = useMemo(() => buildStoreScopedCacheKey("orders:list"), []);
 
   useEffect(() => {
     ordersRef.current = orders;
@@ -162,7 +168,7 @@ export default function Orders() {
 
     readCachedView(cacheKey).then((cached) => {
       const cachedRows = Array.isArray(cached?.value?.rows) ? cached.value.rows : [];
-      if (!active || cachedRows.length === 0) {
+      if (!active || cachedRows.length === 0 || cachedRows.length <= ordersRef.current.length) {
         return;
       }
 
@@ -186,11 +192,9 @@ export default function Orders() {
       return fetchPromiseRef.current;
     }
 
-    const request = (async () => {
-      const hasVisibleOrders = ordersRef.current.length > 0;
-
+      const request = (async () => {
       if (!silent) {
-        setLoading(!hasVisibleOrders);
+        setLoading(Boolean(forceSync));
         setError("");
       }
 
@@ -225,7 +229,7 @@ export default function Orders() {
                   ? `Loaded ${accumulatedRows.length.toLocaleString()} orders so far...`
                   : `Loaded ${accumulatedRows.length.toLocaleString()} orders`,
               });
-              if (!silent) {
+              if (!silent && forceSync) {
                 setLoading(false);
               }
             },
@@ -258,7 +262,7 @@ export default function Orders() {
             : { active: false, message: "" },
         );
       } finally {
-        if (!silent) {
+        if (!silent && forceSync) {
           setLoading(false);
         }
       }
@@ -303,7 +307,7 @@ export default function Orders() {
       }
 
       if (!isCacheFresh(cached, ORDERS_CACHE_FRESH_MS)) {
-        await fetchOrders({ silent: Boolean(cached?.value?.rows?.length) });
+        await fetchOrders({ silent: true });
       }
     })();
 
@@ -585,14 +589,10 @@ export default function Orders() {
               </div>
               <button
                 onClick={() => fetchOrders({ forceSync: true })}
-                disabled={loading || loadStatus.active}
-                className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-60"
+                className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
               >
-                <RefreshCw
-                  size={18}
-                  className={loading || loadStatus.active ? "animate-spin" : ""}
-                />
-                {loading || loadStatus.active ? "Refreshing..." : "Refresh"}
+                <RefreshCw size={18} />
+                Refresh
               </button>
             </div>
           </div>
@@ -603,15 +603,6 @@ export default function Orders() {
               {error}
             </div>
           )}
-
-          <ProgressiveLoadBanner
-            active={loadStatus.active}
-            loadedCount={orders.length}
-            batchSize={ORDERS_PAGE_SIZE}
-            itemLabel="orders"
-            message={loadStatus.message}
-            lastUpdatedAt={lastUpdatedAt}
-          />
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <SummaryCard
@@ -868,9 +859,6 @@ export default function Orders() {
             </div>
           </div>
 
-          {loading && orders.length === 0 ? (
-            <ProgressiveTableSkeleton rows={8} columns={6} />
-          ) : (
           <div className="bg-white rounded-xl shadow overflow-hidden border border-slate-200">
             <div className="hidden lg:block overflow-x-auto">
               <table className="data-table w-full min-w-[1220px]">
@@ -909,10 +897,10 @@ export default function Orders() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && orders.length === 0 ? (
+                  {loadStatus.active && orders.length === 0 ? (
                     <tr>
                       <td colSpan="10" className="px-6 py-10 text-center text-slate-500">
-                        Loading orders...
+                        Latest orders will appear here automatically.
                       </td>
                     </tr>
                   ) : filteredOrders.length > 0 ? (
@@ -1012,8 +1000,10 @@ export default function Orders() {
             </div>
 
             <div className="lg:hidden divide-y divide-slate-100">
-              {loading && orders.length === 0 ? (
-                <div className="px-5 py-10 text-center text-slate-500">Loading orders...</div>
+              {loadStatus.active && orders.length === 0 ? (
+                <div className="px-5 py-10 text-center text-slate-500">
+                  Latest orders will appear here automatically.
+                </div>
               ) : filteredOrders.length > 0 ? (
                 filteredOrders.map((order) => (
                   <article key={order.id} className="p-4 space-y-3">
@@ -1095,7 +1085,6 @@ export default function Orders() {
               )}
             </div>
           </div>
-          )}
         </div>
       </main>
     </div>

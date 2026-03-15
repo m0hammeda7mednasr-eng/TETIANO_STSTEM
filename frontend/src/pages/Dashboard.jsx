@@ -23,12 +23,22 @@ import {
 import {
   buildStoreScopedCacheKey,
   isCacheFresh,
+  peekCachedView,
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
 
 const CURRENCY_LABEL = "LE";
 const DASHBOARD_CACHE_FRESH_MS = 60 * 1000;
+const EMPTY_DASHBOARD_STATS = {
+  total_sales: 0,
+  total_order_value: 0,
+  pending_order_value: 0,
+  total_orders: 0,
+  total_products: 0,
+  total_customers: 0,
+  avg_order_value: 0,
+};
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -89,27 +99,46 @@ export default function Dashboard() {
   const canViewOrders = hasPermission("can_view_orders");
   const canManageUsers = hasPermission("can_manage_users");
   const canViewAllReports = hasPermission("can_view_all_reports");
-
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState("");
-  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
-  const [stats, setStats] = useState({
-    total_sales: 0,
-    total_order_value: 0,
-    pending_order_value: 0,
-    total_orders: 0,
-    total_products: 0,
-    total_customers: 0,
-    avg_order_value: 0,
-  });
-  const [pendingRequests, setPendingRequests] = useState([]);
-  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
-  const [recentReports, setRecentReports] = useState([]);
-  const [recentOrders, setRecentOrders] = useState([]);
   const cacheKey = useMemo(
     () => buildStoreScopedCacheKey("dashboard:summary"),
     [],
+  );
+  const initialCachedSnapshot = useMemo(() => {
+    const cached = peekCachedView(cacheKey);
+    const snapshot = cached?.value;
+
+    return {
+      stats: snapshot?.stats || EMPTY_DASHBOARD_STATS,
+      recentOrders: Array.isArray(snapshot?.recentOrders) ? snapshot.recentOrders : [],
+      pendingRequests: Array.isArray(snapshot?.pendingRequests)
+        ? snapshot.pendingRequests
+        : [],
+      pendingRequestsCount: Number(
+        snapshot?.pendingRequestsCount ?? snapshot?.pendingRequests?.length ?? 0,
+      ),
+      recentReports: Array.isArray(snapshot?.recentReports) ? snapshot.recentReports : [],
+      updatedAt: cached?.updatedAt ? new Date(cached.updatedAt) : null,
+    };
+  }, [cacheKey]);
+
+  const [, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(
+    () => initialCachedSnapshot.updatedAt,
+  );
+  const [stats, setStats] = useState(() => initialCachedSnapshot.stats);
+  const [pendingRequests, setPendingRequests] = useState(
+    () => initialCachedSnapshot.pendingRequests,
+  );
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(
+    () => initialCachedSnapshot.pendingRequestsCount,
+  );
+  const [recentReports, setRecentReports] = useState(
+    () => initialCachedSnapshot.recentReports,
+  );
+  const [recentOrders, setRecentOrders] = useState(
+    () => initialCachedSnapshot.recentOrders,
   );
 
   const loadData = useCallback(
@@ -159,15 +188,7 @@ export default function Dashboard() {
         if (statsResult.status === "fulfilled") {
           setStats(extractObject(statsResult.value.data));
         } else {
-          setStats({
-            total_sales: 0,
-            total_order_value: 0,
-            pending_order_value: 0,
-            total_orders: 0,
-            total_products: 0,
-            total_customers: 0,
-            avg_order_value: 0,
-          });
+          setStats(EMPTY_DASHBOARD_STATS);
         }
 
         const ordersData =
@@ -208,15 +229,7 @@ export default function Dashboard() {
           stats:
             statsResult.status === "fulfilled"
               ? extractObject(statsResult.value.data)
-              : {
-                  total_sales: 0,
-                  total_order_value: 0,
-                  pending_order_value: 0,
-                  total_orders: 0,
-                  total_products: 0,
-                  total_customers: 0,
-                  avg_order_value: 0,
-                },
+              : EMPTY_DASHBOARD_STATS,
           recentOrders: sortedOrders.slice(0, 6),
           pendingRequests: nextPendingRequests,
           pendingRequestsCount: nextPendingRequestsCount,
@@ -409,11 +422,11 @@ export default function Dashboard() {
     }
   };
 
-  if (authLoading || loading) {
+  if (authLoading) {
     return (
       <div className="flex h-screen bg-slate-100">
         <Sidebar />
-        <main className="flex-1 p-8">Loading dashboard...</main>
+        <main className="flex-1 p-8" />
       </div>
     );
   }

@@ -15,7 +15,6 @@ import api from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPages } from "../utils/pagination";
 
-const POLLING_INTERVAL_MS = 60000;
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
 const ORDERS_PAGE_SIZE = 200;
 const CURRENCY_LABEL = "LE";
@@ -208,11 +207,7 @@ export default function Orders() {
   );
 
   useEffect(() => {
-    fetchOrders({ forceSync: true });
-
-    const interval = setInterval(() => {
-      fetchOrders({ silent: true });
-    }, POLLING_INTERVAL_MS);
+    fetchOrders();
 
     const unsubscribe = subscribeToSharedDataUpdates(() => {
       setLastLiveEventAt(new Date());
@@ -223,7 +218,6 @@ export default function Orders() {
     window.addEventListener("focus", onFocus);
 
     return () => {
-      clearInterval(interval);
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };

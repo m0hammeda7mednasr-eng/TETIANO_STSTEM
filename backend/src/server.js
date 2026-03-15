@@ -21,6 +21,7 @@ import eventsRoutes from "./routes/events.js";
 import { supabase } from "./supabaseClient.js";
 import { setRlsContext } from "./middleware/rls.js";
 import { emitRealtimeEvent } from "./services/realtimeEventService.js";
+import { startShopifyBackgroundSync } from "./services/shopifyBackgroundSyncService.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -134,5 +135,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
+  startShopifyBackgroundSync();
   console.log(`✅ Server running on port ${PORT}`);
 });

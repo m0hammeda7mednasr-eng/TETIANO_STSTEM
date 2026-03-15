@@ -16,7 +16,6 @@ import { useAuth } from "../context/AuthContext";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPages } from "../utils/pagination";
 
-const POLLING_INTERVAL_MS = 120000;
 const CUSTOMERS_PAGE_SIZE = 200;
 const ORDERS_PAGE_SIZE = 200;
 const CURRENCY_LABEL = "LE";
@@ -142,10 +141,6 @@ export default function Customers() {
   useEffect(() => {
     fetchData();
 
-    const interval = setInterval(() => {
-      fetchData({ silent: true });
-    }, POLLING_INTERVAL_MS);
-
     const unsubscribe = subscribeToSharedDataUpdates(() => {
       fetchData({ silent: true });
     });
@@ -154,7 +149,6 @@ export default function Customers() {
     window.addEventListener("focus", onFocus);
 
     return () => {
-      clearInterval(interval);
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };

@@ -39,7 +39,6 @@ const DASHBOARD_ORDER_STATS_SELECT = [
   "status",
   "cancelled_at",
   "created_at",
-  "data",
 ].join(",");
 const DASHBOARD_ORDER_STATS_SELECTS = [
   DASHBOARD_ORDER_STATS_SELECT,
@@ -48,6 +47,17 @@ const DASHBOARD_ORDER_STATS_SELECTS = [
     "store_id",
     "user_id",
     "total_price",
+    "financial_status",
+    "status",
+    "cancelled_at",
+    "created_at",
+  ].join(","),
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "total_price",
+    "total_refunded",
     "financial_status",
     "status",
     "cancelled_at",

@@ -2,6 +2,8 @@ import axios from "axios";
 import { Product, Order, Customer } from "../models/index.js";
 
 export class ShopifyService {
+  static #SHOPIFY_API_TIMEOUT_MS = 15000;
+
   static #getProductVariants(product = {}) {
     return Array.isArray(product?.variants) ? product.variants : [];
   }
@@ -37,6 +39,151 @@ export class ShopifyService {
 
       return currentUpdatedAt > latestUpdatedAt ? current : latest;
     }, null);
+  }
+
+  static #extractNextPageUrl(linkHeader = "") {
+    const nextLinkMatch = String(linkHeader || "").match(
+      /<([^>]+)>;\s*rel="next"/,
+    );
+    return nextLinkMatch ? nextLinkMatch[1] : null;
+  }
+
+  static #buildResourceUrl(shop, resource, params = {}) {
+    const query = new URLSearchParams();
+
+    Object.entries(params).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === "") {
+        return;
+      }
+      query.set(key, String(value));
+    });
+
+    return `https://${shop}/admin/api/2024-01/${resource}.json?${query.toString()}`;
+  }
+
+  static async #fetchPage(url, accessToken) {
+    const response = await axios.get(url, {
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json",
+      },
+      timeout: this.#SHOPIFY_API_TIMEOUT_MS,
+    });
+
+    const responseDataKey = Object.keys(response.data || {})[0];
+    const items = Array.isArray(response.data?.[responseDataKey])
+      ? response.data[responseDataKey]
+      : [];
+
+    return {
+      items,
+      nextPageUrl: this.#extractNextPageUrl(response.headers?.link),
+    };
+  }
+
+  static #mapProductFromShopify(product = {}) {
+    const firstVariant = product.variants?.[0] || {};
+    const costPrice = firstVariant.cost || firstVariant.cost_price || 0;
+    const totalInventory = this.#getTotalInventory(product);
+
+    return {
+      shopify_id: product.id.toString(),
+      title: product.title,
+      description: product.body_html,
+      vendor: product.vendor,
+      product_type: product.product_type,
+      image_url: product.image?.src || "",
+      price: firstVariant.price || 0,
+      cost_price: costPrice,
+      currency: "USD",
+      sku: firstVariant.sku || "",
+      inventory_quantity: totalInventory,
+      created_at: product.created_at,
+      updated_at: product.updated_at,
+      data: product,
+    };
+  }
+
+  static #mapOrderFromShopify(order = {}) {
+    return {
+      shopify_id: order.id.toString(),
+      order_number: order.order_number,
+      customer_name:
+        `${order.customer?.first_name || ""} ${order.customer?.last_name || ""}`.trim(),
+      customer_email: order.customer?.email || "",
+      total_price: order.total_price,
+      subtotal_price: order.subtotal_price,
+      total_tax: order.total_tax,
+      total_discounts: order.total_discounts,
+      currency: order.currency,
+      status: order.financial_status,
+      fulfillment_status: order.fulfillment_status,
+      items_count: Array.isArray(order.line_items) ? order.line_items.length : 0,
+      created_at: order.created_at,
+      updated_at: order.updated_at,
+      data: order,
+    };
+  }
+
+  static #mapCustomerFromShopify(customer = {}) {
+    return {
+      shopify_id: customer.id.toString(),
+      name: `${customer.first_name || ""} ${customer.last_name || ""}`.trim(),
+      email: customer.email,
+      phone: customer.phone || "",
+      total_spent: customer.total_spent,
+      orders_count: customer.orders_count,
+      default_address: customer.default_address?.address1 || "",
+      city: customer.default_address?.city || "",
+      country: customer.default_address?.country || "",
+      created_at: customer.created_at,
+      updated_at: customer.updated_at,
+      data: customer,
+    };
+  }
+
+  static async #syncBatch({
+    entityLabel,
+    model,
+    mapper,
+    accessToken,
+    userId,
+    storeId,
+    pageUrl,
+    initialUrl,
+  }) {
+    const { items, nextPageUrl } = await this.#fetchPage(
+      pageUrl || initialUrl,
+      accessToken,
+    );
+
+    const mappedRows = items.map((item) => mapper(item));
+    const rowsWithScope = mappedRows.map((row) => ({
+      ...row,
+      user_id: userId,
+      store_id: storeId,
+      updated_at: new Date().toISOString(),
+    }));
+
+    let persistedCount = 0;
+    if (rowsWithScope.length > 0) {
+      const result = await model.updateMultiple(rowsWithScope);
+      if (result?.error) {
+        throw new Error(
+          `Failed to persist Shopify ${entityLabel}: ${result.error.message}`,
+        );
+      }
+      persistedCount = result?.data?.length || 0;
+    }
+
+    return {
+      rows: mappedRows,
+      batchCount: mappedRows.length,
+      persistedCount,
+      nextPageUrl,
+      latestRow:
+        entityLabel === "orders" ? this.#getLatestOrder(mappedRows) : null,
+    };
   }
 
   static async #syncEntity({
@@ -146,29 +293,7 @@ export class ShopifyService {
         `✅ Successfully fetched ${allProducts.length} products from Shopify`,
       );
 
-      return allProducts.map((product) => {
-        // Extract cost price from variant (if available in Shopify)
-        const firstVariant = product.variants[0] || {};
-        const costPrice = firstVariant.cost || firstVariant.cost_price || 0;
-        const totalInventory = this.#getTotalInventory(product);
-
-        return {
-          shopify_id: product.id.toString(),
-          title: product.title,
-          description: product.body_html,
-          vendor: product.vendor,
-          product_type: product.product_type,
-          image_url: product.image?.src || "",
-          price: firstVariant.price || 0,
-          cost_price: costPrice, // Extract cost price from Shopify
-          currency: "USD",
-          sku: firstVariant.sku || "",
-          inventory_quantity: totalInventory,
-          created_at: product.created_at,
-          updated_at: product.updated_at,
-          data: product,
-        };
-      });
+      return allProducts.map((product) => this.#mapProductFromShopify(product));
     } catch (error) {
       console.error(
         "❌ Error processing products from Shopify:",
@@ -198,24 +323,7 @@ export class ShopifyService {
         `✅ Successfully fetched ${allOrders.length} orders from Shopify`,
       );
 
-      return allOrders.map((order) => ({
-        shopify_id: order.id.toString(),
-        order_number: order.order_number,
-        customer_name:
-          `${order.customer?.first_name || ""} ${order.customer?.last_name || ""}`.trim(),
-        customer_email: order.customer?.email || "",
-        total_price: order.total_price,
-        subtotal_price: order.subtotal_price,
-        total_tax: order.total_tax,
-        total_discounts: order.total_discounts,
-        currency: order.currency,
-        status: order.financial_status,
-        fulfillment_status: order.fulfillment_status,
-        items_count: order.line_items.length,
-        created_at: order.created_at,
-        updated_at: order.updated_at,
-        data: order,
-      }));
+      return allOrders.map((order) => this.#mapOrderFromShopify(order));
     } catch (error) {
       console.error("❌ Error processing orders from Shopify:", error.message);
       console.error("Error details:", error.response?.data || error);
@@ -254,6 +362,32 @@ export class ShopifyService {
     }
   }
 
+  static async syncOrdersBatch(
+    userId,
+    shop,
+    accessToken,
+    storeId,
+    options = {},
+  ) {
+    const batchSize = Math.max(1, parseInt(options?.batchSize, 10) || 100);
+    const initialUrl = this.#buildResourceUrl(shop, "orders", {
+      limit: batchSize,
+      status: "any",
+      updated_at_min: String(options?.updatedAtMin || "").trim() || undefined,
+    });
+
+    return await this.#syncBatch({
+      entityLabel: "orders",
+      model: Order,
+      mapper: (order) => this.#mapOrderFromShopify(order),
+      accessToken,
+      userId,
+      storeId,
+      pageUrl: options?.pageUrl || null,
+      initialUrl,
+    });
+  }
+
   static async getCustomersFromShopify(accessToken, shop) {
     try {
       console.log(
@@ -265,20 +399,9 @@ export class ShopifyService {
         `✅ Successfully fetched ${allCustomers.length} customers from Shopify`,
       );
 
-      return allCustomers.map((customer) => ({
-        shopify_id: customer.id.toString(),
-        name: `${customer.first_name || ""} ${customer.last_name || ""}`.trim(),
-        email: customer.email,
-        phone: customer.phone || "",
-        total_spent: customer.total_spent,
-        orders_count: customer.orders_count,
-        default_address: customer.default_address?.address1 || "",
-        city: customer.default_address?.city || "",
-        country: customer.default_address?.country || "",
-        created_at: customer.created_at,
-        updated_at: customer.updated_at,
-        data: customer,
-      }));
+      return allCustomers.map((customer) =>
+        this.#mapCustomerFromShopify(customer),
+      );
     } catch (error) {
       console.error(
         "❌ Error processing customers from Shopify:",
@@ -287,6 +410,56 @@ export class ShopifyService {
       console.error("Error details:", error.response?.data || error);
       throw error;
     }
+  }
+
+  static async syncProductsBatch(
+    userId,
+    shop,
+    accessToken,
+    storeId,
+    options = {},
+  ) {
+    const batchSize = Math.max(1, parseInt(options?.batchSize, 10) || 100);
+    const initialUrl = this.#buildResourceUrl(shop, "products", {
+      limit: batchSize,
+      updated_at_min: String(options?.updatedAtMin || "").trim() || undefined,
+    });
+
+    return await this.#syncBatch({
+      entityLabel: "products",
+      model: Product,
+      mapper: (product) => this.#mapProductFromShopify(product),
+      accessToken,
+      userId,
+      storeId,
+      pageUrl: options?.pageUrl || null,
+      initialUrl,
+    });
+  }
+
+  static async syncCustomersBatch(
+    userId,
+    shop,
+    accessToken,
+    storeId,
+    options = {},
+  ) {
+    const batchSize = Math.max(1, parseInt(options?.batchSize, 10) || 100);
+    const initialUrl = this.#buildResourceUrl(shop, "customers", {
+      limit: batchSize,
+      updated_at_min: String(options?.updatedAtMin || "").trim() || undefined,
+    });
+
+    return await this.#syncBatch({
+      entityLabel: "customers",
+      model: Customer,
+      mapper: (customer) => this.#mapCustomerFromShopify(customer),
+      accessToken,
+      userId,
+      storeId,
+      pageUrl: options?.pageUrl || null,
+      initialUrl,
+    });
   }
 
   static async syncAllData(userId, shop, accessToken, storeId) {

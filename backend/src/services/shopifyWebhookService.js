@@ -1,7 +1,8 @@
 import axios from "axios";
 import crypto from "crypto";
-import { Product, Order } from "../models/index.js";
+import { Product, Order, Customer } from "../models/index.js";
 import { supabase } from "../supabaseClient.js";
+import { queueShopifyBackgroundSync } from "./shopifyBackgroundSyncService.js";
 
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
 const TETIANO_PAYMENT_TAG_PREFIXES = [
@@ -36,9 +37,13 @@ export const MANAGED_WEBHOOK_TOPICS = [
   "orders/updated",
   "orders/paid",
   "orders/cancelled",
+  "customers/create",
+  "customers/update",
+  "customers/delete",
   "products/create",
   "products/update",
   "products/delete",
+  "inventory_levels/update",
 ];
 
 const normalizeShopDomain = (value) =>
@@ -387,6 +392,25 @@ const mapOrderFromShopify = (order = {}) => {
   };
 };
 
+const mapCustomerFromShopify = (customer = {}) => ({
+  shopify_id: toStringNumber(customer.id),
+  name: `${customer.first_name || ""} ${customer.last_name || ""}`.trim(),
+  email: customer.email || "",
+  phone: customer.phone || "",
+  total_spent: parseNumeric(customer.total_spent),
+  orders_count: parseNumeric(customer.orders_count),
+  default_address: customer.default_address?.address1 || "",
+  city: customer.default_address?.city || "",
+  country: customer.default_address?.country || "",
+  created_at: customer.created_at || new Date().toISOString(),
+  updated_at: customer.updated_at || new Date().toISOString(),
+  shopify_updated_at: customer.updated_at || new Date().toISOString(),
+  pending_sync: false,
+  sync_error: null,
+  last_synced_at: new Date().toISOString(),
+  data: customer,
+});
+
 const extractRealtimeScopesFromTokens = (tokenRows = []) => {
   const userIds = Array.from(
     new Set(
@@ -455,6 +479,48 @@ const upsertOrderForTokens = async (shopDomain, orderPayload) => {
     affectedRows: upserts.length,
     ...extractRealtimeScopesFromTokens(tokenRows),
   };
+};
+
+const upsertCustomerForTokens = async (shopDomain, customerPayload) => {
+  const tokenRows = await selectTokenRowsByShop(shopDomain);
+  if (tokenRows.length === 0) {
+    return {
+      affectedRows: 0,
+      affectedUserIds: [],
+      affectedStoreIds: [],
+    };
+  }
+
+  const mapped = mapCustomerFromShopify(customerPayload);
+  const upserts = tokenRows.map((token) => ({
+    ...mapped,
+    user_id: token.user_id,
+    store_id: token.store_id || null,
+  }));
+
+  await Customer.updateMultiple(upserts);
+  return {
+    affectedRows: upserts.length,
+    ...extractRealtimeScopesFromTokens(tokenRows),
+  };
+};
+
+const queueBackgroundEntitySyncForTokens = (tokenRows, entityNames) => {
+  for (const token of tokenRows || []) {
+    if (!token?.user_id || !token?.shop || !token?.access_token) {
+      continue;
+    }
+
+    queueShopifyBackgroundSync(
+      {
+        user_id: token.user_id,
+        store_id: token.store_id || null,
+        shop: token.shop,
+        access_token: token.access_token,
+      },
+      entityNames,
+    );
+  }
 };
 
 const safeDeleteEntity = async (tableName, shopifyId, tokenRows) => {
@@ -658,6 +724,26 @@ export const handleShopifyWebhook = async ({ topic, shopDomain, payload }) => {
   }
 
   if (
+    normalizedTopic === "customers/create" ||
+    normalizedTopic === "customers/update"
+  ) {
+    const result = await upsertCustomerForTokens(normalizedShop, payload);
+    return { handled: true, topic: normalizedTopic, ...result };
+  }
+
+  if (normalizedTopic === "customers/delete") {
+    const shopifyId = toStringNumber(payload.id);
+    const tokenRows = await selectTokenRowsByShop(normalizedShop);
+    const result = await safeDeleteEntity("customers", shopifyId, tokenRows);
+    return {
+      handled: true,
+      topic: normalizedTopic,
+      ...result,
+      ...extractRealtimeScopesFromTokens(tokenRows),
+    };
+  }
+
+  if (
     normalizedTopic === "products/create" ||
     normalizedTopic === "products/update"
   ) {
@@ -673,6 +759,18 @@ export const handleShopifyWebhook = async ({ topic, shopDomain, payload }) => {
   ) {
     const result = await upsertOrderForTokens(normalizedShop, payload);
     return { handled: true, topic: normalizedTopic, ...result };
+  }
+
+  if (normalizedTopic === "inventory_levels/update") {
+    const tokenRows = await selectTokenRowsByShop(normalizedShop);
+    queueBackgroundEntitySyncForTokens(tokenRows, ["products"]);
+    return {
+      handled: true,
+      topic: normalizedTopic,
+      affectedRows: 0,
+      queuedSync: true,
+      ...extractRealtimeScopesFromTokens(tokenRows),
+    };
   }
 
   return { handled: false, reason: "unsupported_topic", topic: normalizedTopic };

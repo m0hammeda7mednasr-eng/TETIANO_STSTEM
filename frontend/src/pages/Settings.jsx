@@ -75,6 +75,8 @@ export default function Settings() {
       const syncSuffix =
         syncStatus === "completed" && syncCounts
           ? ` Initial sync completed: ${syncCounts.products} products, ${syncCounts.orders} orders, ${syncCounts.customers} customers.`
+          : syncStatus === "queued"
+            ? " Background sync started and will continue automatically in batches."
           : syncStatus === "failed"
             ? " Connection saved, but initial sync failed. Run Sync Shopify."
             : "";
@@ -210,7 +212,10 @@ export default function Settings() {
       await loadShopifyStatus();
       setMessage({
         type: "success",
-        text: `Sync completed: ${data.counts.products} products, ${data.counts.orders} orders, ${data.counts.customers} customers.`,
+        text:
+          data?.mode === "background"
+            ? "Background sync started. Shopify data will save automatically in batches."
+            : `Sync completed: ${data.counts.products} products, ${data.counts.orders} orders, ${data.counts.customers} customers.`,
       });
     } catch (error) {
       const backendCode = error.response?.data?.code;

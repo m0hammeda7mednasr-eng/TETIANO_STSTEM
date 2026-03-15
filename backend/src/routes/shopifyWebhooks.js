@@ -55,7 +55,11 @@ router.post("/", async (req, res) => {
       ? "orders.updated"
       : topicText.startsWith("products/")
         ? "products.updated"
-        : "data.updated";
+        : topicText.startsWith("inventory_levels/")
+          ? "products.updated"
+          : topicText.startsWith("customers/")
+            ? "customers.updated"
+          : "data.updated";
     emitRealtimeEvent({
       type: eventType,
       source: "shopify.webhook",

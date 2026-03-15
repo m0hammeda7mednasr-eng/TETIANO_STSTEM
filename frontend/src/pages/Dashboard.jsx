@@ -21,7 +21,6 @@ import {
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
 
-const POLLING_INTERVAL_MS = 30000;
 const CURRENCY_LABEL = "LE";
 
 const toNumber = (value) => {
@@ -207,10 +206,6 @@ export default function Dashboard() {
   useEffect(() => {
     if (authLoading) return;
 
-    const interval = setInterval(() => {
-      loadData({ silent: true });
-    }, POLLING_INTERVAL_MS);
-
     const unsubscribe = subscribeToSharedDataUpdates(() => {
       loadData({ silent: true });
     });
@@ -222,7 +217,6 @@ export default function Dashboard() {
     window.addEventListener("focus", onFocus);
 
     return () => {
-      clearInterval(interval);
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };

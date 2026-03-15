@@ -16,6 +16,7 @@ import {
   getWebhookAddress,
   removeManagedWebhooks,
 } from "../services/shopifyWebhookService.js";
+import { queueShopifyBackgroundSync } from "../services/shopifyBackgroundSyncService.js";
 import {
   getUserRole,
   requireAdminRole,
@@ -91,7 +92,6 @@ const ORDER_LIST_SELECT = [
   "cancelled_at",
   "created_at",
   "updated_at",
-  "data",
 ].join(",");
 const ORDER_LIST_SELECTS = [
   ORDER_LIST_SELECT,
@@ -109,7 +109,6 @@ const ORDER_LIST_SELECTS = [
     "cancelled_at",
     "created_at",
     "updated_at",
-    "data",
   ].join(","),
   [
     "id",
@@ -121,6 +120,23 @@ const ORDER_LIST_SELECTS = [
     "total_price",
     "financial_status",
     "fulfillment_status",
+    "cancelled_at",
+    "created_at",
+    "updated_at",
+  ].join(","),
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "total_price",
+    "total_refunded",
+    "financial_status",
+    "fulfillment_status",
+    "payment_method",
+    "manual_payment_method",
     "cancelled_at",
     "created_at",
     "updated_at",
@@ -141,7 +157,6 @@ const CUSTOMER_LIST_SELECT = [
   "default_address",
   "created_at",
   "updated_at",
-  "data",
 ].join(",");
 const CUSTOMER_LIST_SELECTS = [
   CUSTOMER_LIST_SELECT,
@@ -156,6 +171,22 @@ const CUSTOMER_LIST_SELECTS = [
     "country",
     "orders_count",
     "total_spent",
+    "default_address",
+    "created_at",
+    "updated_at",
+  ].join(","),
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "name",
+    "email",
+    "phone",
+    "city",
+    "country",
+    "orders_count",
+    "total_spent",
+    "default_address",
     "created_at",
     "updated_at",
     "data",
@@ -1628,25 +1659,17 @@ router.get("/callback", async (req, res) => {
       );
     }
 
-    let initialSyncStatus = "started";
-    let initialSyncCounts = null;
-    try {
-      const syncResult = await ShopifyService.syncAllData(
-        userId,
+    queueShopifyBackgroundSync(
+      {
+        user_id: userId,
+        store_id: storeId,
         shop,
-        accessToken,
-        storeId,
-      );
-      initialSyncCounts = {
-        products: syncResult?.products?.length || 0,
-        orders: syncResult?.orders?.length || 0,
-        customers: syncResult?.customers?.length || 0,
-      };
-      initialSyncStatus = "completed";
-    } catch (syncError) {
-      initialSyncStatus = "failed";
-      console.error("Initial Shopify sync failed after callback:", syncError);
-    }
+        access_token: accessToken,
+      },
+      ["orders", "products", "customers"],
+    );
+    const initialSyncStatus = "queued";
+    const initialSyncCounts = null;
 
     ensureWebhooksRegistered({
       shop,
@@ -1795,45 +1818,15 @@ router.post(
         }
       }
 
-      // Try to sync data with better error handling
-      let syncResult;
-      try {
-        syncResult = await ShopifyService.syncAllData(
-          syncOwnerUserId,
-          tokenData.shop,
-          tokenData.access_token,
-          syncStoreId,
-        );
-      } catch (syncError) {
-        console.error("❌ Shopify sync failed:", syncError);
-        const requiresReconnect = isShopifyCredentialError(syncError);
-        return res.status(requiresReconnect ? 400 : 500).json({
-          error: requiresReconnect
-            ? "Shopify authorization is invalid or expired. Please reconnect Shopify."
-            : "Failed to sync data from Shopify",
-          code: requiresReconnect
-            ? "SHOPIFY_REAUTH_REQUIRED"
-            : "SHOPIFY_SYNC_FAILED",
-          details: syncError.message,
+      queueShopifyBackgroundSync(
+        {
+          user_id: syncOwnerUserId,
+          store_id: syncStoreId,
           shop: tokenData.shop,
-        });
-      }
-
-      const syncCounts = syncResult?.counts || {
-        products: 0,
-        orders: 0,
-        customers: 0,
-      };
-      const persistedCounts = syncResult?.persisted || syncCounts;
-      const products = { length: syncCounts.products };
-      const orders = { length: syncCounts.orders };
-      const customers = { length: syncCounts.customers };
-
-      console.log(
-        `✅ Sync completed: ${products?.length || 0} products, ${orders?.length || 0} orders, ${customers?.length || 0} customers`,
+          access_token: tokenData.access_token,
+        },
+        ["orders", "products", "customers"],
       );
-
-      const latestSyncedOrder = syncResult?.latestOrder || null;
 
       // Try webhook registration (optional, don't fail if it doesn't work)
       let webhookSync = null;
@@ -1855,27 +1848,19 @@ router.post(
 
       const response = {
         success: true,
-        message: "Data synced successfully",
+        mode: "background",
+        message: "Background Shopify sync started",
         store_id: syncStoreId,
         webhook_sync: webhookSync,
-        counts: {
-          products: syncCounts.products,
-          orders: syncCounts.orders,
-          customers: syncCounts.customers,
-        },
-        persisted_counts: persistedCounts,
-        latest_order: latestSyncedOrder
-          ? {
-            shopify_id: latestSyncedOrder.shopify_id || null,
-            order_number: latestSyncedOrder.order_number || null,
-            financial_status: latestSyncedOrder.status || null,
-            created_at: latestSyncedOrder.created_at || null,
-            updated_at: latestSyncedOrder.updated_at || null,
-          }
-          : null,
+        counts: null,
+        persisted_counts: null,
+        latest_order: null,
       };
 
-      console.log("✅ Sync response:", response);
+      console.log("Queued Shopify background sync:", {
+        store_id: syncStoreId,
+        shop: tokenData.shop,
+      });
       res.json(response);
     } catch (error) {
       console.error("💥 Critical error in sync endpoint:", error);
@@ -2135,19 +2120,28 @@ router.get(
       const syncRecentParam = String(req.query.sync_recent || "")
         .toLowerCase()
         .trim();
-      const shouldSyncRecent =
-        pagination.offset === 0 && syncRecentParam !== "false";
       const forceSyncRecent = syncRecentParam === "force";
       let liveSyncResult = null;
 
-      if (shouldSyncRecent) {
-        liveSyncResult = await syncRecentOrdersWithCooldown({
+      if (forceSyncRecent && pagination.offset === 0) {
+        const tokenData = await resolveSyncToken({
           userId: req.user.id,
           requestedStoreId,
           isAdmin,
-          waitForCompletion: true,
-          forceRun: forceSyncRecent,
         });
+
+        if (tokenData?.access_token && tokenData?.shop) {
+          queueShopifyBackgroundSync(
+            {
+              user_id: tokenData.user_id || req.user.id,
+              store_id: requestedStoreId || tokenData.store_id || null,
+              shop: tokenData.shop,
+              access_token: tokenData.access_token,
+            },
+            ["orders"],
+          );
+          liveSyncResult = { triggered: true, reason: "queued_background" };
+        }
       }
 
       const { data, error } = await getScopedEntityPage({

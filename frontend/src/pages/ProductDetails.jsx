@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import {
@@ -16,6 +16,16 @@ import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 
 const CURRENCY_LABEL = "LE";
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const cloneVariantDrafts = (variants = []) =>
+  variants.map((variant) => ({
+    id: String(variant.id || ""),
+    inventory_quantity: String(toNumber(variant.inventory_quantity)),
+  }));
 
 export default function ProductDetails() {
   const { id } = useParams();
@@ -30,6 +40,33 @@ export default function ProductDetails() {
 
   // Editable fields
   const [editedProduct, setEditedProduct] = useState({});
+  const [editedVariants, setEditedVariants] = useState([]);
+
+  const hasMultipleVariants = (product?.variants?.length || 0) > 1;
+  const editedVariantsById = useMemo(
+    () =>
+      new Map(
+        editedVariants.map((variant) => [String(variant.id), variant]),
+      ),
+    [editedVariants],
+  );
+
+  const displayedInventoryQuantity = useMemo(() => {
+    if (!product) return 0;
+
+    if (hasMultipleVariants) {
+      return editing
+        ? editedVariants.reduce(
+            (sum, variant) => sum + toNumber(variant.inventory_quantity),
+            0,
+          )
+        : toNumber(product.inventory_quantity);
+    }
+
+    return editing
+      ? toNumber(editedProduct.inventory_quantity)
+      : toNumber(product.inventory_quantity);
+  }, [editedProduct.inventory_quantity, editedVariants, editing, hasMultipleVariants, product]);
 
   const fetchProductDetails = useCallback(async () => {
     setLoading(true);
@@ -37,6 +74,7 @@ export default function ProductDetails() {
       const response = await api.get(`/shopify/products/${id}/details`);
       setProduct(response.data);
       setEditedProduct(response.data);
+      setEditedVariants(cloneVariantDrafts(response.data?.variants || []));
     } catch (error) {
       console.error("Error fetching product details:", error);
       showNotification("فشل تحميل تفاصيل المنتج", "error");
@@ -53,13 +91,64 @@ export default function ProductDetails() {
     if (!canEditProducts) return;
     setSaving(true);
     try {
-      const payload = {
-        price: parseFloat(editedProduct.price),
-        inventory: parseInt(editedProduct.inventory_quantity),
-      };
+      const payload = {};
+      const nextPrice = parseFloat(editedProduct.price);
+      const nextInventory = parseInt(editedProduct.inventory_quantity, 10);
+
+      if (
+        Number.isFinite(nextPrice) &&
+        nextPrice !== toNumber(product.price)
+      ) {
+        payload.price = nextPrice;
+      }
+
+      if (
+        !hasMultipleVariants &&
+        Number.isFinite(nextInventory) &&
+        nextInventory !== toNumber(product.inventory_quantity)
+      ) {
+        payload.inventory = nextInventory;
+      }
 
       if (isAdmin) {
-        payload.cost_price = parseFloat(editedProduct.cost_price || 0);
+        const nextCostPrice = parseFloat(editedProduct.cost_price || 0);
+        if (
+          Number.isFinite(nextCostPrice) &&
+          nextCostPrice !== toNumber(product.cost_price)
+        ) {
+          payload.cost_price = nextCostPrice;
+        }
+      }
+
+      const originalVariantInventoryById = new Map(
+        (product.variants || []).map((variant) => [
+          String(variant.id || ""),
+          toNumber(variant.inventory_quantity),
+        ]),
+      );
+
+      const variantUpdates = editedVariants
+        .filter((variant) => {
+          const variantId = String(variant.id || "");
+          return (
+            originalVariantInventoryById.has(variantId) &&
+            toNumber(variant.inventory_quantity) !==
+              originalVariantInventoryById.get(variantId)
+          );
+        })
+        .map((variant) => ({
+          id: variant.id,
+          inventory_quantity: toNumber(variant.inventory_quantity),
+        }));
+
+      if (variantUpdates.length > 0) {
+        payload.variant_updates = variantUpdates;
+      }
+
+      if (Object.keys(payload).length === 0) {
+        showNotification("لا توجد تغييرات للحفظ", "info");
+        setSaving(false);
+        return;
       }
 
       await api.post(`/shopify/products/${id}/update`, payload);
@@ -84,7 +173,21 @@ export default function ProductDetails() {
 
   const handleCancel = () => {
     setEditedProduct(product);
+    setEditedVariants(cloneVariantDrafts(product?.variants || []));
     setEditing(false);
+  };
+
+  const handleVariantInventoryChange = (variantId, value) => {
+    setEditedVariants((currentVariants) =>
+      currentVariants.map((variant) =>
+        String(variant.id) === String(variantId)
+          ? {
+              ...variant,
+              inventory_quantity: value,
+            }
+          : variant,
+      ),
+    );
   };
 
   const showNotification = (message, type = "info") => {
@@ -295,6 +398,12 @@ export default function ProductDetails() {
                   <h2 className="text-xl font-bold text-gray-800 mb-4">
                     الأشكال ({product.variants.length})
                   </h2>
+                  {hasMultipleVariants && (
+                    <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                      تحكم في مخزون كل Variant من هنا، وإجمالي المخزون بيتحدث
+                      من مجموع كل الفاريانتس.
+                    </div>
+                  )}
                   <div className="space-y-3">
                     {product.variants.map((variant, index) => (
                       <div
@@ -351,10 +460,63 @@ export default function ProductDetails() {
                                 </p>
                               )}
                             <p
-                              className={`text-sm ${variant.inventory_quantity > 10 ? "text-green-600" : variant.inventory_quantity > 0 ? "text-yellow-600" : "text-red-600"}`}
+                              className={`text-sm ${
+                                toNumber(
+                                  editing
+                                    ? editedVariantsById.get(
+                                        String(variant.id || ""),
+                                      )?.inventory_quantity ??
+                                        variant.inventory_quantity
+                                    : variant.inventory_quantity,
+                                ) > 10
+                                  ? "text-green-600"
+                                  : toNumber(
+                                        editing
+                                          ? editedVariantsById.get(
+                                              String(variant.id || ""),
+                                            )?.inventory_quantity ??
+                                              variant.inventory_quantity
+                                          : variant.inventory_quantity,
+                                      ) > 0
+                                    ? "text-yellow-600"
+                                    : "text-red-600"
+                              }`}
                             >
-                              المخزون: {variant.inventory_quantity || 0}
+                              المخزون:{" "}
+                              {toNumber(
+                                editing
+                                  ? editedVariantsById.get(
+                                      String(variant.id || ""),
+                                    )?.inventory_quantity ??
+                                      variant.inventory_quantity
+                                  : variant.inventory_quantity,
+                              )}
                             </p>
+                            {editing && canEditProducts && hasMultipleVariants && (
+                              <div className="mt-3">
+                                <label className="mb-1 block text-xs font-medium text-gray-600">
+                                  تعديل مخزون هذا الـ Variant
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={
+                                    editedVariantsById.get(
+                                      String(variant.id || ""),
+                                    )?.inventory_quantity ??
+                                    String(toNumber(variant.inventory_quantity))
+                                  }
+                                  onChange={(event) =>
+                                    handleVariantInventoryChange(
+                                      variant.id,
+                                      event.target.value,
+                                    )
+                                  }
+                                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+                            )}
                             {variant.requires_shipping && (
                               <p className="text-xs text-gray-500 mt-1">
                                 يتطلب شحن
@@ -558,7 +720,7 @@ export default function ProductDetails() {
                             %
                           </span>
                         </div>
-                        {product.inventory_quantity > 0 && (
+                        {displayedInventoryQuantity > 0 && (
                           <div className="flex justify-between items-center pt-2 border-t border-green-200">
                             <span className="text-sm font-medium text-green-800">
                               الربح المحتمل (المخزون الكلي):
@@ -567,7 +729,7 @@ export default function ProductDetails() {
                               {(
                                 (parseFloat(product.price) -
                                   parseFloat(product.cost_price)) *
-                                product.inventory_quantity
+                                displayedInventoryQuantity
                               ).toFixed(2)}{" "}
                               {CURRENCY_LABEL}
                             </span>
@@ -579,9 +741,9 @@ export default function ProductDetails() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      المخزون
+                      {hasMultipleVariants ? "إجمالي المخزون" : "المخزون"}
                     </label>
-                    {editing ? (
+                    {editing && !hasMultipleVariants ? (
                       <input
                         type="number"
                         value={editedProduct.inventory_quantity}
@@ -596,17 +758,24 @@ export default function ProductDetails() {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     ) : (
-                      <p
-                        className={`text-2xl font-bold ${
-                          product.inventory_quantity > 10
-                            ? "text-green-600"
-                            : product.inventory_quantity > 0
-                              ? "text-yellow-600"
-                              : "text-red-600"
-                        }`}
-                      >
-                        {product.inventory_quantity || 0}
-                      </p>
+                      <>
+                        <p
+                          className={`text-2xl font-bold ${
+                            displayedInventoryQuantity > 10
+                              ? "text-green-600"
+                              : displayedInventoryQuantity > 0
+                                ? "text-yellow-600"
+                                : "text-red-600"
+                          }`}
+                        >
+                          {displayedInventoryQuantity}
+                        </p>
+                        {editing && hasMultipleVariants && (
+                          <p className="mt-2 text-sm text-slate-600">
+                            عدل مخزون كل Variant من قسم الأشكال.
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -818,16 +987,16 @@ export default function ProductDetails() {
                     <p className="text-sm text-gray-600">حالة المخزون</p>
                     <span
                       className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
-                        product.inventory_quantity > 10
+                        displayedInventoryQuantity > 10
                           ? "bg-green-100 text-green-800"
-                          : product.inventory_quantity > 0
+                          : displayedInventoryQuantity > 0
                             ? "bg-yellow-100 text-yellow-800"
                             : "bg-red-100 text-red-800"
                       }`}
                     >
-                      {product.inventory_quantity > 10
+                      {displayedInventoryQuantity > 10
                         ? "متوفر"
-                        : product.inventory_quantity > 0
+                        : displayedInventoryQuantity > 0
                           ? "كمية قليلة"
                           : "نفذ من المخزون"}
                     </span>

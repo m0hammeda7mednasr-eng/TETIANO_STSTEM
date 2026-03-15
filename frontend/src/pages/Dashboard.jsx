@@ -12,7 +12,7 @@ import {
   UserCheck,
   Users,
 } from "lucide-react";
-import api, { getErrorMessage } from "../utils/api";
+import api, { getErrorMessage, shopifyAPI } from "../utils/api";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { extractArray, extractObject } from "../utils/response";
@@ -52,21 +52,8 @@ const formatOrderTotal = (amount) =>
     maximumFractionDigits: 2,
   })} ${CURRENCY_LABEL}`;
 
-const parseOrderData = (order) => {
-  if (!order) return {};
-  if (typeof order.data === "string") {
-    try {
-      return JSON.parse(order.data);
-    } catch {
-      return {};
-    }
-  }
-  return order.data || {};
-};
-
 const getOrderFinancialStatus = (order) => {
-  const data = parseOrderData(order);
-  return String(data.financial_status || order.financial_status || order.status || "")
+  return String(order.financial_status || order.status || "")
     .toLowerCase()
     .trim();
 };
@@ -127,7 +114,9 @@ export default function Dashboard() {
 
         const statsPromise = api.get("/dashboard/stats");
         const ordersPromise = canViewOrders
-          ? api.get("/shopify/orders?limit=6&sort_by=created_at&sort_dir=desc")
+          ? api.get(
+              "/shopify/orders?limit=6&sort_by=created_at&sort_dir=desc&sync_recent=false",
+            )
           : Promise.resolve({ data: [] });
         const requestsPromise =
           isAdmin || canManageUsers
@@ -306,7 +295,7 @@ export default function Dashboard() {
     try {
       setSyncing(true);
       setError("");
-      await api.post("/shopify/sync", {});
+      await shopifyAPI.sync();
       markSharedDataUpdated();
       await loadData({ silent: true });
       setLastUpdatedAt(new Date());

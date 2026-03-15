@@ -150,6 +150,10 @@ export class ProductManagementService {
         (sum, v) => sum + (v.inventory_quantity || 0),
         0,
       );
+      product.inventory_quantity =
+        variants.length > 0 ? product.total_inventory : product.inventory_quantity;
+      product.variants_count = variants.length;
+      product.has_multiple_variants = variants.length > 1;
 
       // Price range
       const prices = variants

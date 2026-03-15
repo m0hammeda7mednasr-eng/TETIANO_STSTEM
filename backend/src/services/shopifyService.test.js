@@ -116,21 +116,19 @@ describe("ShopifyService", () => {
       expect(Customer.updateMultiple).toHaveBeenCalledTimes(1);
 
       expect(result).toMatchObject({
-        products: expect.arrayContaining([
-          expect.objectContaining({ shopify_id: "p1" }),
-          expect.objectContaining({ shopify_id: "p2" }),
-        ]),
-        orders: expect.arrayContaining([
-          expect.objectContaining({ shopify_id: "o1" }),
-        ]),
-        customers: expect.arrayContaining([
-          expect.objectContaining({ shopify_id: "c1" }),
-        ]),
+        counts: {
+          products: 2,
+          orders: 1,
+          customers: 1,
+        },
         persisted: {
           products: 0,
           orders: 0,
           customers: 0,
         },
+        latestOrder: expect.objectContaining({
+          shopify_id: "o1",
+        }),
       });
     });
 

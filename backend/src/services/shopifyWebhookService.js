@@ -59,6 +59,15 @@ const parseNumeric = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const getProductVariants = (product = {}) =>
+  Array.isArray(product?.variants) ? product.variants : [];
+
+const getProductTotalInventory = (product = {}) =>
+  getProductVariants(product).reduce(
+    (sum, variant) => sum + parseNumeric(variant?.inventory_quantity),
+    0,
+  );
+
 const normalizeAttributeName = (value) =>
   String(value || "")
     .toLowerCase()
@@ -296,9 +305,7 @@ const selectTokenRowsByShop = async (shopDomain) => {
 };
 
 const mapProductFromShopify = (product = {}) => {
-  const firstVariant = Array.isArray(product.variants)
-    ? product.variants[0] || {}
-    : {};
+  const firstVariant = getProductVariants(product)[0] || {};
   const costPrice = firstVariant.cost || firstVariant.cost_price || 0;
 
   return {
@@ -312,7 +319,7 @@ const mapProductFromShopify = (product = {}) => {
     cost_price: parseNumeric(costPrice),
     currency: "USD",
     sku: firstVariant.sku || "",
-    inventory_quantity: parseNumeric(firstVariant.inventory_quantity),
+    inventory_quantity: getProductTotalInventory(product),
     created_at: product.created_at || new Date().toISOString(),
     updated_at: product.updated_at || new Date().toISOString(),
     shopify_updated_at: product.updated_at || new Date().toISOString(),

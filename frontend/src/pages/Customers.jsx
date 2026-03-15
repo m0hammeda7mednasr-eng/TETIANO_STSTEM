@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Clock3,
   Mail,
@@ -13,10 +13,12 @@ import {
 import api from "../utils/api";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
-import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
+import { fetchAllPages } from "../utils/pagination";
 
-const POLLING_INTERVAL_MS = 30000;
+const POLLING_INTERVAL_MS = 120000;
+const CUSTOMERS_PAGE_SIZE = 200;
+const ORDERS_PAGE_SIZE = 200;
 const CURRENCY_LABEL = "LE";
 
 const toNumber = (value) => {
@@ -40,15 +42,12 @@ const parseJson = (value) => {
 
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
-const getOrderCustomerId = (order) => {
-  const orderData = parseJson(order?.data);
-  return String(orderData?.customer?.id || "");
-};
+const getOrderCustomerId = (order) =>
+  String(order?.customer_shopify_id || order?.customer_id || "");
 
 const getOrderFinancialStatus = (order) => {
-  const orderData = parseJson(order?.data);
   return String(
-    orderData?.financial_status || order?.financial_status || order?.status || "",
+    order?.financial_status || order?.status || "",
   )
     .toLowerCase()
     .trim();
@@ -67,52 +66,74 @@ export default function Customers() {
   const [countryFilter, setCountryFilter] = useState("all");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const fetchPromiseRef = useRef(null);
 
   const fetchData = useCallback(
     async ({ silent = false } = {}) => {
-      if (!silent) {
-        setLoading(true);
-        setError("");
+      if (fetchPromiseRef.current) {
+        return fetchPromiseRef.current;
       }
 
+      const request = (async () => {
+        if (!silent) {
+          setLoading(true);
+          setError("");
+        }
+
+        try {
+          const [customersData, ordersData] = await Promise.all([
+            fetchAllPages(
+              ({ limit, offset }) =>
+                api.get("/shopify/customers", {
+                  params: {
+                    limit,
+                    offset,
+                    sort_by: "created_at",
+                    sort_dir: "desc",
+                  },
+                }),
+              { limit: CUSTOMERS_PAGE_SIZE },
+            ),
+            canViewOrders
+              ? fetchAllPages(
+                  ({ limit, offset }) =>
+                    api.get("/shopify/orders", {
+                      params: {
+                        limit,
+                        offset,
+                        sort_by: "created_at",
+                        sort_dir: "desc",
+                        sync_recent: "false",
+                      },
+                    }),
+                  { limit: ORDERS_PAGE_SIZE },
+                )
+              : Promise.resolve([]),
+          ]);
+
+          setCustomers(customersData);
+          setOrders(ordersData);
+          setLastUpdatedAt(new Date());
+        } catch (requestError) {
+          console.error("Failed to fetch customers:", requestError);
+          if (!silent) {
+            setCustomers([]);
+            setOrders([]);
+            setError("Failed to load customers");
+          }
+        } finally {
+          if (!silent) {
+            setLoading(false);
+          }
+        }
+      })();
+
+      fetchPromiseRef.current = request;
+
       try {
-        const customersPromise = api.get("/shopify/customers");
-        const ordersPromise = canViewOrders
-          ? api.get("/shopify/orders?limit=250&sort_by=created_at&sort_dir=desc")
-          : Promise.resolve({ data: [] });
-
-        const [customersResult, ordersResult] = await Promise.allSettled([
-          customersPromise,
-          ordersPromise,
-        ]);
-
-        const customersData =
-          customersResult.status === "fulfilled"
-            ? extractArray(customersResult.value.data)
-            : [];
-        const ordersData =
-          ordersResult.status === "fulfilled"
-            ? extractArray(ordersResult.value.data)
-            : [];
-
-        setCustomers(customersData);
-        setOrders(ordersData);
-        setLastUpdatedAt(new Date());
-
-        if (!silent && customersResult.status === "rejected") {
-          setError("Failed to load customers");
-        }
-      } catch (requestError) {
-        console.error("Failed to fetch customers:", requestError);
-        if (!silent) {
-          setCustomers([]);
-          setOrders([]);
-          setError("Failed to load customers");
-        }
+        await request;
       } finally {
-        if (!silent) {
-          setLoading(false);
-        }
+        fetchPromiseRef.current = null;
       }
     },
     [canViewOrders],

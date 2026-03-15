@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api from "../utils/api.js";
+import api, { shopifyAPI } from "../utils/api.js";
 import Sidebar from "../components/Sidebar";
 import {
   AlertCircle,
@@ -205,7 +205,7 @@ export default function Settings() {
     setMessage({ type: "info", text: "Syncing Shopify data..." });
 
     try {
-      const { data } = await api.post("/shopify/sync");
+      const { data } = await shopifyAPI.sync();
       markSharedDataUpdated();
       await loadShopifyStatus();
       setMessage({

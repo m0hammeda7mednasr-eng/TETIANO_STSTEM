@@ -2,6 +2,81 @@ import axios from "axios";
 import { Product, Order, Customer } from "../models/index.js";
 
 export class ShopifyService {
+  static #getProductVariants(product = {}) {
+    return Array.isArray(product?.variants) ? product.variants : [];
+  }
+
+  static #getTotalInventory(product = {}) {
+    const variants = this.#getProductVariants(product);
+    if (variants.length === 0) {
+      return 0;
+    }
+
+    return variants.reduce((sum, variant) => {
+      const quantity = Number(variant?.inventory_quantity);
+      return sum + (Number.isFinite(quantity) ? quantity : 0);
+    }, 0);
+  }
+
+  static #getLatestOrder(rows = []) {
+    return rows.reduce((latest, current) => {
+      if (!latest) {
+        return current || null;
+      }
+
+      const latestUpdatedAt = Date.parse(latest?.updated_at || "");
+      const currentUpdatedAt = Date.parse(current?.updated_at || "");
+
+      if (Number.isNaN(currentUpdatedAt)) {
+        return latest;
+      }
+
+      if (Number.isNaN(latestUpdatedAt)) {
+        return current;
+      }
+
+      return currentUpdatedAt > latestUpdatedAt ? current : latest;
+    }, null);
+  }
+
+  static async #syncEntity({
+    entityLabel,
+    fetcher,
+    updater,
+    userId,
+    storeId,
+  }) {
+    const fetchedRows = await fetcher();
+    const rowsWithScope = fetchedRows.map((row) => ({
+      ...row,
+      user_id: userId,
+      store_id: storeId,
+      updated_at: new Date().toISOString(),
+    }));
+
+    let persistedCount = 0;
+    if (rowsWithScope.length > 0) {
+      console.log(`Syncing ${rowsWithScope.length} ${entityLabel}...`);
+      const result = await updater(rowsWithScope);
+      if (result?.error) {
+        throw new Error(
+          `Failed to persist Shopify ${entityLabel}: ${result.error.message}`,
+        );
+      }
+      persistedCount = result?.data?.length || 0;
+      console.log(
+        `Synced ${rowsWithScope.length} ${entityLabel} to DB. Persisted rows returned: ${persistedCount}`,
+      );
+    }
+
+    return {
+      fetchedCount: fetchedRows.length,
+      persistedCount,
+      latestRow:
+        entityLabel === "orders" ? this.#getLatestOrder(fetchedRows) : null,
+    };
+  }
+
   // Generic helper to handle Shopify's cursor-based pagination
   static async #fetchAllPages(initialUrl, accessToken) {
     let results = [];
@@ -75,6 +150,7 @@ export class ShopifyService {
         // Extract cost price from variant (if available in Shopify)
         const firstVariant = product.variants[0] || {};
         const costPrice = firstVariant.cost || firstVariant.cost_price || 0;
+        const totalInventory = this.#getTotalInventory(product);
 
         return {
           shopify_id: product.id.toString(),
@@ -87,7 +163,7 @@ export class ShopifyService {
           cost_price: costPrice, // Extract cost price from Shopify
           currency: "USD",
           sku: firstVariant.sku || "",
-          inventory_quantity: firstVariant.inventory_quantity || 0,
+          inventory_quantity: totalInventory,
           created_at: product.created_at,
           updated_at: product.updated_at,
           data: product,
@@ -241,107 +317,58 @@ export class ShopifyService {
         );
       }
 
-      const [products, orders, customers] = await Promise.all([
-        this.getProductsFromShopify(accessToken, shop),
-        this.getOrdersFromShopify(accessToken, shop),
-        this.getCustomersFromShopify(accessToken, shop),
-      ]);
-      console.log(
-        `Fetched from Shopify: ${products.length} products, ${orders.length} orders, ${customers.length} customers.`,
-      );
-
-      const productsWithUser = products.map((p) => ({
-        ...p,
-        user_id: userId,
-        store_id: storeId,
-        updated_at: new Date().toISOString(),
-      }));
-      const ordersWithUser = orders.map((o) => ({
-        ...o,
-        user_id: userId,
-        store_id: storeId,
-        updated_at: new Date().toISOString(),
-      }));
-      const customersWithUser = customers.map((c) => ({
-        ...c,
-        user_id: userId,
-        store_id: storeId,
-        updated_at: new Date().toISOString(),
-      }));
-
       console.log("Starting database update...");
       const syncResults = {
-        products: {
-          fetched: products,
-          persisted: [],
+        counts: {
+          products: 0,
+          orders: 0,
+          customers: 0,
         },
-        orders: {
-          fetched: orders,
-          persisted: [],
+        persisted: {
+          products: 0,
+          orders: 0,
+          customers: 0,
         },
-        customers: {
-          fetched: customers,
-          persisted: [],
-        },
+        latestOrder: null,
       };
 
-      if (productsWithUser.length > 0) {
-        console.log(`Syncing ${productsWithUser.length} products...`);
-        const productResult = await Product.updateMultiple(productsWithUser);
-        if (productResult?.error) {
-          throw new Error(
-            `Failed to persist Shopify products: ${productResult.error.message}`,
-          );
-        }
-        syncResults.products.persisted = productResult?.data || [];
-        console.log(
-          `Synced ${productsWithUser.length} products to DB. Persisted rows returned: ${syncResults.products.persisted.length}`,
-        );
-      }
+      const productSync = await this.#syncEntity({
+        entityLabel: "products",
+        fetcher: () => this.getProductsFromShopify(accessToken, shop),
+        updater: (rows) => Product.updateMultiple(rows),
+        userId,
+        storeId,
+      });
+      syncResults.counts.products = productSync.fetchedCount;
+      syncResults.persisted.products = productSync.persistedCount;
 
-      if (ordersWithUser.length > 0) {
-        console.log(`Syncing ${ordersWithUser.length} orders...`);
-        const orderResult = await Order.updateMultiple(ordersWithUser);
-        if (orderResult?.error) {
-          throw new Error(
-            `Failed to persist Shopify orders: ${orderResult.error.message}`,
-          );
-        }
-        syncResults.orders.persisted = orderResult?.data || [];
-        console.log(
-          `Synced ${ordersWithUser.length} orders to DB. Persisted rows returned: ${syncResults.orders.persisted.length}`,
-        );
-      }
+      const orderSync = await this.#syncEntity({
+        entityLabel: "orders",
+        fetcher: () => this.getOrdersFromShopify(accessToken, shop),
+        updater: (rows) => Order.updateMultiple(rows),
+        userId,
+        storeId,
+      });
+      syncResults.counts.orders = orderSync.fetchedCount;
+      syncResults.persisted.orders = orderSync.persistedCount;
+      syncResults.latestOrder = orderSync.latestRow;
 
-      if (customersWithUser.length > 0) {
-        console.log(`Syncing ${customersWithUser.length} customers...`);
-        const customerResult = await Customer.updateMultiple(customersWithUser);
-        if (customerResult?.error) {
-          throw new Error(
-            `Failed to persist Shopify customers: ${customerResult.error.message}`,
-          );
-        }
-        syncResults.customers.persisted = customerResult?.data || [];
-        console.log(
-          `Synced ${customersWithUser.length} customers to DB. Persisted rows returned: ${syncResults.customers.persisted.length}`,
-        );
-      }
+      const customerSync = await this.#syncEntity({
+        entityLabel: "customers",
+        fetcher: () => this.getCustomersFromShopify(accessToken, shop),
+        updater: (rows) => Customer.updateMultiple(rows),
+        userId,
+        storeId,
+      });
+      syncResults.counts.customers = customerSync.fetchedCount;
+      syncResults.persisted.customers = customerSync.persistedCount;
 
       console.log("Database update complete.");
       console.log(
-        `Final sync results: ${syncResults.products.fetched.length} products, ${syncResults.orders.fetched.length} orders, ${syncResults.customers.fetched.length} customers`,
+        `Final sync results: ${syncResults.counts.products} products, ${syncResults.counts.orders} orders, ${syncResults.counts.customers} customers`,
       );
 
-      return {
-        products: syncResults.products.fetched,
-        orders: syncResults.orders.fetched,
-        customers: syncResults.customers.fetched,
-        persisted: {
-          products: syncResults.products.persisted.length,
-          orders: syncResults.orders.persisted.length,
-          customers: syncResults.customers.persisted.length,
-        },
-      };
+      return syncResults;
     } catch (error) {
       console.error("Critical error during Shopify data sync:", error.message);
       console.error("Error details:", error);

@@ -12,11 +12,12 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
-import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
+import { fetchAllPages } from "../utils/pagination";
 
-const POLLING_INTERVAL_MS = 10000;
+const POLLING_INTERVAL_MS = 60000;
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
+const ORDERS_PAGE_SIZE = 200;
 const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
@@ -50,164 +51,48 @@ const PAYMENT_METHOD_LABELS = {
   wallet: "Wallet",
   none: "None",
 };
-const TETIANO_STATUS_TAG_PREFIXES = ["tetiano_status:"];
-const TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES = ["tetiano_status", "status"];
 const PAID_LIKE_STATUSES = new Set([
   "paid",
   "partially_paid",
   "partially_refunded",
   "refunded",
 ]);
-
-const parseOrderData = (order) => {
-  if (!order) return {};
-  if (typeof order.data === "string") {
-    try {
-      return JSON.parse(order.data);
-    } catch {
-      return {};
-    }
-  }
-  return order.data || {};
-};
-
-const parseTagList = (tagsValue) => {
-  if (Array.isArray(tagsValue)) {
-    return tagsValue.map((tag) => String(tag || "").trim()).filter(Boolean);
-  }
-
-  return String(tagsValue || "")
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-};
-
-const extractTagValueByPrefixes = (tags, prefixes = []) => {
-  for (const rawTag of tags || []) {
-    const tag = String(rawTag || "").trim();
-    const lowerTag = tag.toLowerCase();
-
-    for (const prefix of prefixes) {
-      const normalizedPrefix = String(prefix || "").toLowerCase();
-      if (!lowerTag.startsWith(normalizedPrefix)) {
-        continue;
-      }
-
-      const rawValue = tag.slice(prefix.length).trim();
-      if (rawValue) {
-        return rawValue;
-      }
-    }
-  }
-
-  return "";
-};
-
-const getNoteAttributeValue = (data, keys = []) => {
-  const normalizedKeys = new Set(
-    (keys || [])
-      .map((key) =>
-        String(key || "")
-          .toLowerCase()
-          .trim(),
-      )
-      .filter(Boolean),
-  );
-  const attributes = Array.isArray(data?.note_attributes)
-    ? data.note_attributes
-    : [];
-
-  for (const attribute of attributes) {
-    const name = String(attribute?.name || "")
-      .toLowerCase()
-      .trim();
-    if (!normalizedKeys.has(name)) {
-      continue;
-    }
-
-    const value = String(attribute?.value || "").trim();
-    if (value) {
-      return value;
-    }
-  }
-
-  return "";
-};
-
-const resolveOrderStatus = (order, data) =>
-  String(
-    data?.tetiano_status ||
-      getNoteAttributeValue(data, TETIANO_STATUS_NOTE_ATTRIBUTE_NAMES) ||
-      extractTagValueByPrefixes(parseTagList(data?.tags), TETIANO_STATUS_TAG_PREFIXES) ||
-      data?.financial_status ||
-      order?.financial_status ||
-      order?.status ||
-      "",
-  )
+const normalizeOrderState = (value) =>
+  String(value || "")
     .toLowerCase()
     .trim();
 
 const getOrderMeta = (order) => {
-  const data = parseOrderData(order);
-  const paymentStatus = resolveOrderStatus(order, data);
-  const fulfillmentStatus = String(
-    order.fulfillment_status || data.fulfillment_status || "",
-  )
-    .toLowerCase()
-    .trim();
-
-  const refunds = Array.isArray(data.refunds) ? data.refunds : [];
-  const refundedAmountFromRefunds = refunds.reduce((sum, refund) => {
-    const transactions = Array.isArray(refund?.transactions)
-      ? refund.transactions
-      : [];
-    return (
-      sum +
-      transactions.reduce(
-        (innerSum, transaction) => innerSum + toNumber(transaction?.amount),
-        0,
-      )
-    );
-  }, 0);
-
+  const paymentStatus = normalizeOrderState(
+    order.financial_status || order.status,
+  );
+  const fulfillmentStatus = normalizeOrderState(order.fulfillment_status);
   const totalPrice = toNumber(order.total_price);
   const refundedAmount = Math.max(
+    toNumber(order.refunded_amount),
     toNumber(order.total_refunded),
-    refundedAmountFromRefunds,
   );
   const isCancelled =
-    Boolean(order.cancelled_at) ||
-    Boolean(data.cancelled_at) ||
+    Boolean(order.is_cancelled) ||
     paymentStatus === "voided" ||
     paymentStatus === "cancelled";
-
-  const hasAnyRefund =
-    refundedAmount > 0 ||
-    paymentStatus === "refunded" ||
-    paymentStatus === "partially_refunded";
+  const hasAnyRefund = Boolean(order.has_any_refund) || refundedAmount > 0;
   const isPartialRefund =
-    paymentStatus === "partially_refunded" ||
+    Boolean(order.is_partial_refund) ||
     (hasAnyRefund && refundedAmount > 0 && refundedAmount < totalPrice);
   const isFullRefund =
-    paymentStatus === "refunded" ||
+    Boolean(order.is_full_refund) ||
     (hasAnyRefund && totalPrice > 0 && refundedAmount >= totalPrice);
-  const isPaid = paymentStatus === "paid" || paymentStatus === "partially_paid";
-  const isPaidLike = PAID_LIKE_STATUSES.has(paymentStatus);
-  const isFulfilled = fulfillmentStatus === "fulfilled";
-  const manualPaymentMethod = String(
-    order.payment_method || order.manual_payment_method || data.tetiano_payment_method || "",
-  )
-    .toLowerCase()
-    .trim();
-  const paymentMethod = isPaid
-    ? "shopify"
-    : manualPaymentMethod === "instapay" || manualPaymentMethod === "wallet"
-      ? manualPaymentMethod
-      : "none";
+  const isPaid = Boolean(order.is_paid);
+  const isPaidLike = Boolean(order.is_paid_like) || PAID_LIKE_STATUSES.has(paymentStatus);
+  const isFulfilled = Boolean(order.is_fulfilled) || fulfillmentStatus === "fulfilled";
+  const paymentMethod = normalizeOrderState(order.payment_method || "none") || "none";
   const netSalesAmount =
-    isCancelled || !isPaidLike
-      ? 0
-      : Math.max(0, totalPrice - refundedAmount);
+    order.net_sales_amount !== undefined && order.net_sales_amount !== null
+      ? toNumber(order.net_sales_amount)
+      : isCancelled || !isPaidLike
+        ? 0
+        : Math.max(0, totalPrice - refundedAmount);
 
   return {
     paymentStatus,
@@ -249,28 +134,56 @@ export default function Orders() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [lastLiveEventAt, setLastLiveEventAt] = useState(null);
   const refreshTimeoutRef = useRef(null);
+  const fetchPromiseRef = useRef(null);
 
   const fetchOrders = useCallback(async ({ silent = false, forceSync = false } = {}) => {
-    if (!silent) {
-      setLoading(true);
-      setError("");
+    if (fetchPromiseRef.current) {
+      return fetchPromiseRef.current;
     }
+
+    const request = (async () => {
+      if (!silent) {
+        setLoading(true);
+        setError("");
+      }
+
+      try {
+        const rows = await fetchAllPages(
+          ({ limit, offset, pageIndex }) =>
+            api.get("/shopify/orders", {
+              params: {
+                limit,
+                offset,
+                sort_by: "created_at",
+                sort_dir: "desc",
+                sync_recent:
+                  forceSync && pageIndex === 0 ? "force" : "false",
+              },
+            }),
+          { limit: ORDERS_PAGE_SIZE },
+        );
+
+        setOrders(rows);
+        setLastUpdatedAt(new Date());
+      } catch (requestError) {
+        console.error("Error fetching orders:", requestError);
+        if (!silent) {
+          setOrders([]);
+          setError("Failed to load orders");
+        }
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    fetchPromiseRef.current = request;
+
     try {
-      const response = await api.get(
-        forceSync ? "/shopify/orders?sync_recent=force" : "/shopify/orders",
-      );
-      setOrders(extractArray(response.data));
-      setLastUpdatedAt(new Date());
-    } catch (requestError) {
-      console.error("Error fetching orders:", requestError);
-      if (!silent) {
-        setOrders([]);
-        setError("Failed to load orders");
-      }
+      await request;
     } finally {
-      if (!silent) {
-        setLoading(false);
-      }
+      fetchPromiseRef.current = null;
     }
   }, []);
 

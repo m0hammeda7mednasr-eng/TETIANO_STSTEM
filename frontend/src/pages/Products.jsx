@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -16,13 +16,14 @@ import Sidebar from "../components/Sidebar";
 import ProductEditModal from "../components/ProductEditModal";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
-import { extractArray } from "../utils/response";
 import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
+import { fetchAllPages } from "../utils/pagination";
 
-const POLLING_INTERVAL_MS = 30000;
+const POLLING_INTERVAL_MS = 120000;
+const PRODUCTS_PAGE_SIZE = 200;
 const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
@@ -105,6 +106,7 @@ export default function Products() {
   const [notification, setNotification] = useState(null);
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const fetchPromiseRef = useRef(null);
 
   const showNotification = useCallback((message, type = "info") => {
     setNotification({ message, type });
@@ -113,25 +115,52 @@ export default function Products() {
 
   const fetchProducts = useCallback(
     async ({ silent = false } = {}) => {
-      if (!silent) {
-        setLoading(true);
-        setError("");
+      if (fetchPromiseRef.current) {
+        return fetchPromiseRef.current;
       }
+
+      const request = (async () => {
+        if (!silent) {
+          setLoading(true);
+          setError("");
+        }
+
+        try {
+          const rows = await fetchAllPages(
+            ({ limit, offset }) =>
+              api.get("/shopify/products", {
+                params: {
+                  limit,
+                  offset,
+                  sort_by: "updated_at",
+                  sort_dir: "desc",
+                },
+              }),
+            { limit: PRODUCTS_PAGE_SIZE },
+          );
+
+          setProducts(rows);
+          setLastUpdatedAt(new Date());
+        } catch (requestError) {
+          console.error("Error fetching products:", requestError);
+          if (!silent) {
+            setProducts([]);
+            setError("Failed to load products");
+            showNotification("Failed to load products", "error");
+          }
+        } finally {
+          if (!silent) {
+            setLoading(false);
+          }
+        }
+      })();
+
+      fetchPromiseRef.current = request;
+
       try {
-        const response = await api.get("/shopify/products");
-        setProducts(extractArray(response.data));
-        setLastUpdatedAt(new Date());
-      } catch (requestError) {
-        console.error("Error fetching products:", requestError);
-        if (!silent) {
-          setProducts([]);
-          setError("Failed to load products");
-          showNotification("Failed to load products", "error");
-        }
+        await request;
       } finally {
-        if (!silent) {
-          setLoading(false);
-        }
+        fetchPromiseRef.current = null;
       }
     },
     [showNotification],
@@ -352,7 +381,12 @@ export default function Products() {
                 ...(isAdmin && updates.cost_price !== undefined
                   ? { cost_price: updates.cost_price }
                   : {}),
-                inventory_quantity: updates.inventory,
+                ...(updates.inventory !== undefined
+                  ? {
+                      inventory_quantity: updates.inventory,
+                      total_inventory: updates.inventory,
+                    }
+                  : {}),
                 pending_sync: true,
               }
             : product,
@@ -361,8 +395,10 @@ export default function Products() {
 
       const payload = {
         price: updates.price,
-        inventory: updates.inventory,
       };
+      if (updates.inventory !== undefined) {
+        payload.inventory = updates.inventory;
+      }
       if (isAdmin && updates.cost_price !== undefined) {
         payload.cost_price = updates.cost_price;
       }

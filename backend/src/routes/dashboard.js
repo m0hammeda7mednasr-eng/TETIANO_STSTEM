@@ -1,5 +1,10 @@
 import express from "express";
-import { Product, Order, Customer } from "../models/index.js";
+import {
+  Product,
+  Order,
+  Customer,
+  getAccessibleStoreIds,
+} from "../models/index.js";
 import { authenticateToken } from "../middleware/auth.js";
 import {
   requireAdminRole,
@@ -20,6 +25,7 @@ const PAID_LIKE_STATUSES = new Set([
 const REFUNDED_STATUSES = new Set(["refunded", "partially_refunded"]);
 const PENDING_STATUSES = new Set(["pending", "authorized"]);
 const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
+const DASHBOARD_BATCH_SIZE = 200;
 
 const toNumber = (value) => {
   if (value === null || value === undefined || value === "") {
@@ -333,6 +339,79 @@ const getScopedRows = async (req, entityModel) => {
   return applyStoreFilter(sourceResult.data || [], requestedStoreId);
 };
 
+const getScopedRowsBatched = async (req, entityModel) => {
+  const tableName =
+    entityModel === Product
+      ? "products"
+      : entityModel === Order
+        ? "orders"
+        : entityModel === Customer
+          ? "customers"
+          : null;
+
+  if (!tableName) {
+    throw new Error("Unsupported dashboard entity model");
+  }
+
+  const requestedStoreId = getRequestedStoreId(req);
+  const isAdmin = req.user?.role === "admin";
+  const accessibleStoreIds = isAdmin
+    ? []
+    : await getAccessibleStoreIds(req.user.id);
+  const rows = [];
+
+  const loadBatch = async (offset, useLegacyUserScope) => {
+    let query = supabase
+      .from(tableName)
+      .select("*")
+      .order("created_at", { ascending: false })
+      .range(offset, offset + DASHBOARD_BATCH_SIZE - 1);
+
+    if (!isAdmin) {
+      if (!useLegacyUserScope && accessibleStoreIds.length > 0) {
+        query = query.in("store_id", accessibleStoreIds);
+      } else {
+        query = query.eq("user_id", req.user.id);
+      }
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw error;
+    }
+
+    return data || [];
+  };
+
+  let offset = 0;
+  let useLegacyUserScope = false;
+
+  while (true) {
+    const batch = await loadBatch(offset, useLegacyUserScope);
+
+    if (
+      !isAdmin &&
+      accessibleStoreIds.length > 0 &&
+      offset === 0 &&
+      batch.length === 0 &&
+      !useLegacyUserScope
+    ) {
+      useLegacyUserScope = true;
+      continue;
+    }
+
+    rows.push(...batch);
+
+    if (batch.length < DASHBOARD_BATCH_SIZE) {
+      break;
+    }
+
+    offset += batch.length;
+  }
+
+  return applyStoreFilter(rows, requestedStoreId);
+};
+
 const getOperationalCostsByProduct = async (productIds, userId) => {
   if (!Array.isArray(productIds) || productIds.length === 0) {
     return [];
@@ -380,9 +459,9 @@ const getGlobalOperationalCosts = async (userId) => {
 router.get("/stats", authenticateToken, async (req, res) => {
   try {
     const [products, orders, customers] = await Promise.all([
-      getScopedRows(req, Product),
-      getScopedRows(req, Order),
-      getScopedRows(req, Customer),
+      getScopedRowsBatched(req, Product),
+      getScopedRowsBatched(req, Order),
+      getScopedRowsBatched(req, Customer),
     ]);
 
     const saleOrders = orders.filter(
@@ -426,8 +505,8 @@ router.get(
   async (req, res) => {
     try {
       const [orders, customers] = await Promise.all([
-        getScopedRows(req, Order),
-        getScopedRows(req, Customer),
+        getScopedRowsBatched(req, Order),
+        getScopedRowsBatched(req, Customer),
       ]);
 
       const allOrders = orders || [];
@@ -636,7 +715,7 @@ router.get(
       const limit = parseInt(req.query.limit, 10) || 20;
       const offset = parseInt(req.query.offset, 10) || 0;
 
-      const customers = await getScopedRows(req, Customer);
+      const customers = await getScopedRowsBatched(req, Customer);
       const sorted = [...customers].sort(
         (a, b) => new Date(b.created_at) - new Date(a.created_at),
       );
@@ -666,8 +745,8 @@ router.get(
       const offset = parseInt(req.query.offset, 10) || 0;
 
       const [products, orders] = await Promise.all([
-        getScopedRows(req, Product),
-        getScopedRows(req, Order),
+        getScopedRowsBatched(req, Product),
+        getScopedRowsBatched(req, Order),
       ]);
 
       const profitabilityOrders = orders.filter(
@@ -873,7 +952,7 @@ router.get(
       const limit = parseInt(req.query.limit, 10) || 20;
       const offset = parseInt(req.query.offset, 10) || 0;
 
-      const orders = await getScopedRows(req, Order);
+      const orders = await getScopedRowsBatched(req, Order);
       const sorted = [...orders].sort(
         (a, b) => new Date(b.created_at) - new Date(a.created_at),
       );

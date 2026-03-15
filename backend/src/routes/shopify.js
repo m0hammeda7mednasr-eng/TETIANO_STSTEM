@@ -22,6 +22,7 @@ import {
   requirePermission,
 } from "../middleware/permissions.js";
 import { authenticateToken } from "../middleware/auth.js";
+import { supabase as db } from "../supabaseClient.js";
 
 const router = express.Router();
 
@@ -29,6 +30,82 @@ const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
+const DEFAULT_LIST_LIMIT = 200;
+const MAX_LIST_LIMIT = 250;
+const PRODUCT_LIST_SELECT = [
+  "id",
+  "shopify_id",
+  "store_id",
+  "title",
+  "vendor",
+  "product_type",
+  "price",
+  "cost_price",
+  "sku",
+  "inventory_quantity",
+  "last_synced_at",
+  "local_updated_at",
+  "pending_sync",
+  "sync_error",
+  "created_at",
+  "updated_at",
+  "data",
+].join(",");
+const ORDER_LIST_SELECT = [
+  "id",
+  "shopify_id",
+  "store_id",
+  "order_number",
+  "customer_name",
+  "customer_email",
+  "total_price",
+  "total_refunded",
+  "financial_status",
+  "fulfillment_status",
+  "payment_method",
+  "manual_payment_method",
+  "cancelled_at",
+  "created_at",
+  "updated_at",
+  "data",
+].join(",");
+const CUSTOMER_LIST_SELECT = [
+  "id",
+  "shopify_id",
+  "store_id",
+  "name",
+  "email",
+  "phone",
+  "city",
+  "country",
+  "orders_count",
+  "total_spent",
+  "default_address",
+  "created_at",
+  "updated_at",
+  "data",
+].join(",");
+const PRODUCT_SORT_FIELDS = new Set([
+  "created_at",
+  "updated_at",
+  "price",
+  "inventory_quantity",
+  "title",
+]);
+const ORDER_SORT_FIELDS = new Set([
+  "created_at",
+  "updated_at",
+  "total_price",
+  "order_number",
+]);
+const CUSTOMER_SORT_FIELDS = new Set([
+  "created_at",
+  "updated_at",
+  "total_spent",
+  "orders_count",
+  "name",
+  "email",
+]);
 const orderBackgroundSyncState = new Map();
 const normalizeBaseUrl = (value) =>
   String(value || "")
@@ -136,6 +213,135 @@ const filterRowsByStoreId = (rows, requestedStoreId) => {
   return (rows || []).filter(
     (row) => row?.store_id && String(row.store_id) === requestedStoreId,
   );
+};
+
+const toNonNegativeInteger = (value, fallback = 0) => {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const getListPagination = (query = {}, defaultLimit = DEFAULT_LIST_LIMIT) => {
+  const requestedLimit = parseInt(query.limit, 10);
+  const limit =
+    Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, MAX_LIST_LIMIT)
+      : defaultLimit;
+
+  return {
+    limit,
+    offset: toNonNegativeInteger(query.offset, 0),
+  };
+};
+
+const getListSortOptions = (
+  query = {},
+  allowedFields = new Set(),
+  defaultField = "created_at",
+  defaultDirection = "desc",
+) => {
+  const requestedField = String(query.sort_by || "")
+    .trim()
+    .toLowerCase();
+  const sortBy = allowedFields.has(requestedField)
+    ? requestedField
+    : defaultField;
+  const sortDir = String(query.sort_dir || defaultDirection)
+    .trim()
+    .toLowerCase();
+
+  return {
+    sortBy,
+    ascending: sortDir === "asc",
+  };
+};
+
+const buildPaginatedCollection = (rows, { limit, offset }) => {
+  const items = Array.isArray(rows) ? rows : [];
+  const count = items.length;
+
+  return {
+    data: items,
+    pagination: {
+      limit,
+      offset,
+      count,
+      has_more: count === limit,
+      next_offset: offset + count,
+    },
+  };
+};
+
+const getScopedEntityPage = async ({
+  req,
+  tableName,
+  select,
+  pagination,
+  sortOptions,
+}) => {
+  const requestedStoreId = getRequestedStoreId(req);
+  const isAdmin = await resolveIsAdmin(req);
+  const accessibleStoreIds = isAdmin
+    ? []
+    : await getAccessibleStoreIds(req.user.id);
+
+  if (
+    requestedStoreId &&
+    !isAdmin &&
+    accessibleStoreIds.length > 0 &&
+    !accessibleStoreIds.includes(requestedStoreId)
+  ) {
+    return {
+      data: [],
+      error: null,
+      isAdmin,
+      requestedStoreId,
+    };
+  }
+
+  const { limit, offset } = pagination;
+  const { sortBy, ascending } = sortOptions;
+
+  const buildQuery = (useLegacyUserScope = false) => {
+    let query = db
+      .from(tableName)
+      .select(select)
+      .order(sortBy, { ascending })
+      .range(offset, offset + limit - 1);
+
+    if (requestedStoreId) {
+      return query.eq("store_id", requestedStoreId);
+    }
+
+    if (isAdmin) {
+      return query;
+    }
+
+    if (!useLegacyUserScope && accessibleStoreIds.length > 0) {
+      return query.in("store_id", accessibleStoreIds);
+    }
+
+    return query.eq("user_id", req.user.id);
+  };
+
+  let result = await buildQuery(false);
+
+  if (
+    !isAdmin &&
+    !requestedStoreId &&
+    accessibleStoreIds.length > 0 &&
+    offset === 0 &&
+    !result.error &&
+    (!Array.isArray(result.data) || result.data.length === 0)
+  ) {
+    result = await buildQuery(true);
+  }
+
+  return {
+    data: result?.data || [],
+    error: result?.error || null,
+    isAdmin,
+    requestedStoreId,
+  };
 };
 
 const getScopedEntityRows = async (req, entityModel) => {
@@ -471,6 +677,56 @@ const parseJsonField = (value) => {
   return value;
 };
 
+const getProductVariantRows = (product) => {
+  const parsedData = parseJsonField(product?.data);
+  return Array.isArray(parsedData?.variants) ? parsedData.variants : [];
+};
+
+const getProductTotalInventory = (product) => {
+  const variants = getProductVariantRows(product);
+  if (variants.length === 0) {
+    return toNumber(product?.inventory_quantity);
+  }
+
+  return variants.reduce(
+    (sum, variant) => sum + toNumber(variant?.inventory_quantity),
+    0,
+  );
+};
+
+const getProductPrimarySku = (product) => {
+  const currentSku = String(product?.sku || "").trim();
+  if (currentSku) {
+    return currentSku;
+  }
+
+  const variants = getProductVariantRows(product);
+  const firstVariantWithSku = variants.find((variant) =>
+    String(variant?.sku || "").trim(),
+  );
+
+  return String(firstVariantWithSku?.sku || "").trim();
+};
+
+const buildProductSummary = (product) => {
+  const variants = getProductVariantRows(product);
+  const totalInventory = getProductTotalInventory(product);
+
+  return {
+    ...product,
+    inventory_quantity: totalInventory,
+    total_inventory: totalInventory,
+    sku: getProductPrimarySku(product),
+    variants_count: variants.length,
+    has_multiple_variants: variants.length > 1,
+  };
+};
+
+const buildProductListItem = (product, isAdmin) => {
+  const { data, ...summary } = buildProductSummary(product);
+  return sanitizeProductForRole(summary, isAdmin);
+};
+
 const TETIANO_PAYMENT_TAG_PREFIXES = ["tetiano_payment_method:", "tetiano_pm:"];
 const TETIANO_PAYMENT_NOTE_ATTRIBUTE_NAMES = [
   "tetiano_payment_method",
@@ -652,6 +908,19 @@ const isShopifyPaidOrder = (order) => {
 };
 
 const resolveOrderPaymentMethod = (order) => {
+  const explicitPaymentMethod = normalizePaymentMethod(order?.payment_method);
+  if (
+    explicitPaymentMethod === "shopify" ||
+    explicitPaymentMethod === "instapay" ||
+    explicitPaymentMethod === "wallet"
+  ) {
+    return explicitPaymentMethod;
+  }
+
+  if (explicitPaymentMethod === "none" && !isShopifyPaidOrder(order)) {
+    return "none";
+  }
+
   if (isShopifyPaidOrder(order)) {
     return "shopify";
   }
@@ -666,6 +935,52 @@ const resolveOrderPaymentMethod = (order) => {
   }
 
   return "none";
+};
+
+const getOrderCustomerShopifyId = (order) => {
+  const data = parseJsonField(order?.data);
+  return String(order?.customer_id || data?.customer?.id || "").trim();
+};
+
+const buildOrderListItem = (order) => {
+  const financialStatus = getOrderFinancialStatus(order);
+  const totalPrice = getOrderGrossAmount(order);
+  const refundedAmount = getOrderRefundedAmount(order);
+  const fulfillmentStatus = String(
+    order?.fulfillment_status ||
+      parseJsonField(order?.data)?.fulfillment_status ||
+      "",
+  )
+    .toLowerCase()
+    .trim();
+  const hasAnyRefund =
+    refundedAmount > 0 ||
+    financialStatus === "refunded" ||
+    financialStatus === "partially_refunded";
+  const isPartialRefund =
+    financialStatus === "partially_refunded" ||
+    (hasAnyRefund && refundedAmount > 0 && refundedAmount < totalPrice);
+  const isFullRefund =
+    financialStatus === "refunded" ||
+    (hasAnyRefund && totalPrice > 0 && refundedAmount >= totalPrice);
+  const { data, manual_payment_method, ...safeOrder } = order || {};
+
+  return {
+    ...safeOrder,
+    customer_shopify_id: getOrderCustomerShopifyId(order),
+    financial_status: financialStatus,
+    fulfillment_status: fulfillmentStatus,
+    payment_method: resolveOrderPaymentMethod(order),
+    refunded_amount: refundedAmount,
+    has_any_refund: hasAnyRefund,
+    is_partial_refund: isPartialRefund,
+    is_full_refund: isFullRefund,
+    is_cancelled: isCancelledOrder(order),
+    is_paid: isShopifyPaidOrder(order),
+    is_paid_like: PAID_LIKE_STATUSES.has(financialStatus),
+    is_fulfilled: fulfillmentStatus === "fulfilled",
+    net_sales_amount: getOrderNetSalesAmount(order),
+  };
 };
 
 const applyOrdersQueryFilters = (rows, query = {}) => {
@@ -1404,24 +1719,21 @@ router.post(
         });
       }
 
-      const { products, orders, customers } = syncResult;
-      const persistedCounts = syncResult?.persisted || {
-        products: products?.length || 0,
-        orders: orders?.length || 0,
-        customers: customers?.length || 0,
+      const syncCounts = syncResult?.counts || {
+        products: 0,
+        orders: 0,
+        customers: 0,
       };
+      const persistedCounts = syncResult?.persisted || syncCounts;
+      const products = { length: syncCounts.products };
+      const orders = { length: syncCounts.orders };
+      const customers = { length: syncCounts.customers };
 
       console.log(
         `✅ Sync completed: ${products?.length || 0} products, ${orders?.length || 0} orders, ${customers?.length || 0} customers`,
       );
 
-      // Get latest synced order
-      const latestSyncedOrder =
-        [...(orders || [])].sort(
-          (a, b) =>
-            parseTimestampValue(b?.updated_at) -
-            parseTimestampValue(a?.updated_at),
-        )[0] || null;
+      const latestSyncedOrder = syncResult?.latestOrder || null;
 
       // Try webhook registration (optional, don't fail if it doesn't work)
       let webhookSync = null;
@@ -1447,9 +1759,9 @@ router.post(
         store_id: syncStoreId,
         webhook_sync: webhookSync,
         counts: {
-          products: products?.length || 0,
-          orders: orders?.length || 0,
-          customers: customers?.length || 0,
+          products: syncCounts.products,
+          orders: syncCounts.orders,
+          customers: syncCounts.customers,
         },
         persisted_counts: persistedCounts,
         latest_order: latestSyncedOrder
@@ -1673,7 +1985,20 @@ router.get(
   requirePermission("can_view_products"),
   async (req, res) => {
     try {
-      const { data, error, isAdmin } = await getScopedEntityRows(req, Product);
+      const pagination = getListPagination(req.query);
+      const sortOptions = getListSortOptions(
+        req.query,
+        PRODUCT_SORT_FIELDS,
+        "updated_at",
+        "desc",
+      );
+      const { data, error, isAdmin } = await getScopedEntityPage({
+        req,
+        tableName: "products",
+        select: PRODUCT_LIST_SELECT,
+        pagination,
+        sortOptions,
+      });
       if (error) {
         console.error("Error fetching products:", error);
         return res.status(500).json({ error: error.message });
@@ -1682,13 +2007,9 @@ router.get(
         `Returning ${data?.length || 0} products for user ${req.user.id}`,
       );
       const sanitizedProducts = (data || []).map((product) =>
-        sanitizeProductForRole(product, isAdmin),
+        buildProductListItem(product, isAdmin),
       );
-      const filteredProducts = applyProductsQueryFilters(
-        sanitizedProducts,
-        req.query,
-      );
-      res.json(filteredProducts);
+      res.json(buildPaginatedCollection(sanitizedProducts, pagination));
     } catch (e) {
       console.error("Exception fetching products:", e);
       res.status(500).json({ error: e.message });
@@ -1701,21 +2022,21 @@ router.get(
   requirePermission("can_view_orders"),
   async (req, res) => {
     try {
-      const {
-        data: initialScopedOrders,
-        error: initialOrdersError,
-        isAdmin,
-        requestedStoreId,
-      } = await getScopedEntityRows(req, Order);
-      if (initialOrdersError) {
-        console.error("Error fetching orders before sync:", initialOrdersError);
-        return res.status(500).json({ error: initialOrdersError.message });
-      }
+      const pagination = getListPagination(req.query);
+      const sortOptions = getListSortOptions(
+        req.query,
+        ORDER_SORT_FIELDS,
+        "created_at",
+        "desc",
+      );
+      const requestedStoreId = getRequestedStoreId(req);
+      const isAdmin = await resolveIsAdmin(req);
 
       const syncRecentParam = String(req.query.sync_recent || "")
         .toLowerCase()
         .trim();
-      const shouldSyncRecent = syncRecentParam !== "false";
+      const shouldSyncRecent =
+        pagination.offset === 0 && syncRecentParam !== "false";
       const forceSyncRecent = syncRecentParam === "force";
       let liveSyncResult = null;
 
@@ -1724,15 +2045,18 @@ router.get(
           userId: req.user.id,
           requestedStoreId,
           isAdmin,
-          latestKnownOrderAt: getLatestOrderTimestamp(initialScopedOrders || []),
           waitForCompletion: true,
           forceRun: forceSyncRecent,
         });
       }
 
-      // After any potential sync, ALWAYS fetch the latest data from the DB.
-      // This ensures that data from a full sync is also reflected.
-      const { data, error } = await getScopedEntityRows(req, Order);
+      const { data, error } = await getScopedEntityPage({
+        req,
+        tableName: "orders",
+        select: ORDER_LIST_SELECT,
+        pagination,
+        sortOptions,
+      });
       if (error) {
         console.error("Error fetching orders:", error);
         return res.status(500).json({ error: error.message });
@@ -1741,14 +2065,8 @@ router.get(
       console.log(
         `Returning ${data?.length || 0} orders for user ${req.user.id}`,
       );
-      const normalizedOrders = (data || []).map((order) => ({
-        ...order,
-        financial_status: getOrderFinancialStatus(order),
-        payment_method: resolveOrderPaymentMethod(order),
-      }));
-      const filteredOrders = applyOrdersQueryFilters(
-        normalizedOrders,
-        req.query,
+      const normalizedOrders = (data || []).map((order) =>
+        buildOrderListItem(order),
       );
       if (liveSyncResult) {
         res.setHeader(
@@ -1756,7 +2074,7 @@ router.get(
           liveSyncResult.reason || "attempted",
         );
       }
-      res.json(filteredOrders);
+      res.json(buildPaginatedCollection(normalizedOrders, pagination));
     } catch (e) {
       console.error("Exception fetching orders:", e);
       res.status(500).json({ error: e.message });
@@ -1769,7 +2087,20 @@ router.get(
   requirePermission("can_view_customers"),
   async (req, res) => {
     try {
-      const { data, error } = await getScopedEntityRows(req, Customer);
+      const pagination = getListPagination(req.query);
+      const sortOptions = getListSortOptions(
+        req.query,
+        CUSTOMER_SORT_FIELDS,
+        "created_at",
+        "desc",
+      );
+      const { data, error } = await getScopedEntityPage({
+        req,
+        tableName: "customers",
+        select: CUSTOMER_LIST_SELECT,
+        pagination,
+        sortOptions,
+      });
       if (error) {
         console.error("Error fetching customers:", error);
         return res.status(500).json({ error: error.message });
@@ -1777,7 +2108,7 @@ router.get(
       console.log(
         `Returning ${data?.length || 0} customers for user ${req.user.id}`,
       );
-      res.json(data || []);
+      res.json(buildPaginatedCollection(data || [], pagination));
     } catch (e) {
       console.error("Exception fetching customers:", e);
       res.status(500).json({ error: e.message });
@@ -1799,7 +2130,7 @@ router.get(
       if (!data) {
         return res.status(404).json({ error: "Product not found" });
       }
-      res.json(sanitizeProductForRole(data, isAdmin));
+      res.json(sanitizeProductForRole(buildProductSummary(data), isAdmin));
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -1916,7 +2247,7 @@ router.post(
   async (req, res) => {
     try {
       const isAdmin = await resolveIsAdmin(req);
-      const { price, cost_price, inventory } = req.body;
+      const { price, cost_price, inventory, variant_updates } = req.body;
       const productId = req.params.id;
       const userId = req.user.id;
 
@@ -1933,6 +2264,12 @@ router.post(
         updates.cost_price = parseFloat(cost_price);
       if (inventory !== undefined && inventory !== null)
         updates.inventory = parseInt(inventory);
+      if (Array.isArray(variant_updates) && variant_updates.length > 0) {
+        updates.variant_updates = variant_updates.map((variantUpdate) => ({
+          id: variantUpdate?.id,
+          inventory_quantity: parseInt(variantUpdate?.inventory_quantity),
+        }));
+      }
 
       if (Object.keys(updates).length === 0) {
         return res.status(400).json({ error: "No updates provided" });

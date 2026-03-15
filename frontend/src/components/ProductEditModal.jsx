@@ -9,11 +9,14 @@ export default function ProductEditModal({
   onSave,
   canEditCost = false,
 }) {
+  const hasMultipleVariants = Boolean(product.has_multiple_variants);
   const [price, setPrice] = useState(product.price || "");
   const [costPrice, setCostPrice] = useState(
     canEditCost ? product.cost_price || "" : "",
   );
-  const [inventory, setInventory] = useState(product.inventory_quantity || "");
+  const [inventory, setInventory] = useState(
+    product.total_inventory ?? product.inventory_quantity ?? "",
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -36,8 +39,11 @@ export default function ProductEditModal({
     try {
       const payload = {
         price: parseFloat(price),
-        inventory: parseInt(inventory, 10),
       };
+
+      if (!hasMultipleVariants) {
+        payload.inventory = parseInt(inventory, 10);
+      }
 
       if (canEditCost) {
         payload.cost_price = parseFloat(costPrice || 0);
@@ -107,7 +113,7 @@ export default function ProductEditModal({
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Inventory
+              {hasMultipleVariants ? "Total Inventory" : "Inventory"}
             </label>
             <input
               type="number"
@@ -115,9 +121,16 @@ export default function ProductEditModal({
               onChange={(e) => setInventory(e.target.value)}
               min="0"
               step="1"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={hasMultipleVariants}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
               placeholder="0"
             />
+            {hasMultipleVariants && (
+              <p className="mt-2 text-xs text-slate-500">
+                المنتجات متعددة الفاريانتس يتم تعديل مخزونها من صفحة تفاصيل
+                المنتج لكل Variant على حدة.
+              </p>
+            )}
           </div>
 
           {canEditCost && price && costPrice && (

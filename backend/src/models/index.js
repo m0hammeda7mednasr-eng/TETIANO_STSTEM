@@ -2,6 +2,7 @@ import { supabase } from "../supabaseClient.js";
 
 const sortByCreatedAtDesc = { ascending: false };
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
+const SHOPIFY_UPSERT_BATCH_SIZE = 200;
 
 const isSchemaCompatibilityError = (error) => {
   if (!error) return false;
@@ -267,7 +268,7 @@ const syncRowsIndividually = async (tableName, rows, itemLabel) => {
   };
 };
 
-const upsertRowsWithManualFallback = async (tableName, rows, itemLabel) => {
+const upsertRowsChunkWithFallback = async (tableName, rows, itemLabel) => {
   const upsertResult = await supabase
     .from(tableName)
     .upsert(rows, {
@@ -285,6 +286,48 @@ const upsertRowsWithManualFallback = async (tableName, rows, itemLabel) => {
   );
 
   return await syncRowsIndividually(tableName, rows, itemLabel);
+};
+
+const upsertRowsWithManualFallback = async (tableName, rows, itemLabel) => {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { data: [], error: null };
+  }
+
+  if (rows.length <= SHOPIFY_UPSERT_BATCH_SIZE) {
+    return await upsertRowsChunkWithFallback(tableName, rows, itemLabel);
+  }
+
+  const persistedRows = [];
+
+  for (
+    let startIndex = 0;
+    startIndex < rows.length;
+    startIndex += SHOPIFY_UPSERT_BATCH_SIZE
+  ) {
+    const chunk = rows.slice(
+      startIndex,
+      startIndex + SHOPIFY_UPSERT_BATCH_SIZE,
+    );
+    const chunkResult = await upsertRowsChunkWithFallback(
+      tableName,
+      chunk,
+      itemLabel,
+    );
+
+    if (chunkResult?.error) {
+      return {
+        data: persistedRows,
+        error: chunkResult.error,
+      };
+    }
+
+    persistedRows.push(...(chunkResult?.data || []));
+  }
+
+  return {
+    data: persistedRows,
+    error: null,
+  };
 };
 
 export const getAccessibleStoreIds = async (userId) => {

@@ -5,6 +5,7 @@ const API_BASE =
   process.env.REACT_APP_API_BASE_URL ||
   process.env.REACT_APP_API_URL ||
   "http://localhost:5000/api";
+const SHOPIFY_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -150,7 +151,8 @@ export const shopifyAPI = {
   getProducts: () => api.get("/shopify/products"),
   getOrders: () => api.get("/shopify/orders"),
   getCustomers: () => api.get("/shopify/customers"),
-  sync: () => api.post("/shopify/sync", {}),
+  sync: () =>
+    api.post("/shopify/sync", {}, { timeout: SHOPIFY_SYNC_TIMEOUT_MS }),
 };
 
 export default api;

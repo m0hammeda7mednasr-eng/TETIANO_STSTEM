@@ -8,6 +8,7 @@ import { useAuth } from "../context/AuthContext";
 let notificationsEndpointUnsupported = false;
 let unreadCountRequestInFlight = false;
 const NETWORK_RETRY_PAUSE_MS = 45000;
+const NOTIFICATION_POLL_INTERVAL_MS = 120000;
 
 const TYPE_LABELS = {
   system: "System",
@@ -212,7 +213,12 @@ export default function NotificationBell() {
     }
 
     fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000);
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      fetchUnreadCount();
+    }, NOTIFICATION_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [fetchUnreadCount, notificationsApiAvailable]);
 

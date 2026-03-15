@@ -14,15 +14,18 @@ import api from "../utils/api";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
-import { fetchAllPages, fetchAllPagesProgressively } from "../utils/pagination";
+import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
   buildStoreScopedCacheKey,
+  isCacheFresh,
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
 
-const CUSTOMERS_PAGE_SIZE = 200;
-const ORDERS_PAGE_SIZE = 200;
+const CUSTOMERS_PAGE_SIZE = 100;
+const ORDERS_PAGE_SIZE = 100;
+const CUSTOMER_ORDER_SCAN_PAGES = 4;
+const CUSTOMERS_CACHE_FRESH_MS = 90 * 1000;
 const CURRENCY_LABEL = "LE";
 
 const toNumber = (value) => {
@@ -69,6 +72,7 @@ export default function Customers() {
   const [cityFilter, setCityFilter] = useState("all");
   const [countryFilter, setCountryFilter] = useState("all");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [relatedOrdersLoading, setRelatedOrdersLoading] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [loadStatus, setLoadStatus] = useState({
     active: false,
@@ -76,7 +80,6 @@ export default function Customers() {
   });
   const fetchPromiseRef = useRef(null);
   const customersRef = useRef([]);
-  const ordersRef = useRef([]);
   const cacheKey = useMemo(
     () => buildStoreScopedCacheKey("customers:list"),
     [],
@@ -87,18 +90,11 @@ export default function Customers() {
   }, [customers]);
 
   useEffect(() => {
-    ordersRef.current = orders;
-  }, [orders]);
-
-  useEffect(() => {
     let active = true;
 
     readCachedView(cacheKey).then((cached) => {
       const cachedCustomers = Array.isArray(cached?.value?.customers)
         ? cached.value.customers
-        : [];
-      const cachedOrders = Array.isArray(cached?.value?.orders)
-        ? cached.value.orders
         : [];
 
       if (!active || cachedCustomers.length === 0) {
@@ -106,7 +102,7 @@ export default function Customers() {
       }
 
       setCustomers(cachedCustomers);
-      setOrders(canViewOrders ? cachedOrders : []);
+      setOrders([]);
       setLastUpdatedAt(
         cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
       );
@@ -157,12 +153,10 @@ export default function Customers() {
                 setCustomers(accumulatedRows);
                 setLastUpdatedAt(new Date());
                 setLoadStatus({
-                  active: hasMore || canViewOrders,
+                  active: hasMore,
                   message: hasMore
                     ? `Loaded ${accumulatedRows.length.toLocaleString()} customers so far...`
-                    : canViewOrders
-                      ? `Loaded ${accumulatedRows.length.toLocaleString()} customers. Loading linked orders...`
-                      : `Loaded ${accumulatedRows.length.toLocaleString()} customers`,
+                    : `Loaded ${accumulatedRows.length.toLocaleString()} customers`,
                 });
                 if (!silent) {
                   setLoading(false);
@@ -171,24 +165,8 @@ export default function Customers() {
             },
           );
 
-          const ordersData = canViewOrders
-            ? await fetchAllPages(
-                ({ limit, offset }) =>
-                  api.get("/shopify/orders", {
-                    params: {
-                      limit,
-                      offset,
-                      sort_by: "created_at",
-                      sort_dir: "desc",
-                      sync_recent: "false",
-                    },
-                  }),
-                { limit: ORDERS_PAGE_SIZE },
-              )
-            : [];
-
           setCustomers(customersData);
-          setOrders(ordersData);
+          setOrders([]);
           setLastUpdatedAt(new Date());
           setLoadStatus({
             active: false,
@@ -199,7 +177,6 @@ export default function Customers() {
           });
           await writeCachedView(cacheKey, {
             customers: customersData,
-            orders: ordersData,
           });
         } catch (requestError) {
           console.error("Failed to fetch customers:", requestError);
@@ -232,11 +209,22 @@ export default function Customers() {
         fetchPromiseRef.current = null;
       }
     },
-    [cacheKey, canViewOrders],
+    [cacheKey],
   );
 
   useEffect(() => {
-    fetchData();
+    let active = true;
+
+    (async () => {
+      const cached = await readCachedView(cacheKey);
+      if (!active) {
+        return;
+      }
+
+      if (!isCacheFresh(cached, CUSTOMERS_CACHE_FRESH_MS)) {
+        await fetchData({ silent: Boolean(cached?.value?.customers?.length) });
+      }
+    })();
 
     const unsubscribe = subscribeToSharedDataUpdates(() => {
       fetchData({ silent: true });
@@ -246,10 +234,89 @@ export default function Customers() {
     window.addEventListener("focus", onFocus);
 
     return () => {
+      active = false;
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };
-  }, [fetchData]);
+  }, [cacheKey, fetchData]);
+
+  const loadSelectedCustomerOrders = useCallback(
+    async (customer) => {
+      if (!canViewOrders || !customer) {
+        setOrders([]);
+        setRelatedOrdersLoading(false);
+        return;
+      }
+
+      const customerId = String(customer.shopify_id || "").trim();
+      const customerEmail = normalizeText(customer.email);
+      const matchedOrders = [];
+      const seenOrderIds = new Set();
+
+      setRelatedOrdersLoading(true);
+      setOrders([]);
+
+      try {
+        await fetchAllPagesProgressively(
+          ({ limit, offset }) =>
+            api.get("/shopify/orders", {
+              params: {
+                limit,
+                offset,
+                sort_by: "created_at",
+                sort_dir: "desc",
+                sync_recent: "false",
+              },
+            }),
+          {
+            limit: ORDERS_PAGE_SIZE,
+            maxPages: CUSTOMER_ORDER_SCAN_PAGES,
+            onPage: ({ batch, pageIndex }) => {
+              batch.forEach((order) => {
+                const byEmail =
+                  customerEmail &&
+                  normalizeText(order.customer_email) === customerEmail;
+                const byId = customerId && getOrderCustomerId(order) === customerId;
+                if (!byEmail && !byId) {
+                  return;
+                }
+
+                const orderId = String(order.id || order.shopify_id || "");
+                if (!orderId || seenOrderIds.has(orderId)) {
+                  return;
+                }
+
+                seenOrderIds.add(orderId);
+                matchedOrders.push(order);
+              });
+
+              matchedOrders.sort(
+                (a, b) => new Date(b.created_at) - new Date(a.created_at),
+              );
+              setOrders([...matchedOrders].slice(0, 8));
+
+              return matchedOrders.length < 8 && pageIndex + 1 < CUSTOMER_ORDER_SCAN_PAGES;
+            },
+          },
+        );
+      } catch (requestError) {
+        console.error("Failed to fetch related customer orders:", requestError);
+      } finally {
+        setRelatedOrdersLoading(false);
+      }
+    },
+    [canViewOrders],
+  );
+
+  useEffect(() => {
+    if (!selectedCustomer) {
+      setOrders([]);
+      setRelatedOrdersLoading(false);
+      return;
+    }
+
+    loadSelectedCustomerOrders(selectedCustomer);
+  }, [loadSelectedCustomerOrders, selectedCustomer]);
 
   const cityOptions = useMemo(
     () =>
@@ -331,26 +398,9 @@ export default function Customers() {
     if (!selectedCustomer) return null;
     const data = parseJson(selectedCustomer.data);
 
-    let relatedOrders = [];
-    if (canViewOrders) {
-      const customerId = String(selectedCustomer.shopify_id || "");
-      const customerEmail = normalizeText(selectedCustomer.email);
-
-      relatedOrders = orders
-        .filter((order) => {
-          const byEmail =
-            customerEmail &&
-            normalizeText(order.customer_email) === normalizeText(customerEmail);
-          const byId = customerId && getOrderCustomerId(order) === customerId;
-          return byEmail || byId;
-        })
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-        .slice(0, 8);
-    }
-
     return {
       data,
-      relatedOrders,
+      relatedOrders: canViewOrders ? orders.slice(0, 8) : [],
       tags: Array.isArray(data.tags)
         ? data.tags
         : String(data.tags || "")
@@ -638,9 +688,13 @@ export default function Customers() {
               {canViewOrders ? (
                 <div>
                   <h3 className="font-semibold text-slate-900 mb-3">Recent Orders</h3>
-                  {selectedCustomerMeta.relatedOrders.length === 0 ? (
+                  {relatedOrdersLoading ? (
                     <p className="text-sm text-slate-500">
-                      No related orders found in current synchronized data.
+                      Loading recent orders for this customer...
+                    </p>
+                  ) : selectedCustomerMeta.relatedOrders.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      No related orders found in the scanned order batches.
                     </p>
                   ) : (
                     <div className="overflow-x-auto">

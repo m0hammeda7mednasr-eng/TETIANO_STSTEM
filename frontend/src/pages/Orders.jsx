@@ -16,12 +16,14 @@ import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
   buildStoreScopedCacheKey,
+  isCacheFresh,
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
-const ORDERS_PAGE_SIZE = 200;
+const ORDERS_PAGE_SIZE = 100;
+const ORDERS_CACHE_FRESH_MS = 90 * 1000;
 const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
@@ -287,7 +289,18 @@ export default function Orders() {
   );
 
   useEffect(() => {
-    fetchOrders();
+    let active = true;
+
+    (async () => {
+      const cached = await readCachedView(cacheKey);
+      if (!active) {
+        return;
+      }
+
+      if (!isCacheFresh(cached, ORDERS_CACHE_FRESH_MS)) {
+        await fetchOrders({ silent: Boolean(cached?.value?.rows?.length) });
+      }
+    })();
 
     const unsubscribe = subscribeToSharedDataUpdates(() => {
       setLastLiveEventAt(new Date());
@@ -298,10 +311,11 @@ export default function Orders() {
     window.addEventListener("focus", onFocus);
 
     return () => {
+      active = false;
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };
-  }, [fetchOrders, scheduleSilentRefresh]);
+  }, [cacheKey, fetchOrders, scheduleSilentRefresh]);
 
   const ordersWithMeta = useMemo(
     () =>

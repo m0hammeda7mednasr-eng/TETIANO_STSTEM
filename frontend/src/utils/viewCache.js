@@ -117,3 +117,20 @@ export const writeCachedView = async (key, value) => {
     }
   });
 };
+
+export const getCacheAgeMs = (cachedEntry) => {
+  const updatedAt = cachedEntry?.updatedAt;
+  if (!updatedAt) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const timestamp = new Date(updatedAt).getTime();
+  if (!Number.isFinite(timestamp)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Math.max(0, Date.now() - timestamp);
+};
+
+export const isCacheFresh = (cachedEntry, maxAgeMs) =>
+  getCacheAgeMs(cachedEntry) <= maxAgeMs;

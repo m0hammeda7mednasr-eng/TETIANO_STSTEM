@@ -23,11 +23,13 @@ import {
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
   buildStoreScopedCacheKey,
+  isCacheFresh,
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
 
-const PRODUCTS_PAGE_SIZE = 200;
+const PRODUCTS_PAGE_SIZE = 100;
+const PRODUCTS_CACHE_FRESH_MS = 90 * 1000;
 const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
@@ -247,7 +249,18 @@ export default function Products() {
   );
 
   useEffect(() => {
-    fetchProducts();
+    let active = true;
+
+    (async () => {
+      const cached = await readCachedView(cacheKey);
+      if (!active) {
+        return;
+      }
+
+      if (!isCacheFresh(cached, PRODUCTS_CACHE_FRESH_MS)) {
+        await fetchProducts({ silent: Boolean(cached?.value?.rows?.length) });
+      }
+    })();
 
     const unsubscribe = subscribeToSharedDataUpdates(() => {
       fetchProducts({ silent: true });
@@ -257,10 +270,11 @@ export default function Products() {
     window.addEventListener("focus", onFocus);
 
     return () => {
+      active = false;
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };
-  }, [fetchProducts]);
+  }, [cacheKey, fetchProducts]);
 
   const productsWithMeta = useMemo(
     () =>

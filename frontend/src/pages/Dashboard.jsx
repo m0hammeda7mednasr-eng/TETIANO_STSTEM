@@ -22,11 +22,13 @@ import {
 } from "../utils/realtime";
 import {
   buildStoreScopedCacheKey,
+  isCacheFresh,
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
 
 const CURRENCY_LABEL = "LE";
+const DASHBOARD_CACHE_FRESH_MS = 60 * 1000;
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -262,7 +264,9 @@ export default function Dashboard() {
         return;
       }
 
-      await loadData({ silent: Boolean(snapshot) });
+      if (!isCacheFresh(cached, DASHBOARD_CACHE_FRESH_MS)) {
+        await loadData({ silent: Boolean(snapshot) });
+      }
     })();
 
     return () => {

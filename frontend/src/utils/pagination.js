@@ -37,13 +37,16 @@ export const fetchAllPagesProgressively = async (
         : batch.length === limit;
 
     if (typeof onPage === "function" && batch.length > 0) {
-      await onPage({
+      const shouldContinue = await onPage({
         batch,
         rows: [...rows],
         pageIndex,
         pagination,
         hasMore,
       });
+      if (shouldContinue === false) {
+        break;
+      }
     }
 
     if (batch.length === 0) {

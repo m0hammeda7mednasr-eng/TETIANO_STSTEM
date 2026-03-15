@@ -330,7 +330,7 @@ export default function Dashboard() {
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };
-  }, [authLoading, loadData]);
+  }, [authLoading, cacheKey, loadData]);
 
   const shortcuts = useMemo(() => {
     const items = [

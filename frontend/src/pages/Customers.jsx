@@ -79,7 +79,7 @@ export default function Customers() {
 
   const [customers, setCustomers] = useState(() => initialCachedSnapshot.rows);
   const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [cityFilter, setCityFilter] = useState("all");

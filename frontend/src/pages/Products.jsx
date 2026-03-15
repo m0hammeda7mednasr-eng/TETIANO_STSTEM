@@ -120,7 +120,7 @@ export default function Products() {
 
   const [products, setProducts] = useState(() => initialCachedSnapshot.rows);
   const [filters, setFilters] = useState(INITIAL_FILTERS);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [notification, setNotification] = useState(null);
   const [error, setError] = useState("");

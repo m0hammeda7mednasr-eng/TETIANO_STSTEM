@@ -145,7 +145,7 @@ export default function Orders() {
   }, [cacheKey]);
   const [orders, setOrders] = useState(() => initialCachedSnapshot.rows);
   const [filters, setFilters] = useState(INITIAL_FILTERS);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(
     () => initialCachedSnapshot.updatedAt,

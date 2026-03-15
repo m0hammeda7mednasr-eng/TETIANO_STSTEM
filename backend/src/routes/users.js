@@ -2,6 +2,7 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import { authenticateToken } from "../middleware/auth.js";
 import {
+  buildPermissionsForRole,
   requirePermission,
   DEFAULT_PERMISSIONS,
   PERMISSION_KEYS,
@@ -9,6 +10,10 @@ import {
   normalizeRole,
 } from "../middleware/permissions.js";
 import { supabase } from "../supabaseClient.js";
+import {
+  isTransientSupabaseError,
+  withSupabaseRetry,
+} from "../helpers/supabaseRetry.js";
 
 const router = express.Router();
 const MAX_USERS_LIST_LIMIT = 200;
@@ -292,11 +297,27 @@ router.get("/me/stores", authenticateToken, async (req, res) => {
 // Get current user info (no admin required) - MUST be before /:userId
 router.get("/me", authenticateToken, async (req, res) => {
   try {
-    const { data: user, error } = await supabase
-      .from("users")
-      .select("id, email, name, role, is_active, created_at")
-      .eq("id", req.user.id)
-      .single();
+    const { data: user, error } = await withSupabaseRetry(() =>
+      supabase
+        .from("users")
+        .select("id, email, name, role, is_active, created_at")
+        .eq("id", req.user.id)
+        .limit(1)
+        .maybeSingle(),
+    );
+
+    if (error && isTransientSupabaseError(error)) {
+      return res.json({
+        id: req.user.id,
+        email: req.user.email,
+        name: null,
+        role: normalizeRole(req.user.role),
+        is_active: true,
+        created_at: null,
+        permissions: buildPermissionsForRole(req.user.role),
+        degraded: true,
+      });
+    }
 
     if (error) throw error;
 
@@ -308,21 +329,27 @@ router.get("/me", authenticateToken, async (req, res) => {
     const normalizedUserRole = normalizeRole(user.role);
 
     if (normalizedUserRole === "admin") {
-      for (const key of PERMISSION_KEYS) {
-        normalizedPermissions[key] = true;
-      }
+      normalizedPermissions = buildPermissionsForRole(normalizedUserRole);
     } else {
-      const { data: permissionsData, error: permissionsError } = await supabase
-        .from("permissions")
-        .select("*")
-        .eq("user_id", req.user.id)
-        .single();
+      const { data: permissionsData, error: permissionsError } =
+        await withSupabaseRetry(() =>
+          supabase
+            .from("permissions")
+            .select("*")
+            .eq("user_id", req.user.id)
+            .limit(1)
+            .maybeSingle(),
+        );
 
-      if (permissionsError && permissionsError.code !== "PGRST116") {
-        throw permissionsError;
+      if (permissionsError && isTransientSupabaseError(permissionsError)) {
+        normalizedPermissions = buildPermissionsForRole(normalizedUserRole);
+      } else {
+        if (permissionsError && permissionsError.code !== "PGRST116") {
+          throw permissionsError;
+        }
+
+        normalizedPermissions = normalizePermissions(permissionsData);
       }
-
-      normalizedPermissions = normalizePermissions(permissionsData);
     }
 
     res.json({
@@ -332,43 +359,61 @@ router.get("/me", authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching user:", error);
-    res.status(500).json({ error: error.message });
+    res.status(isTransientSupabaseError(error) ? 503 : 500).json({
+      error: isTransientSupabaseError(error)
+        ? "User profile is temporarily unavailable"
+        : error.message,
+    });
   }
 });
 
 // Get current user permissions - MUST be before /:userId
 router.get("/me/permissions", authenticateToken, async (req, res) => {
   try {
-    const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", req.user.id)
-      .single();
+    const { data: userData, error: userError } = await withSupabaseRetry(() =>
+      supabase
+        .from("users")
+        .select("role")
+        .eq("id", req.user.id)
+        .limit(1)
+        .maybeSingle(),
+    );
+
+    if (userError && isTransientSupabaseError(userError)) {
+      return res.json(buildPermissionsForRole(req.user.role));
+    }
 
     if (userError && userError.code !== "PGRST116") {
       throw userError;
     }
 
     if (normalizeRole(userData?.role) === "admin") {
-      const adminPermissions = { ...DEFAULT_PERMISSIONS };
-      for (const key of PERMISSION_KEYS) {
-        adminPermissions[key] = true;
-      }
-      return res.json(adminPermissions);
+      return res.json(buildPermissionsForRole("admin"));
     }
 
-    const { data, error } = await supabase
-      .from("permissions")
-      .select("*")
-      .eq("user_id", req.user.id)
-      .single();
+    const { data, error } = await withSupabaseRetry(() =>
+      supabase
+        .from("permissions")
+        .select("*")
+        .eq("user_id", req.user.id)
+        .limit(1)
+        .maybeSingle(),
+    );
+
+    if (error && isTransientSupabaseError(error)) {
+      return res.json(buildPermissionsForRole(req.user.role));
+    }
 
     if (error && error.code !== "PGRST116") throw error;
 
     res.json(normalizePermissions(data));
   } catch (error) {
     console.error("Error fetching permissions:", error);
-    res.status(500).json({ error: error.message });
+    res.status(isTransientSupabaseError(error) ? 503 : 500).json({
+      error: isTransientSupabaseError(error)
+        ? "User permissions are temporarily unavailable"
+        : error.message,
+    });
   }
 });
 

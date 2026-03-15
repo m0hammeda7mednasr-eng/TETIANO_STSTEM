@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { authAPI } from "../utils/api";
 import { Mail, Lock } from "lucide-react";
+import { authAPI, getErrorMessage } from "../utils/api";
 import tetianoLogo from "../assets/tetiano-logo.jpeg";
 
 export default function Login() {
@@ -29,13 +29,18 @@ export default function Login() {
       const response = await authAPI.login(formData);
       localStorage.setItem("token", response.data.token);
       localStorage.setItem("user", JSON.stringify(response.data.user));
+
+      if (response.data.permissions) {
+        localStorage.setItem(
+          "permissions",
+          JSON.stringify(response.data.permissions),
+        );
+      }
+
       navigate("/dashboard");
     } catch (err) {
       console.error("Login error:", err);
-      const errorMsg =
-        err.response?.data?.error ||
-        "فشل تسجيل الدخول. تحقق من البريد الإلكتروني وكلمة المرور";
-      setError(errorMsg);
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -60,7 +65,7 @@ export default function Login() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              البريد الإلكتروني
+              Email
             </label>
             <div className="relative">
               <Mail className="absolute left-3 top-3 text-gray-400" size={20} />
@@ -79,7 +84,7 @@ export default function Login() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              كلمة المرور
+              Password
             </label>
             <div className="relative">
               <Lock className="absolute left-3 top-3 text-gray-400" size={20} />
@@ -89,7 +94,7 @@ export default function Login() {
                 value={formData.password}
                 onChange={handleChange}
                 autoComplete="current-password"
-                placeholder="••••••••"
+                placeholder="........"
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               />
@@ -107,17 +112,17 @@ export default function Login() {
             disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition duration-300 disabled:opacity-50"
           >
-            {loading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
+            {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
 
         <p className="text-center mt-6 text-gray-600 text-sm">
-          ليس لديك حساب؟{" "}
+          Don&apos;t have an account?{" "}
           <a
             href="/register"
             className="text-blue-600 hover:underline font-medium"
           >
-            إنشاء حساب جديد
+            Create one
           </a>
         </p>
       </div>

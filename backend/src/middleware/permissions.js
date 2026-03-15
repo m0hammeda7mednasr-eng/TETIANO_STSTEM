@@ -1,4 +1,8 @@
 import { supabase } from "../supabaseClient.js";
+import {
+  isTransientSupabaseError,
+  withSupabaseRetry,
+} from "../helpers/supabaseRetry.js";
 
 export const PERMISSION_KEYS = [
   "can_view_dashboard",
@@ -48,6 +52,21 @@ export const normalizePermissions = (permissionsRow = null) => {
   return normalized;
 };
 
+export const buildPermissionsForRole = (role, permissionsRow = null) => {
+  const normalizedRole = normalizeRole(role);
+  const normalizedPermissions = normalizePermissions(permissionsRow);
+
+  if (normalizedRole !== "admin") {
+    return normalizedPermissions;
+  }
+
+  for (const key of PERMISSION_KEYS) {
+    normalizedPermissions[key] = true;
+  }
+
+  return normalizedPermissions;
+};
+
 export const normalizeRole = (role) => {
   if (typeof role !== "string") {
     return "user";
@@ -66,11 +85,14 @@ export const getUserRole = async (userId) => {
     return null;
   }
 
-  const { data: user, error } = await supabase
-    .from("users")
-    .select("role")
-    .eq("id", userId)
-    .single();
+  const { data: user, error } = await withSupabaseRetry(() =>
+    supabase
+      .from("users")
+      .select("role")
+      .eq("id", userId)
+      .limit(1)
+      .maybeSingle(),
+  );
 
   if (error && error.code !== "PGRST116") {
     throw error;
@@ -88,11 +110,14 @@ export const getUserPermissions = async (userId) => {
     return { ...DEFAULT_PERMISSIONS };
   }
 
-  const { data: permissions, error } = await supabase
-    .from("permissions")
-    .select("*")
-    .eq("user_id", userId)
-    .single();
+  const { data: permissions, error } = await withSupabaseRetry(() =>
+    supabase
+      .from("permissions")
+      .select("*")
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle(),
+  );
 
   if (error && error.code !== "PGRST116") {
     throw error;
@@ -116,7 +141,11 @@ export const requireAdminRole = async (req, res, next) => {
     next();
   } catch (error) {
     console.error("Admin role check error:", error);
-    res.status(500).json({ error: "Failed to validate user role" });
+    res.status(isTransientSupabaseError(error) ? 503 : 500).json({
+      error: isTransientSupabaseError(error)
+        ? "User role validation is temporarily unavailable"
+        : "Failed to validate user role",
+    });
   }
 };
 
@@ -147,7 +176,11 @@ export const requirePermission = (permissionName) => {
       next();
     } catch (error) {
       console.error("Permission check error:", error);
-      res.status(500).json({ error: "Failed to validate permissions" });
+      res.status(isTransientSupabaseError(error) ? 503 : 500).json({
+        error: isTransientSupabaseError(error)
+          ? "Permission validation is temporarily unavailable"
+          : "Failed to validate permissions",
+      });
     }
   };
 };

@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import { getUserRole, normalizeRole } from "./permissions.js";
 import { getJwtSecret } from "../helpers/jwt.js";
+import { isTransientSupabaseError } from "../helpers/supabaseRetry.js";
 
 /**
  * Centralized JWT validation middleware
@@ -65,15 +66,32 @@ export const authenticateToken = async (req, res, next) => {
     if (process.env.NODE_ENV === "test") {
       normalizedRole = normalizeRole(decoded.role || "user");
     } else {
-      // Always resolve current role from DB to avoid stale JWT role privileges.
-      const dbRole = await getUserRole(decoded.id);
-      if (!dbRole) {
-        return res.status(401).json({
-          error: "User not found",
-        });
-      }
+      const tokenRole = normalizeRole(decoded.role || "user");
 
-      normalizedRole = normalizeRole(dbRole);
+      try {
+        // Always resolve current role from DB to avoid stale JWT role privileges.
+        const dbRole = await getUserRole(decoded.id);
+        if (!dbRole) {
+          return res.status(401).json({
+            error: "User not found",
+          });
+        }
+
+        normalizedRole = normalizeRole(dbRole);
+      } catch (roleError) {
+        const isSafeMethod = ["GET", "HEAD", "OPTIONS"].includes(
+          String(req.method || "").toUpperCase(),
+        );
+
+        if (isSafeMethod && isTransientSupabaseError(roleError)) {
+          normalizedRole = tokenRole;
+          req.authFallback = {
+            source: "token-role",
+          };
+        } else {
+          throw roleError;
+        }
+      }
     }
 
     // Attach decoded user object to req.user with required fields
@@ -89,8 +107,10 @@ export const authenticateToken = async (req, res, next) => {
     next();
   } catch (error) {
     console.error("Authentication middleware error:", error);
-    return res.status(500).json({
-      error: "Authentication failed",
+    return res.status(isTransientSupabaseError(error) ? 503 : 500).json({
+      error: isTransientSupabaseError(error)
+        ? "Authentication service is temporarily unavailable"
+        : "Authentication failed",
     });
   }
 };

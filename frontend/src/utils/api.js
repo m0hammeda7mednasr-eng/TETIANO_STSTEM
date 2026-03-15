@@ -134,6 +134,8 @@ export const getErrorMessage = (error) => {
       return "Resource not found";
     case 500:
       return "Server error. Please try again later.";
+    case 503:
+      return "Service temporarily unavailable. Please try again in a moment.";
     default:
       return "An unexpected error occurred. Please try again.";
   }

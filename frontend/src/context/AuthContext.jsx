@@ -11,21 +11,68 @@ import api from "../utils/api";
 const AuthContext = createContext(null);
 const AUTH_REFRESH_INTERVAL_MS = 120000;
 const MIN_AUTH_REFRESH_GAP_MS = 5000;
+const DEFAULT_CLIENT_PERMISSIONS = {
+  can_view_dashboard: true,
+  can_view_products: true,
+  can_edit_products: false,
+  can_view_orders: true,
+  can_edit_orders: false,
+  can_view_customers: true,
+  can_edit_customers: false,
+  can_manage_users: false,
+  can_manage_settings: false,
+  can_view_profits: false,
+  can_manage_tasks: false,
+  can_view_all_reports: false,
+  can_view_activity_log: false,
+};
+
+const readJsonFromStorage = (key) => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const buildCachedPermissions = (cachedUser, cachedPermissions) => {
+  if (cachedUser?.role === "admin") {
+    return Object.keys(DEFAULT_CLIENT_PERMISSIONS).reduce((acc, key) => {
+      acc[key] = true;
+      return acc;
+    }, {});
+  }
+
+  return cachedPermissions || { ...DEFAULT_CLIENT_PERMISSIONS };
+};
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [permissions, setPermissions] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const cachedUser = readJsonFromStorage("user");
+  const [user, setUser] = useState(cachedUser);
+  const [permissions, setPermissions] = useState(() =>
+    buildCachedPermissions(cachedUser, readJsonFromStorage("permissions")),
+  );
+  const [loading, setLoading] = useState(!cachedUser);
+  const [isAdmin, setIsAdmin] = useState(cachedUser?.role === "admin");
 
-  // Prevent race conditions using refs instead of outer module variables
   const authRefreshInFlight = useRef(false);
   const lastAuthRefreshAt = useRef(0);
 
   const resetAuthState = useCallback(() => {
+    localStorage.removeItem("user");
+    localStorage.removeItem("permissions");
     setUser(null);
     setPermissions({});
     setIsAdmin(false);
+  }, []);
+
+  const applyAuthState = useCallback((nextUser, nextPermissions) => {
+    localStorage.setItem("user", JSON.stringify(nextUser));
+    localStorage.setItem("permissions", JSON.stringify(nextPermissions));
+    setUser(nextUser);
+    setPermissions(nextPermissions);
+    setIsAdmin(nextUser?.role === "admin");
   }, []);
 
   const loadAuthState = useCallback(
@@ -62,15 +109,17 @@ export const AuthProvider = ({ children }) => {
         }
 
         const resolvedRole = String(userData?.role || "user").toLowerCase();
-
-        setUser({
+        const nextUser = {
           id: userData.id,
           email: userData.email,
           name: userData.name,
           role: resolvedRole,
-        });
-        setIsAdmin(resolvedRole === "admin");
-        setPermissions(perms || {});
+        };
+
+        applyAuthState(
+          nextUser,
+          perms || buildCachedPermissions(nextUser, readJsonFromStorage("permissions")),
+        );
       } catch (error) {
         console.error("Failed to refresh auth state", error);
 
@@ -81,6 +130,17 @@ export const AuthProvider = ({ children }) => {
           if (window.location.pathname !== "/login") {
             window.location.href = "/login";
           }
+        } else {
+          const fallbackUser = readJsonFromStorage("user");
+          if (fallbackUser) {
+            applyAuthState(
+              fallbackUser,
+              buildCachedPermissions(
+                fallbackUser,
+                readJsonFromStorage("permissions"),
+              ),
+            );
+          }
         }
       } finally {
         authRefreshInFlight.current = false;
@@ -89,7 +149,7 @@ export const AuthProvider = ({ children }) => {
         }
       }
     },
-    [resetAuthState],
+    [applyAuthState, resetAuthState],
   );
 
   useEffect(() => {

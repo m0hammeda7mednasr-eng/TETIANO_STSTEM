@@ -1,121 +1,156 @@
 import express from "express";
-import { supabase } from "../supabaseClient.js";
 import jwt from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
-import { normalizeRole } from "../middleware/permissions.js";
+import { supabase } from "../supabaseClient.js";
+import {
+  buildPermissionsForRole,
+  getUserPermissions,
+  normalizeRole,
+} from "../middleware/permissions.js";
 import { getJwtSecret } from "../helpers/jwt.js";
+import {
+  isTransientSupabaseError,
+  withSupabaseRetry,
+} from "../helpers/supabaseRetry.js";
 
 const router = express.Router();
+const INVALID_LOGIN_ERROR = "Invalid email or password";
+const AUTH_SERVICE_UNAVAILABLE_ERROR =
+  "Authentication service is temporarily unavailable. Please try again in a moment.";
+
+const createTokenPayload = (user) => ({
+  id: user.id,
+  email: user.email,
+  role: normalizeRole(user.role || "user"),
+});
+
+const signUserToken = (user) =>
+  jwt.sign(createTokenPayload(user), getJwtSecret(), { expiresIn: "7d" });
 
 // Register
 router.post("/register", async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const email = String(req.body?.email || "").trim();
+    const password = String(req.body?.password || "");
+    const name = String(req.body?.name || "").trim();
 
     if (!email || !password || !name) {
-      return res.status(400).json({ error: "جميع الحقول مطلوبة" });
+      return res.status(400).json({ error: "All fields are required" });
     }
 
     if (password.length < 6) {
       return res
         .status(400)
-        .json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
+        .json({ error: "Password must be at least 6 characters long" });
     }
 
-    // Hash password
     const hashedPassword = await bcryptjs.hash(password, 10);
-
-    // Create user in Supabase
-    const { data: userData, error: userError } = await supabase
-      .from("users")
-      .insert([{ email, password: hashedPassword, name }])
-      .select();
+    const { data: userData, error: userError } = await withSupabaseRetry(() =>
+      supabase
+        .from("users")
+        .insert([{ email, password: hashedPassword, name }])
+        .select("id, email, name, role"),
+    );
 
     if (userError) {
-      if (userError.code === "23505") {
-        return res
-          .status(400)
-          .json({ error: "البريد الإلكتروني مستخدم بالفعل" });
+      if (isTransientSupabaseError(userError)) {
+        return res.status(503).json({ error: AUTH_SERVICE_UNAVAILABLE_ERROR });
       }
+
+      if (userError.code === "23505") {
+        return res.status(400).json({ error: "Email is already in use" });
+      }
+
       return res.status(400).json({ error: userError.message });
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        id: userData[0].id,
-        email: userData[0].email,
-        role: normalizeRole(userData[0].role || "user"),
-      },
-      getJwtSecret(),
-      { expiresIn: "7d" },
-    );
+    const user = Array.isArray(userData) ? userData[0] : null;
+    if (!user) {
+      return res.status(500).json({ error: "Failed to create account" });
+    }
 
     res.json({
-      token,
+      token: signUserToken(user),
       user: {
-        id: userData[0].id,
-        email: userData[0].email,
-        name: userData[0].name,
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: normalizeRole(user.role || "user"),
       },
+      permissions: buildPermissionsForRole(user.role),
     });
   } catch (error) {
     console.error("Register error:", error);
-    res.status(500).json({ error: "حدث خطأ أثناء إنشاء الحساب" });
+    res.status(isTransientSupabaseError(error) ? 503 : 500).json({
+      error: isTransientSupabaseError(error)
+        ? AUTH_SERVICE_UNAVAILABLE_ERROR
+        : "An error occurred while creating the account",
+    });
   }
 });
 
 // Login
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = String(req.body?.email || "").trim();
+    const password = String(req.body?.password || "");
 
     if (!email || !password) {
       return res
         .status(400)
-        .json({ error: "البريد الإلكتروني وكلمة المرور مطلوبان" });
+        .json({ error: "Email and password are required" });
     }
 
-    // Fetch user
-    const { data: users, error } = await supabase
-      .from("users")
-      .select()
-      .eq("email", email);
+    const { data: user, error } = await withSupabaseRetry(() =>
+      supabase
+        .from("users")
+        .select("id, email, name, password, role")
+        .eq("email", email)
+        .limit(1)
+        .maybeSingle(),
+    );
 
-    if (error || !users || users.length === 0) {
-      return res
-        .status(401)
-        .json({ error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
+    if (error) {
+      console.error("Login user lookup error:", error);
+      return res.status(isTransientSupabaseError(error) ? 503 : 500).json({
+        error: isTransientSupabaseError(error)
+          ? AUTH_SERVICE_UNAVAILABLE_ERROR
+          : "Failed to validate login credentials",
+      });
     }
 
-    const user = users[0];
+    if (!user) {
+      return res.status(401).json({ error: INVALID_LOGIN_ERROR });
+    }
 
-    // Verify password
     const passwordMatch = await bcryptjs.compare(password, user.password);
     if (!passwordMatch) {
-      return res
-        .status(401)
-        .json({ error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
+      return res.status(401).json({ error: INVALID_LOGIN_ERROR });
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        id: user.id,
-        email: user.email,
-        role: normalizeRole(user.role || "user"),
-      },
-      getJwtSecret(),
-      { expiresIn: "7d" },
+    const normalizedRole = normalizeRole(user.role || "user");
+    const permissions = buildPermissionsForRole(
+      normalizedRole,
+      normalizedRole === "admin" ? null : await getUserPermissions(user.id),
     );
 
     res.json({
-      token,
-      user: { id: user.id, email: user.email, name: user.name },
+      token: signUserToken(user),
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: normalizedRole,
+      },
+      permissions,
     });
   } catch (error) {
     console.error("Login error:", error);
-    res.status(500).json({ error: "حدث خطأ أثناء تسجيل الدخول" });
+    res.status(isTransientSupabaseError(error) ? 503 : 500).json({
+      error: isTransientSupabaseError(error)
+        ? AUTH_SERVICE_UNAVAILABLE_ERROR
+        : "An error occurred while signing in",
+    });
   }
 });
 

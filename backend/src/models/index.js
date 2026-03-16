@@ -449,7 +449,6 @@ export const getAccessibleStoreIds = async (userId) => {
     } catch (inferenceError) {
       console.log("Store inference fallback failed:", inferenceError.message);
     }
-    rememberAccessibleStoreIds(userId, []);
     return [];
   } catch (error) {
     console.error("getAccessibleStoreIds error:", error);

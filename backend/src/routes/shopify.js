@@ -1211,6 +1211,17 @@ const buildOrderListItem = (order) => {
   };
 };
 
+const getFallbackOrdersPage = async (req) => {
+  const scopedRowsResult = await getScopedEntityRows(req, Order);
+  if (scopedRowsResult?.error) {
+    throw scopedRowsResult.error;
+  }
+
+  return applyOrdersQueryFilters(scopedRowsResult?.data || [], req.query).map(
+    (order) => buildOrderListItem(order),
+  );
+};
+
 const applyOrdersQueryFilters = (rows, query = {}) => {
   let filtered = [...(rows || [])];
 
@@ -2241,15 +2252,45 @@ router.get(
         }
       }
 
-      const { data, error } = await getScopedEntityPage({
-        req,
-        tableName: "orders",
-        selects: ORDER_LIST_SELECTS,
-        pagination,
-        sortOptions,
-      });
+      let data = [];
+      let error = null;
+
+      try {
+        const scopedPageResult = await getScopedEntityPage({
+          req,
+          tableName: "orders",
+          selects: ORDER_LIST_SELECTS,
+          pagination,
+          sortOptions,
+        });
+        data = scopedPageResult?.data || [];
+        error = scopedPageResult?.error || null;
+      } catch (queryError) {
+        error = queryError;
+      }
+
       if (error) {
         console.error("Error fetching orders:", error);
+
+        if (
+          isSchemaCompatibilityError(error) ||
+          isQueryRetryableError(error)
+        ) {
+          try {
+            const fallbackOrders = await getFallbackOrdersPage(req);
+            if (liveSyncResult) {
+              res.setHeader(
+                "X-Orders-Live-Sync",
+                liveSyncResult.reason || "attempted",
+              );
+            }
+            res.setHeader("X-Orders-Fallback", "scoped_rows");
+            return res.json(buildPaginatedCollection(fallbackOrders, pagination));
+          } catch (fallbackError) {
+            console.error("Fallback orders query failed:", fallbackError);
+          }
+        }
+
         return res.status(500).json({ error: error.message });
       }
 

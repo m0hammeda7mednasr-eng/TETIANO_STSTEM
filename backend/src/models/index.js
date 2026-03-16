@@ -50,28 +50,36 @@ const executeWithSchemaFallback = async (builders) => {
   return { data: null, error: lastError };
 };
 
-const executeWithSchemaAndEmptyFallback = async (builders) => {
+const executeWithSchemaAndEmptyFallback = (
+  builders,
+  { continueOnUnexpectedError = false } = {},
+) => {
   let lastError = null;
   let lastData = null;
 
-  for (const build of builders) {
-    const { data, error } = await build();
+  return (async () => {
+    for (const build of builders) {
+      const { data, error } = await build();
 
-    if (!error) {
-      lastData = data;
-      if (hasMeaningfulData(data)) {
-        return { data, error: null };
+      if (!error) {
+        lastData = data;
+        if (hasMeaningfulData(data)) {
+          return { data, error: null };
+        }
+        continue;
       }
-      continue;
+
+      lastError = error;
+      if (
+        !continueOnUnexpectedError &&
+        !isSchemaCompatibilityError(error)
+      ) {
+        return { data: null, error };
+      }
     }
 
-    lastError = error;
-    if (!isSchemaCompatibilityError(error)) {
-      return { data: null, error };
-    }
-  }
-
-  return { data: lastData, error: lastError };
+    return { data: lastData, error: lastError };
+  })();
 };
 
 const buildListQueryFallbacks = (tableName, applyFilter) => {
@@ -141,60 +149,89 @@ const getAccessibleStoreIdsSafe = async (userId) => {
 const findRowsByUserWithFallback = async (tableName, userId) => {
   const storeIds = await getAccessibleStoreIdsSafe(userId);
 
-  const builders = [];
+  let primaryScopeResult = { data: null, error: null };
 
   // First try: rows linked to stores this user can access.
   if (storeIds.length > 0) {
-    builders.push(
-      ...buildListQueryFallbacks(tableName, (query) =>
+    primaryScopeResult = await executeWithSchemaAndEmptyFallback(
+      buildListQueryFallbacks(tableName, (query) =>
         query.in("store_id", storeIds),
       ),
+      { continueOnUnexpectedError: true },
     );
+
+    if (!primaryScopeResult.error && hasMeaningfulData(primaryScopeResult.data)) {
+      return { data: primaryScopeResult.data, error: null };
+    }
   }
 
   // Fallback for legacy rows that predate store_id backfill.
-  builders.push(
-    ...buildListQueryFallbacks(tableName, (query) =>
-      query.eq("user_id", userId),
-    ),
+  const result = await executeWithSchemaAndEmptyFallback(
+    buildListQueryFallbacks(tableName, (query) => query.eq("user_id", userId)),
   );
 
-  const result = await executeWithSchemaAndEmptyFallback(builders);
-
   if (result.error && isSchemaCompatibilityError(result.error)) {
-    return { data: [], error: null };
+    return {
+      data: Array.isArray(primaryScopeResult.data) ? primaryScopeResult.data : [],
+      error: null,
+    };
   }
 
-  return result;
+  if (result.error && !primaryScopeResult.error) {
+    return {
+      data: Array.isArray(primaryScopeResult.data) ? primaryScopeResult.data : [],
+      error: null,
+    };
+  }
+
+  return {
+    data: Array.isArray(result.data) ? result.data : [],
+    error: result.error,
+  };
 };
 
 const findRowByIdForUserWithFallback = async (tableName, userId, id) => {
   const storeIds = await getAccessibleStoreIdsSafe(userId);
 
-  const builders = [];
+  let primaryScopeResult = { data: null, error: null };
+
   if (storeIds.length > 0) {
-    builders.push(async () =>
-      supabase
-        .from(tableName)
-        .select()
-        .eq("id", id)
-        .in("store_id", storeIds)
-        .maybeSingle(),
+    primaryScopeResult = await executeWithSchemaAndEmptyFallback(
+      [
+        async () =>
+          supabase
+            .from(tableName)
+            .select()
+            .eq("id", id)
+            .in("store_id", storeIds)
+            .maybeSingle(),
+      ],
+      { continueOnUnexpectedError: true },
     );
+
+    if (!primaryScopeResult.error && hasMeaningfulData(primaryScopeResult.data)) {
+      return { data: primaryScopeResult.data, error: null };
+    }
   }
 
-  builders.push(async () =>
-    supabase
-      .from(tableName)
-      .select()
-      .eq("id", id)
-      .eq("user_id", userId)
-      .maybeSingle(),
+  const { data, error } = await executeWithSchemaAndEmptyFallback(
+    [
+      async () =>
+        supabase
+          .from(tableName)
+          .select()
+          .eq("id", id)
+          .eq("user_id", userId)
+          .maybeSingle(),
+    ],
   );
 
-  const { data, error } = await executeWithSchemaAndEmptyFallback(builders);
   if (error && isSchemaCompatibilityError(error)) {
-    return { data: null, error: null };
+    return { data: primaryScopeResult.data || null, error: null };
+  }
+
+  if (error && !primaryScopeResult.error) {
+    return { data: primaryScopeResult.data || null, error: null };
   }
 
   return { data: data || null, error };

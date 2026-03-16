@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 
 let tableData = {};
 let executedQueries = [];
+let queryFailures = [];
 
 const matchesFilters = (row, filters = []) =>
   filters.every((filter) => {
@@ -26,6 +27,25 @@ const resolveRows = (table, filters = []) => {
   const rows = tableData[table] || [];
   return rows.filter((row) => matchesFilters(row, filters));
 };
+
+const findMatchingFailure = (table, filters = [], mode) =>
+  queryFailures.find((failure) => {
+    if (failure.table !== table) {
+      return false;
+    }
+
+    if (failure.mode && failure.mode !== mode) {
+      return false;
+    }
+
+    return (failure.filters || []).every((expectedFilter) =>
+      filters.some(
+        (actualFilter) =>
+          actualFilter.type === expectedFilter.type &&
+          actualFilter.column === expectedFilter.column,
+      ),
+    );
+  });
 
 const createQueryBuilder = (table) => {
   const state = {
@@ -60,6 +80,14 @@ const createQueryBuilder = (table) => {
         orderBy: state.orderBy,
         mode: "maybeSingle",
       });
+      const failure = findMatchingFailure(
+        state.table,
+        state.filters,
+        "maybeSingle",
+      );
+      if (failure) {
+        return { data: null, error: failure.error };
+      }
       const rows = resolveRows(state.table, state.filters);
       return { data: rows[0] || null, error: null };
     }),
@@ -70,6 +98,13 @@ const createQueryBuilder = (table) => {
         orderBy: state.orderBy,
         mode: "list",
       });
+      const failure = findMatchingFailure(state.table, state.filters, "list");
+      if (failure) {
+        return Promise.resolve({
+          data: null,
+          error: failure.error,
+        }).then(resolve, reject);
+      }
       return Promise.resolve({
         data: resolveRows(state.table, state.filters),
         error: null,
@@ -100,6 +135,7 @@ describe("models/index Shopify scoping", () => {
       customers: [],
     };
     executedQueries = [];
+    queryFailures = [];
     supabaseMock.from.mockClear();
   });
 
@@ -165,5 +201,92 @@ describe("models/index Shopify scoping", () => {
           query.filters[0].column === "id",
       ),
     ).toBe(false);
+  });
+
+  it("falls back to legacy user-scoped product lists when store-scoped queries fail", async () => {
+    tableData.user_stores = [
+      { user_id: "employee-1", store_id: "store-1" },
+    ];
+    tableData.products = [
+      { id: "legacy-product", shopify_id: "legacy-1", user_id: "employee-1" },
+    ];
+    queryFailures = [
+      {
+        table: "products",
+        mode: "list",
+        filters: [{ type: "in", column: "store_id" }],
+        error: { message: "statement timeout" },
+      },
+    ];
+
+    const result = await Product.findByUser("employee-1");
+
+    expect(result).toEqual({
+      data: [
+        { id: "legacy-product", shopify_id: "legacy-1", user_id: "employee-1" },
+      ],
+      error: null,
+    });
+    expect(
+      executedQueries.some(
+        (query) =>
+          query.table === "products" &&
+          query.mode === "list" &&
+          query.filters.some(
+            (filter) =>
+              filter.type === "in" && filter.column === "store_id",
+          ),
+      ),
+    ).toBe(true);
+    expect(
+      executedQueries.some(
+        (query) =>
+          query.table === "products" &&
+          query.mode === "list" &&
+          query.filters.some(
+            (filter) =>
+              filter.type === "eq" &&
+              filter.column === "user_id" &&
+              filter.value === "employee-1",
+          ),
+      ),
+    ).toBe(true);
+  });
+
+  it("falls back to legacy user-scoped product lookup when store-scoped lookup fails", async () => {
+    tableData.user_stores = [
+      { user_id: "employee-1", store_id: "store-1" },
+    ];
+    tableData.products = [
+      { id: "legacy-product", shopify_id: "legacy-1", user_id: "employee-1" },
+    ];
+    queryFailures = [
+      {
+        table: "products",
+        mode: "maybeSingle",
+        filters: [{ type: "in", column: "store_id" }],
+        error: { message: "statement timeout" },
+      },
+    ];
+
+    const result = await Product.findByIdForUser("employee-1", "legacy-product");
+
+    expect(result).toEqual({
+      data: { id: "legacy-product", shopify_id: "legacy-1", user_id: "employee-1" },
+      error: null,
+    });
+    expect(
+      executedQueries.some(
+        (query) =>
+          query.table === "products" &&
+          query.mode === "maybeSingle" &&
+          query.filters.some(
+            (filter) =>
+              filter.type === "eq" &&
+              filter.column === "user_id" &&
+              filter.value === "employee-1",
+          ),
+      ),
+    ).toBe(true);
   });
 });

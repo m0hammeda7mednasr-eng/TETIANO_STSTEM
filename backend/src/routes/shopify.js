@@ -18,7 +18,6 @@ import {
 } from "../services/shopifyWebhookService.js";
 import { queueShopifyBackgroundSync } from "../services/shopifyBackgroundSyncService.js";
 import {
-  getUserRole,
   requireAdminRole,
   requirePermission,
 } from "../middleware/permissions.js";
@@ -322,17 +321,7 @@ const getRedirectUri = (req) => {
 const verifyToken = authenticateToken;
 
 const resolveIsAdmin = async (req) => {
-  if (req.user?.role === "admin") {
-    return true;
-  }
-
-  const role = await getUserRole(req.user?.id);
-  if (role === "admin") {
-    req.user.role = "admin";
-    return true;
-  }
-
-  return false;
+  return Boolean(req.user?.isAdmin || req.user?.role === "admin");
 };
 
 const getRequestedStoreId = (req) => {

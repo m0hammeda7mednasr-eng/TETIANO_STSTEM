@@ -22,12 +22,15 @@ import {
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
+import {
+  HEAVY_VIEW_CACHE_FRESH_MS,
+  shouldAutoRefreshView,
+} from "../utils/refreshPolicy";
 
 const CUSTOMERS_PAGE_SIZE = 200;
 const ORDERS_PAGE_SIZE = 200;
 const CUSTOMER_ORDER_SCAN_PAGES = 4;
-const CUSTOMERS_CACHE_FRESH_MS = 2 * 60 * 60 * 1000;
-const CUSTOMERS_BACKGROUND_REFRESH_MS = 2 * 60 * 60 * 1000;
+const CUSTOMERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const CURRENCY_LABEL = "LE";
 
 const toNumber = (value) => {
@@ -238,42 +241,54 @@ export default function Customers() {
         return;
       }
 
-      if (!isCacheFresh(cached, CUSTOMERS_CACHE_FRESH_MS)) {
+      const hasCachedRows =
+        Array.isArray(cached?.value?.customers) && cached.value.customers.length > 0;
+      if (!hasCachedRows && !isCacheFresh(cached, CUSTOMERS_CACHE_FRESH_MS)) {
         await fetchData({ silent: true });
       }
     })();
 
-    const unsubscribe = subscribeToSharedDataUpdates((event) => {
-      if (!isCustomersRelatedSharedUpdate(event)) {
-        return;
-      }
+    let unsubscribe = () => {};
+    let onFocus = null;
+    let interval = null;
 
-      fetchData({ silent: true });
-    });
+    if (shouldAutoRefreshView()) {
+      unsubscribe = subscribeToSharedDataUpdates((event) => {
+        if (!isCustomersRelatedSharedUpdate(event)) {
+          return;
+        }
 
-    const interval = setInterval(() => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
+        fetchData({ silent: true });
+      });
 
-      fetchData({ silent: true });
-    }, CUSTOMERS_BACKGROUND_REFRESH_MS);
+      interval = setInterval(() => {
+        if (document.visibilityState !== "visible") {
+          return;
+        }
 
-    const onFocus = async () => {
-      const cached = await readCachedView(cacheKey);
-      if (isCacheFresh(cached, CUSTOMERS_CACHE_FRESH_MS)) {
-        return;
-      }
+        fetchData({ silent: true });
+      }, CUSTOMERS_CACHE_FRESH_MS);
 
-      fetchData({ silent: true });
-    };
-    window.addEventListener("focus", onFocus);
+      onFocus = async () => {
+        const cached = await readCachedView(cacheKey);
+        if (isCacheFresh(cached, CUSTOMERS_CACHE_FRESH_MS)) {
+          return;
+        }
+
+        fetchData({ silent: true });
+      };
+      window.addEventListener("focus", onFocus);
+    }
 
     return () => {
       active = false;
-      clearInterval(interval);
+      if (interval) {
+        clearInterval(interval);
+      }
       unsubscribe();
-      window.removeEventListener("focus", onFocus);
+      if (onFocus) {
+        window.removeEventListener("focus", onFocus);
+      }
     };
   }, [cacheKey, fetchData]);
 

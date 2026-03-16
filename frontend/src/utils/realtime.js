@@ -1,4 +1,5 @@
 import { getEventsStreamUrl } from "./apiConfig";
+import { shouldAutoRefreshView } from "./refreshPolicy";
 
 const SHARED_DATA_EVENT_KEY = "shared_data_updated_at";
 const SHARED_DATA_EVENT_NAME = "tetiano_shared_data_updated";
@@ -173,7 +174,11 @@ export const markSharedDataUpdated = (detail = {}) => {
 };
 
 export const subscribeToSharedDataUpdates = (onUpdate) => {
-  if (!hasWindow() || typeof onUpdate !== "function") {
+  if (
+    !hasWindow() ||
+    typeof onUpdate !== "function" ||
+    !shouldAutoRefreshView()
+  ) {
     return () => {};
   }
 

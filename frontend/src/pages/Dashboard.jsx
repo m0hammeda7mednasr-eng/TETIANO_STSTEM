@@ -27,9 +27,13 @@ import {
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
+import {
+  HEAVY_VIEW_CACHE_FRESH_MS,
+  shouldAutoRefreshView,
+} from "../utils/refreshPolicy";
 
 const CURRENCY_LABEL = "LE";
-const DASHBOARD_CACHE_FRESH_MS = 60 * 1000;
+const DASHBOARD_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const EMPTY_DASHBOARD_STATS = {
   total_sales: 0,
   total_order_value: 0,
@@ -298,7 +302,8 @@ export default function Dashboard() {
         return;
       }
 
-      if (!isCacheFresh(cached, DASHBOARD_CACHE_FRESH_MS)) {
+      const hasCachedSnapshot = Boolean(snapshot);
+      if (!hasCachedSnapshot && !isCacheFresh(cached, DASHBOARD_CACHE_FRESH_MS)) {
         await loadData({ silent: Boolean(snapshot) });
       }
     })();
@@ -311,24 +316,31 @@ export default function Dashboard() {
   useEffect(() => {
     if (authLoading) return;
 
-    const unsubscribe = subscribeToSharedDataUpdates(() => {
-      loadData({ silent: true });
-    });
+    let unsubscribe = () => {};
+    let onFocus = null;
 
-    const onFocus = async () => {
-      const cached = await readCachedView(cacheKey);
-      if (isCacheFresh(cached, DASHBOARD_CACHE_FRESH_MS)) {
-        return;
-      }
+    if (shouldAutoRefreshView()) {
+      unsubscribe = subscribeToSharedDataUpdates(() => {
+        loadData({ silent: true });
+      });
 
-      loadData({ silent: true });
-    };
+      onFocus = async () => {
+        const cached = await readCachedView(cacheKey);
+        if (isCacheFresh(cached, DASHBOARD_CACHE_FRESH_MS)) {
+          return;
+        }
 
-    window.addEventListener("focus", onFocus);
+        loadData({ silent: true });
+      };
+
+      window.addEventListener("focus", onFocus);
+    }
 
     return () => {
       unsubscribe();
-      window.removeEventListener("focus", onFocus);
+      if (onFocus) {
+        window.removeEventListener("focus", onFocus);
+      }
     };
   }, [authLoading, cacheKey, loadData]);
 

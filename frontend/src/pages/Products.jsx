@@ -28,10 +28,13 @@ import {
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
+import {
+  HEAVY_VIEW_CACHE_FRESH_MS,
+  shouldAutoRefreshView,
+} from "../utils/refreshPolicy";
 
 const PRODUCTS_PAGE_SIZE = 200;
-const PRODUCTS_CACHE_FRESH_MS = 2 * 60 * 60 * 1000;
-const PRODUCTS_BACKGROUND_REFRESH_MS = 2 * 60 * 60 * 1000;
+const PRODUCTS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
@@ -269,42 +272,53 @@ export default function Products() {
         return;
       }
 
-      if (!isCacheFresh(cached, PRODUCTS_CACHE_FRESH_MS)) {
+      const hasCachedRows = Array.isArray(cached?.value?.rows) && cached.value.rows.length > 0;
+      if (!hasCachedRows && !isCacheFresh(cached, PRODUCTS_CACHE_FRESH_MS)) {
         await fetchProducts({ silent: true });
       }
     })();
 
-    const unsubscribe = subscribeToSharedDataUpdates((event) => {
-      if (!isProductsRelatedSharedUpdate(event)) {
-        return;
-      }
+    let unsubscribe = () => {};
+    let onFocus = null;
+    let interval = null;
 
-      fetchProducts({ silent: true });
-    });
+    if (shouldAutoRefreshView()) {
+      unsubscribe = subscribeToSharedDataUpdates((event) => {
+        if (!isProductsRelatedSharedUpdate(event)) {
+          return;
+        }
 
-    const interval = setInterval(() => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
+        fetchProducts({ silent: true });
+      });
 
-      fetchProducts({ silent: true });
-    }, PRODUCTS_BACKGROUND_REFRESH_MS);
+      interval = setInterval(() => {
+        if (document.visibilityState !== "visible") {
+          return;
+        }
 
-    const onFocus = async () => {
-      const cached = await readCachedView(cacheKey);
-      if (isCacheFresh(cached, PRODUCTS_CACHE_FRESH_MS)) {
-        return;
-      }
+        fetchProducts({ silent: true });
+      }, PRODUCTS_CACHE_FRESH_MS);
 
-      fetchProducts({ silent: true });
-    };
-    window.addEventListener("focus", onFocus);
+      onFocus = async () => {
+        const cached = await readCachedView(cacheKey);
+        if (isCacheFresh(cached, PRODUCTS_CACHE_FRESH_MS)) {
+          return;
+        }
+
+        fetchProducts({ silent: true });
+      };
+      window.addEventListener("focus", onFocus);
+    }
 
     return () => {
       active = false;
-      clearInterval(interval);
+      if (interval) {
+        clearInterval(interval);
+      }
       unsubscribe();
-      window.removeEventListener("focus", onFocus);
+      if (onFocus) {
+        window.removeEventListener("focus", onFocus);
+      }
     };
   }, [cacheKey, fetchProducts]);
 

@@ -15,6 +15,10 @@ import api from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
+  HEAVY_VIEW_CACHE_FRESH_MS,
+  shouldAutoRefreshView,
+} from "../utils/refreshPolicy";
+import {
   buildStoreScopedCacheKey,
   isCacheFresh,
   peekCachedView,
@@ -24,8 +28,7 @@ import {
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
 const ORDERS_PAGE_SIZE = 200;
-const ORDERS_CACHE_FRESH_MS = 2 * 60 * 60 * 1000;
-const ORDERS_BACKGROUND_REFRESH_MS = 2 * 60 * 60 * 1000;
+const ORDERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
@@ -318,43 +321,54 @@ export default function Orders() {
         return;
       }
 
-      if (!isCacheFresh(cached, ORDERS_CACHE_FRESH_MS)) {
+      const hasCachedRows = Array.isArray(cached?.value?.rows) && cached.value.rows.length > 0;
+      if (!hasCachedRows && !isCacheFresh(cached, ORDERS_CACHE_FRESH_MS)) {
         await fetchOrders({ silent: true });
       }
     })();
 
-    const unsubscribe = subscribeToSharedDataUpdates((event) => {
-      if (!isOrdersRelatedSharedUpdate(event)) {
-        return;
-      }
+    let unsubscribe = () => {};
+    let onFocus = null;
+    let interval = null;
 
-      setLastLiveEventAt(new Date());
-      scheduleSilentRefresh();
-    });
+    if (shouldAutoRefreshView()) {
+      unsubscribe = subscribeToSharedDataUpdates((event) => {
+        if (!isOrdersRelatedSharedUpdate(event)) {
+          return;
+        }
 
-    const interval = setInterval(() => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
+        setLastLiveEventAt(new Date());
+        scheduleSilentRefresh();
+      });
 
-      scheduleSilentRefresh();
-    }, ORDERS_BACKGROUND_REFRESH_MS);
+      interval = setInterval(() => {
+        if (document.visibilityState !== "visible") {
+          return;
+        }
 
-    const onFocus = async () => {
-      const cached = await readCachedView(cacheKey);
-      if (isCacheFresh(cached, ORDERS_CACHE_FRESH_MS)) {
-        return;
-      }
+        scheduleSilentRefresh();
+      }, ORDERS_CACHE_FRESH_MS);
 
-      scheduleSilentRefresh();
-    };
-    window.addEventListener("focus", onFocus);
+      onFocus = async () => {
+        const cached = await readCachedView(cacheKey);
+        if (isCacheFresh(cached, ORDERS_CACHE_FRESH_MS)) {
+          return;
+        }
+
+        scheduleSilentRefresh();
+      };
+      window.addEventListener("focus", onFocus);
+    }
 
     return () => {
       active = false;
-      clearInterval(interval);
+      if (interval) {
+        clearInterval(interval);
+      }
       unsubscribe();
-      window.removeEventListener("focus", onFocus);
+      if (onFocus) {
+        window.removeEventListener("focus", onFocus);
+      }
     };
   }, [cacheKey, fetchOrders, scheduleSilentRefresh]);
 

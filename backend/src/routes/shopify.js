@@ -1222,6 +1222,66 @@ const getFallbackOrdersPage = async (req) => {
   );
 };
 
+const getFallbackProductsPage = async (req) => {
+  const scopedRowsResult = await getScopedEntityRows(req, Product);
+  if (scopedRowsResult?.error) {
+    throw scopedRowsResult.error;
+  }
+
+  return applyProductsQueryFilters(scopedRowsResult?.data || [], req.query).map(
+    (product) => buildProductListItem(product, Boolean(req.user?.isAdmin)),
+  );
+};
+
+const applyCustomersQueryFilters = (rows, query = {}) => {
+  const sortBy = String(query.sort_by || "created_at").toLowerCase();
+  const sortDir =
+    String(query.sort_dir || "desc").toLowerCase() === "asc" ? 1 : -1;
+  const offset = Math.max(0, parseInt(query.offset, 10) || 0);
+  const limitValue = parseInt(query.limit, 10);
+  const limit =
+    Number.isFinite(limitValue) && limitValue > 0 ? limitValue : null;
+
+  const sorted = [...(rows || [])].sort((a, b) => {
+    if (sortBy === "total_spent") {
+      return (toNumber(a.total_spent) - toNumber(b.total_spent)) * sortDir;
+    }
+    if (sortBy === "orders_count") {
+      return (toNumber(a.orders_count) - toNumber(b.orders_count)) * sortDir;
+    }
+    if (sortBy === "name") {
+      return (
+        String(a.name || "").localeCompare(String(b.name || "")) * sortDir
+      );
+    }
+    if (sortBy === "email") {
+      return (
+        String(a.email || "").localeCompare(String(b.email || "")) * sortDir
+      );
+    }
+
+    return (
+      (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) *
+      sortDir
+    );
+  });
+
+  if (limit === null) {
+    return sorted;
+  }
+
+  return sorted.slice(offset, offset + limit);
+};
+
+const getFallbackCustomersPage = async (req) => {
+  const scopedRowsResult = await getScopedEntityRows(req, Customer);
+  if (scopedRowsResult?.error) {
+    throw scopedRowsResult.error;
+  }
+
+  return applyCustomersQueryFilters(scopedRowsResult?.data || [], req.query);
+};
+
 const applyOrdersQueryFilters = (rows, query = {}) => {
   let filtered = [...(rows || [])];
 
@@ -2194,6 +2254,14 @@ router.get(
       });
       if (error) {
         console.error("Error fetching products:", error);
+        try {
+          const fallbackProducts = await getFallbackProductsPage(req);
+          res.setHeader("X-Products-Fallback", "scoped_rows");
+          return res.json(buildPaginatedCollection(fallbackProducts, pagination));
+        } catch (fallbackError) {
+          console.error("Fallback products query failed:", fallbackError);
+        }
+
         return res.status(500).json({ error: error.message });
       }
       console.log(
@@ -2271,24 +2339,18 @@ router.get(
 
       if (error) {
         console.error("Error fetching orders:", error);
-
-        if (
-          isSchemaCompatibilityError(error) ||
-          isQueryRetryableError(error)
-        ) {
-          try {
-            const fallbackOrders = await getFallbackOrdersPage(req);
-            if (liveSyncResult) {
-              res.setHeader(
-                "X-Orders-Live-Sync",
-                liveSyncResult.reason || "attempted",
-              );
-            }
-            res.setHeader("X-Orders-Fallback", "scoped_rows");
-            return res.json(buildPaginatedCollection(fallbackOrders, pagination));
-          } catch (fallbackError) {
-            console.error("Fallback orders query failed:", fallbackError);
+        try {
+          const fallbackOrders = await getFallbackOrdersPage(req);
+          if (liveSyncResult) {
+            res.setHeader(
+              "X-Orders-Live-Sync",
+              liveSyncResult.reason || "attempted",
+            );
           }
+          res.setHeader("X-Orders-Fallback", "scoped_rows");
+          return res.json(buildPaginatedCollection(fallbackOrders, pagination));
+        } catch (fallbackError) {
+          console.error("Fallback orders query failed:", fallbackError);
         }
 
         return res.status(500).json({ error: error.message });
@@ -2335,6 +2397,14 @@ router.get(
       });
       if (error) {
         console.error("Error fetching customers:", error);
+        try {
+          const fallbackCustomers = await getFallbackCustomersPage(req);
+          res.setHeader("X-Customers-Fallback", "scoped_rows");
+          return res.json(buildPaginatedCollection(fallbackCustomers, pagination));
+        } catch (fallbackError) {
+          console.error("Fallback customers query failed:", fallbackError);
+        }
+
         return res.status(500).json({ error: error.message });
       }
       console.log(

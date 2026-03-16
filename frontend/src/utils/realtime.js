@@ -1,3 +1,5 @@
+import { getEventsStreamUrl } from "./apiConfig";
+
 const SHARED_DATA_EVENT_KEY = "shared_data_updated_at";
 const SHARED_DATA_EVENT_NAME = "tetiano_shared_data_updated";
 const SHARED_DATA_CHANNEL_NAME = "tetiano_shared_data_channel";
@@ -5,11 +7,7 @@ const RECONNECT_DELAY_MS = 4000;
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const API_BASE =
-  process.env.REACT_APP_API_BASE_URL ||
-  process.env.REACT_APP_API_URL ||
-  "http://localhost:5000/api";
-const EVENTS_STREAM_URL = `${String(API_BASE).replace(/\/+$/, "")}/events/stream`;
+const EVENTS_STREAM_URL = getEventsStreamUrl();
 
 let subscriberCount = 0;
 let eventSource = null;

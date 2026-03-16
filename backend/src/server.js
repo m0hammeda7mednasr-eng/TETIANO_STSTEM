@@ -26,6 +26,7 @@ import { startShopifyBackgroundSync } from "./services/shopifyBackgroundSyncServ
 const app = express();
 const PORT = process.env.PORT || 5000;
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const isDevelopment = process.env.NODE_ENV === "development";
 
 // Middleware
 app.use(
@@ -131,12 +132,13 @@ app.use((req, res) => {
 // Error Handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res
-    .status(500)
-    .json({ error: "Internal server error", message: err.message });
+  res.status(500).json({
+    error: "Internal server error",
+    ...(isDevelopment ? { message: err.message } : {}),
+  });
 });
 
 app.listen(PORT, () => {
   startShopifyBackgroundSync();
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });

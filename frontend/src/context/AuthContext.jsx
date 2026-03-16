@@ -9,7 +9,7 @@ import React, {
 import api from "../utils/api";
 
 const AuthContext = createContext(null);
-const AUTH_REFRESH_INTERVAL_MS = 120000;
+const AUTH_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const MIN_AUTH_REFRESH_GAP_MS = 5000;
 const DEFAULT_CLIENT_PERMISSIONS = {
   can_view_dashboard: true,

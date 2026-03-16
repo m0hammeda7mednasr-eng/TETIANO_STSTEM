@@ -61,6 +61,19 @@ const getOrderFinancialStatus = (order) => {
     .toLowerCase()
     .trim();
 };
+const isCustomersRelatedSharedUpdate = (event) => {
+  const source = String(event?.source || "").toLowerCase();
+  if (!source) {
+    return true;
+  }
+
+  return (
+    source.includes("/shopify/customers") ||
+    source.includes("/customers/") ||
+    source.includes("/shopify/orders") ||
+    source.includes("/orders/")
+  );
+};
 
 export default function Customers() {
   const { hasPermission } = useAuth();
@@ -230,7 +243,11 @@ export default function Customers() {
       }
     })();
 
-    const unsubscribe = subscribeToSharedDataUpdates(() => {
+    const unsubscribe = subscribeToSharedDataUpdates((event) => {
+      if (!isCustomersRelatedSharedUpdate(event)) {
+        return;
+      }
+
       fetchData({ silent: true });
     });
 

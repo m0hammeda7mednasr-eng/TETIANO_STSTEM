@@ -1,12 +1,8 @@
 import axios from "axios";
 import { markSharedDataUpdated } from "./realtime";
+import { resolveApiBase } from "./apiConfig";
 
-const API_BASE =
-  process.env.REACT_APP_API_BASE_URL ||
-  process.env.REACT_APP_API_URL ||
-  (process.env.NODE_ENV === "production"
-    ? "https://api.tetiano.me/api"
-    : "http://localhost:5000/api");
+const API_BASE = resolveApiBase();
 const DEFAULT_API_TIMEOUT_MS = 60 * 1000;
 const SHOPIFY_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
 const UUID_REGEX =
@@ -66,7 +62,10 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => {
     if (shouldBroadcastMutation(response)) {
-      markSharedDataUpdated();
+      markSharedDataUpdated({
+        source: String(response?.config?.url || ""),
+        method: String(response?.config?.method || "").toUpperCase(),
+      });
     }
 
     return response;

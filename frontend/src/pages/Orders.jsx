@@ -69,6 +69,18 @@ const normalizeOrderState = (value) =>
   String(value || "")
     .toLowerCase()
     .trim();
+const isOrdersRelatedSharedUpdate = (event) => {
+  const source = String(event?.source || "").toLowerCase();
+  if (!source) {
+    return true;
+  }
+
+  return (
+    source.includes("/shopify/orders") ||
+    source.includes("/orders/") ||
+    source.includes("/order-comments")
+  );
+};
 
 const getOrderMeta = (order) => {
   const paymentStatus = normalizeOrderState(
@@ -311,7 +323,11 @@ export default function Orders() {
       }
     })();
 
-    const unsubscribe = subscribeToSharedDataUpdates(() => {
+    const unsubscribe = subscribeToSharedDataUpdates((event) => {
+      if (!isOrdersRelatedSharedUpdate(event)) {
+        return;
+      }
+
       setLastLiveEventAt(new Date());
       scheduleSilentRefresh();
     });

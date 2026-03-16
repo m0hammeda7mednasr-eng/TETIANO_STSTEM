@@ -3,6 +3,8 @@ import { supabase } from "../supabaseClient.js";
 const sortByCreatedAtDesc = { ascending: false };
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 const SHOPIFY_UPSERT_BATCH_SIZE = 200;
+const ACCESSIBLE_STORE_IDS_CACHE_TTL_MS = 60 * 1000;
+const accessibleStoreIdsCache = new Map();
 
 const isSchemaCompatibilityError = (error) => {
   if (!error) return false;
@@ -95,6 +97,37 @@ const getUniqueStoreIds = (rows) =>
         .filter((value) => value !== null && value !== undefined),
     ),
   );
+
+const getCachedAccessibleStoreIds = (userId) => {
+  const cacheKey = String(userId || "").trim();
+  if (!cacheKey) {
+    return null;
+  }
+
+  const cachedEntry = accessibleStoreIdsCache.get(cacheKey);
+  if (!cachedEntry) {
+    return null;
+  }
+
+  if (Date.now() - cachedEntry.updatedAt > ACCESSIBLE_STORE_IDS_CACHE_TTL_MS) {
+    accessibleStoreIdsCache.delete(cacheKey);
+    return null;
+  }
+
+  return [...cachedEntry.storeIds];
+};
+
+const rememberAccessibleStoreIds = (userId, storeIds) => {
+  const cacheKey = String(userId || "").trim();
+  if (!cacheKey) {
+    return;
+  }
+
+  accessibleStoreIdsCache.set(cacheKey, {
+    storeIds: Array.isArray(storeIds) ? [...storeIds] : [],
+    updatedAt: Date.now(),
+  });
+};
 
 const getAccessibleStoreIdsSafe = async (userId) => {
   try {
@@ -333,6 +366,11 @@ const upsertRowsWithManualFallback = async (tableName, rows, itemLabel) => {
 export const getAccessibleStoreIds = async (userId) => {
   if (!userId) return [];
 
+  const cachedStoreIds = getCachedAccessibleStoreIds(userId);
+  if (cachedStoreIds) {
+    return cachedStoreIds;
+  }
+
   try {
     // Try user_stores table first
     try {
@@ -349,6 +387,7 @@ export const getAccessibleStoreIds = async (userId) => {
       ) {
         const directStoreIds = getUniqueStoreIds(directAccessRows);
         if (directStoreIds.length > 0) {
+          rememberAccessibleStoreIds(userId, directStoreIds);
           return directStoreIds;
         }
       }
@@ -367,6 +406,7 @@ export const getAccessibleStoreIds = async (userId) => {
       if (!ownedTokenError && ownedTokenRows && ownedTokenRows.length > 0) {
         const ownedStoreIds = getUniqueStoreIds(ownedTokenRows);
         if (ownedStoreIds.length > 0) {
+          rememberAccessibleStoreIds(userId, ownedStoreIds);
           return ownedStoreIds;
         }
       }
@@ -403,12 +443,13 @@ export const getAccessibleStoreIds = async (userId) => {
         inferredResults.flatMap((result) => result?.data || []),
       );
       if (inferredStoreIds.length > 0) {
+        rememberAccessibleStoreIds(userId, inferredStoreIds);
         return inferredStoreIds;
       }
     } catch (inferenceError) {
       console.log("Store inference fallback failed:", inferenceError.message);
     }
-
+    rememberAccessibleStoreIds(userId, []);
     return [];
   } catch (error) {
     console.error("getAccessibleStoreIds error:", error);

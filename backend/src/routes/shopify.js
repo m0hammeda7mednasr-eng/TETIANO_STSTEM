@@ -31,8 +31,8 @@ const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
-const DEFAULT_LIST_LIMIT = 100;
-const MAX_LIST_LIMIT = 100;
+const DEFAULT_LIST_LIMIT = 200;
+const MAX_LIST_LIMIT = 200;
 const PAID_LIKE_STATUSES = new Set([
   "paid",
   "partially_paid",

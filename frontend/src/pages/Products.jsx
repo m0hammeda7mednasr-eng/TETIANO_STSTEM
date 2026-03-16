@@ -101,6 +101,14 @@ const getProfitabilityState = (product) => {
   if (profit < 0) return "loss";
   return "break_even";
 };
+const isProductsRelatedSharedUpdate = (event) => {
+  const source = String(event?.source || "").toLowerCase();
+  if (!source) {
+    return true;
+  }
+
+  return source.includes("/shopify/products") || source.includes("/products/");
+};
 
 export default function Products() {
   const navigate = useNavigate();
@@ -266,7 +274,11 @@ export default function Products() {
       }
     })();
 
-    const unsubscribe = subscribeToSharedDataUpdates(() => {
+    const unsubscribe = subscribeToSharedDataUpdates((event) => {
+      if (!isProductsRelatedSharedUpdate(event)) {
+        return;
+      }
+
       fetchProducts({ silent: true });
     });
 

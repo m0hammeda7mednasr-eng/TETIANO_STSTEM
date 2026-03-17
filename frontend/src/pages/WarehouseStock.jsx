@@ -19,6 +19,7 @@ import { warehouseAPI } from "../utils/api";
 import { formatCurrency, formatDateTime } from "../utils/helpers";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
+import { extractObject } from "../utils/response";
 
 const PAGE_LIMIT = 100;
 
@@ -86,6 +87,7 @@ export default function WarehouseStock() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [setupNotice, setSetupNotice] = useState("");
 
   const deferredSearchTerm = useDeferredValue(searchTerm);
 
@@ -93,9 +95,12 @@ export default function WarehouseStock() {
     if (!silent) {
       setLoading(true);
       setError("");
+      setSetupNotice("");
     }
 
     try {
+      let schemaReady = true;
+      let setupMessage = "";
       const products = await fetchAllPagesProgressively(
         ({ limit, offset }) =>
           warehouseAPI.getStock({
@@ -106,13 +111,24 @@ export default function WarehouseStock() {
           }),
         {
           limit: PAGE_LIMIT,
-          onPage: ({ rows: accumulatedRows }) => {
+          onPage: ({ rows: accumulatedRows, payload }) => {
             setRows(accumulatedRows);
+            const responsePayload = extractObject(payload);
+            if (
+              responsePayload?.schema_ready === false ||
+              responsePayload?.setup_required
+            ) {
+              schemaReady = false;
+              setupMessage =
+                responsePayload?.message ||
+                "Warehouse is not configured yet on the database.";
+            }
           },
         },
       );
 
       setRows(products);
+      setSetupNotice(schemaReady ? "" : setupMessage);
       setLastUpdatedAt(new Date());
     } catch (requestError) {
       console.error("Error fetching warehouse stock:", requestError);
@@ -205,6 +221,18 @@ export default function WarehouseStock() {
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-2 text-red-700">
               <AlertCircle size={18} />
               {error}
+            </div>
+          )}
+
+          {setupNotice && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-2 text-amber-800">
+              <ShieldAlert size={18} className="mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold">Warehouse setup required</p>
+                <p className="text-sm mt-1">
+                  {setupNotice}. Stock pages will stay empty until the warehouse tables are created.
+                </p>
+              </div>
             </div>
           )}
 

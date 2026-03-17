@@ -391,6 +391,11 @@ export default function Products() {
       }
 
       const hasCachedRows = Array.isArray(cached?.value?.rows) && cached.value.rows.length > 0;
+      if (productsRef.current.length === 0) {
+        await fetchProducts({ silent: true });
+        return;
+      }
+
       if (!hasCachedRows && !isCacheFresh(cached, PRODUCTS_CACHE_FRESH_MS)) {
         await fetchProducts({ silent: true });
       }
@@ -1032,15 +1037,7 @@ export default function Products() {
                   className="bg-white rounded-xl shadow hover:shadow-xl transition overflow-hidden border border-slate-100"
                 >
                   <div className="relative h-52 bg-gradient-to-br from-slate-100 via-slate-50 to-slate-200 flex items-center justify-center">
-                    {variant.image_url ? (
-                      <img
-                        src={variant.image_url}
-                        alt={`${variant.product_title} ${variant.variant_title}`}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <Package size={56} className="text-slate-400" />
-                    )}
+                    <VariantImage variant={variant} />
                     {getSyncStatusIcon(variant) && (
                       <div className="absolute top-3 left-3 bg-white/90 rounded-full p-2 shadow-sm">
                         {getSyncStatusIcon(variant)}
@@ -1213,6 +1210,26 @@ function DetailItem({ label, value, valueClassName = "" }) {
         {value}
       </p>
     </div>
+  );
+}
+
+function VariantImage({ variant }) {
+  const [hasError, setHasError] = useState(false);
+  const imageUrl = String(variant?.image_url || "").trim();
+
+  if (!imageUrl || hasError) {
+    return <Package size={56} className="text-slate-400" />;
+  }
+
+  return (
+    <img
+      src={imageUrl}
+      alt={`${variant?.product_title || "Product"} ${variant?.variant_title || ""}`.trim()}
+      className="w-full h-full object-cover"
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setHasError(true)}
+    />
   );
 }
 

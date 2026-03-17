@@ -12,7 +12,7 @@ import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { warehouseAPI } from "../utils/api";
 import { formatDateTime } from "../utils/helpers";
-import { extractArray } from "../utils/response";
+import { extractArray, extractObject } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
 const toNumber = (value) => {
@@ -38,10 +38,12 @@ export default function WarehouseScanner() {
   const [recentScans, setRecentScans] = useState([]);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [lastResult, setLastResult] = useState(null);
+  const [setupNotice, setSetupNotice] = useState("");
 
   const fetchRecentScans = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
       setLoadingScans(true);
+      setSetupNotice("");
     }
 
     try {
@@ -49,8 +51,15 @@ export default function WarehouseScanner() {
         limit: 20,
         offset: 0,
       });
+      const payload = extractObject(response?.data);
       const rows = extractArray(response?.data);
       setRecentScans(rows);
+      if (payload?.schema_ready === false || payload?.setup_required) {
+        setSetupNotice(
+          payload?.message ||
+            "Warehouse is not configured yet on the database.",
+        );
+      }
       setLastUpdatedAt(new Date());
     } catch (requestError) {
       console.error("Error fetching recent scans:", requestError);
@@ -132,6 +141,7 @@ export default function WarehouseScanner() {
     movementType === "in"
       ? "bg-emerald-600 hover:bg-emerald-700 border-emerald-600"
       : "bg-rose-600 hover:bg-rose-700 border-rose-600";
+  const scannerLocked = Boolean(setupNotice);
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -166,6 +176,18 @@ export default function WarehouseScanner() {
 
           <div className="grid grid-cols-1 xl:grid-cols-[1.15fr,0.85fr] gap-6">
             <section className="space-y-4">
+              {setupNotice && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-2 text-amber-800">
+                  <AlertCircle size={18} className="mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Warehouse setup required</p>
+                    <p className="text-sm mt-1">
+                      {setupNotice}. Scanner actions will stay disabled until the warehouse tables are created.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
                 <div className="flex flex-wrap gap-3">
                   <ToggleButton
@@ -185,6 +207,12 @@ export default function WarehouseScanner() {
                 </div>
 
                 <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+                  {scannerLocked && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      Warehouse tables are not deployed yet, so scan actions are temporarily disabled.
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
                       كود السكان / SKU
@@ -197,6 +225,7 @@ export default function WarehouseScanner() {
                       placeholder="اسكان أو اكتب SKU هنا"
                       className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg"
                       autoComplete="off"
+                      disabled={scannerLocked}
                     />
                   </div>
 
@@ -212,6 +241,7 @@ export default function WarehouseScanner() {
                         value={quantity}
                         onChange={(event) => setQuantity(event.target.value)}
                         className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
+                        disabled={scannerLocked}
                       />
                     </div>
 
@@ -225,13 +255,14 @@ export default function WarehouseScanner() {
                         onChange={(event) => setNote(event.target.value)}
                         placeholder="اختياري: مرتجع، تحويل، جرد..."
                         className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
+                        disabled={scannerLocked}
                       />
                     </div>
                   </div>
 
                   <button
                     type="submit"
-                    disabled={submitting || !scanCode.trim()}
+                    disabled={submitting || scannerLocked || !scanCode.trim()}
                     className={`w-full text-white px-4 py-3 rounded-xl border flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed ${modeClassName}`}
                   >
                     {movementType === "in" ? <ArrowDown size={18} /> : <ArrowUp size={18} />}

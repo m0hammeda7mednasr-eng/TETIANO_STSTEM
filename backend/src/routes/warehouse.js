@@ -131,6 +131,15 @@ const buildPaginatedCollection = (rows, { limit, offset }) => {
   };
 };
 
+const buildWarehouseSetupResponse = ({ limit, offset, storeId, message }) => ({
+  ...buildPaginatedCollection([], { limit, offset }),
+  store_id: storeId || null,
+  generated_at: new Date().toISOString(),
+  schema_ready: false,
+  setup_required: true,
+  message,
+});
+
 const getAdminStoreIds = async () => {
   const strategies = [
     async () => {
@@ -443,9 +452,14 @@ router.get("/stock", async (req, res) => {
     console.error("Error fetching warehouse stock:", error);
 
     if (isSchemaCompatibilityError(error)) {
-      return res.status(503).json({
-        error: "Warehouse tables are not deployed yet",
-      });
+      return res.json(
+        buildWarehouseSetupResponse({
+          limit: getPagination(req.query).limit,
+          offset: getPagination(req.query).offset,
+          storeId: getRequestedStoreId(req),
+          message: "Warehouse tables are not deployed yet",
+        }),
+      );
     }
 
     res.status(error.status || 500).json({
@@ -481,9 +495,14 @@ router.get("/scans", async (req, res) => {
     console.error("Error fetching warehouse scans:", error);
 
     if (isSchemaCompatibilityError(error)) {
-      return res.status(503).json({
-        error: "Warehouse tables are not deployed yet",
-      });
+      return res.json(
+        buildWarehouseSetupResponse({
+          limit: getPagination(req.query).limit,
+          offset: getPagination(req.query).offset,
+          storeId: getRequestedStoreId(req),
+          message: "Warehouse tables are not deployed yet",
+        }),
+      );
     }
 
     res.status(error.status || 500).json({

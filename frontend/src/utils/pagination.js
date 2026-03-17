@@ -43,6 +43,8 @@ export const fetchAllPagesProgressively = async (
         pageIndex,
         pagination,
         hasMore,
+        payload,
+        response,
       });
       if (shouldContinue === false) {
         break;

@@ -11,6 +11,7 @@ export default function ProductEditModal({
 }) {
   const hasMultipleVariants = Boolean(product.has_multiple_variants);
   const [price, setPrice] = useState(product.price || "");
+  const [sku, setSku] = useState(product.sku || "");
   const [costPrice, setCostPrice] = useState(
     canEditCost ? product.cost_price || "" : "",
   );
@@ -39,6 +40,7 @@ export default function ProductEditModal({
     try {
       const payload = {
         price: parseFloat(price),
+        sku: String(sku || "").trim(),
       };
 
       if (!hasMultipleVariants) {
@@ -91,6 +93,19 @@ export default function ProductEditModal({
               step="0.01"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="0.00"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              SKU
+            </label>
+            <input
+              type="text"
+              value={sku}
+              onChange={(e) => setSku(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="SKU-001"
             />
           </div>
 

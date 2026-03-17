@@ -1404,6 +1404,37 @@ const getOrderCustomerShopifyId = (order) => {
   return String(order?.customer_id || data?.customer?.id || "").trim();
 };
 
+const getOrderLineItems = (order) => {
+  const parsedData = parseJsonField(order?.data);
+  return Array.isArray(parsedData?.line_items) ? parsedData.line_items : [];
+};
+
+const getOrderLineItemImageUrl = (item) => {
+  const propertyImageUrl = Array.isArray(item?.properties)
+    ? item.properties.find((entry) => String(entry?.name || "").trim() === "_image_url")?.value
+    : "";
+
+  return String(
+    propertyImageUrl ||
+      item?.image_url ||
+      item?.image?.src ||
+      item?.image?.url ||
+      item?.featured_image?.src ||
+      item?.featured_image?.url ||
+      "",
+  ).trim();
+};
+
+const buildOrderItemPreviews = (order) =>
+  getOrderLineItems(order)
+    .slice(0, 4)
+    .map((item) => ({
+      id: item?.id || null,
+      title: item?.title || item?.name || "",
+      quantity: toNumber(item?.quantity),
+      image_url: getOrderLineItemImageUrl(item),
+    }));
+
 const buildOrderListItem = (order) => {
   const parsedData = parseJsonField(order?.data);
   const financialStatus = getOrderFinancialStatus(order);
@@ -1454,6 +1485,7 @@ const buildOrderListItem = (order) => {
     sync_error: order?.sync_error || "",
     items_count: itemsCount,
     customer_shopify_id: getOrderCustomerShopifyId(order),
+    item_previews: buildOrderItemPreviews(order),
     financial_status: financialStatus,
     fulfillment_status: fulfillmentStatus,
     payment_method: resolveOrderPaymentMethod(order),
@@ -3375,7 +3407,7 @@ router.post(
   async (req, res) => {
     try {
       const isAdmin = await resolveIsAdmin(req);
-      const { price, cost_price, inventory, variant_updates } = req.body;
+      const { price, cost_price, inventory, sku, variant_updates } = req.body;
       const productId = req.params.id;
       const userId = req.user.id;
 
@@ -3392,11 +3424,41 @@ router.post(
         updates.cost_price = parseFloat(cost_price);
       if (inventory !== undefined && inventory !== null)
         updates.inventory = parseInt(inventory);
+      if (Object.prototype.hasOwnProperty.call(req.body, "sku")) {
+        updates.sku = String(sku ?? "").trim();
+      }
       if (Array.isArray(variant_updates) && variant_updates.length > 0) {
-        updates.variant_updates = variant_updates.map((variantUpdate) => ({
-          id: variantUpdate?.id,
-          inventory_quantity: parseInt(variantUpdate?.inventory_quantity),
-        }));
+        updates.variant_updates = variant_updates.map((variantUpdate) => {
+          const nextVariantUpdate = {
+            id: variantUpdate?.id,
+          };
+
+          if (
+            Object.prototype.hasOwnProperty.call(
+              variantUpdate || {},
+              "inventory_quantity",
+            )
+          ) {
+            nextVariantUpdate.inventory_quantity = parseInt(
+              variantUpdate?.inventory_quantity,
+              10,
+            );
+          }
+
+          if (
+            Object.prototype.hasOwnProperty.call(variantUpdate || {}, "price")
+          ) {
+            nextVariantUpdate.price = parseFloat(variantUpdate?.price);
+          }
+
+          if (
+            Object.prototype.hasOwnProperty.call(variantUpdate || {}, "sku")
+          ) {
+            nextVariantUpdate.sku = String(variantUpdate?.sku ?? "").trim();
+          }
+
+          return nextVariantUpdate;
+        });
       }
 
       if (Object.keys(updates).length === 0) {
@@ -3652,7 +3714,7 @@ router.post(
   requirePermission("can_edit_orders"),
   async (req, res) => {
     try {
-      const { fulfillment_status } = req.body;
+      const { fulfillment_status, line_items } = req.body;
       const orderId = req.params.id;
       const userId = req.user.id;
 
@@ -3664,6 +3726,14 @@ router.post(
         userId,
         orderId,
         fulfillment_status,
+        {
+          lineItems: Array.isArray(line_items)
+            ? line_items.map((item) => ({
+                id: item?.id ?? item?.line_item_id,
+                quantity: item?.quantity,
+              }))
+            : [],
+        },
       );
       res.json(result);
     } catch (error) {

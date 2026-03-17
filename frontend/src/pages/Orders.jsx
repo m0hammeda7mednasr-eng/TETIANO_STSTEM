@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   Clock3,
+  Download,
   Eye,
+  Package,
   RefreshCw,
   RotateCcw,
   Search,
@@ -11,6 +13,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import OrdersExportPanel from "../components/OrdersExportPanel";
 import api from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
@@ -161,6 +164,8 @@ export default function Orders() {
   const [orders, setOrders] = useState(() => initialCachedSnapshot.rows);
   const [missingOrderIds, setMissingOrderIds] = useState([]);
   const [filters, setFilters] = useState(INITIAL_FILTERS);
+  const [selectedOrderIds, setSelectedOrderIds] = useState([]);
+  const [isExportPanelOpen, setIsExportPanelOpen] = useState(false);
   const [, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(
@@ -421,6 +426,11 @@ export default function Orders() {
     [missingOrderIds],
   );
 
+  const selectedOrderIdSet = useMemo(
+    () => new Set(selectedOrderIds),
+    [selectedOrderIds],
+  );
+
   const ordersWithMeta = useMemo(
     () =>
       orders.map((order) => ({
@@ -561,6 +571,40 @@ export default function Orders() {
     return result;
   }, [filters, missingOrderIdSet, ordersWithMeta]);
 
+  const selectableOrders = useMemo(
+    () =>
+      ordersWithMeta.filter(
+        (order) => !missingOrderIdSet.has(String(order?.id || "").trim()),
+      ),
+    [missingOrderIdSet, ordersWithMeta],
+  );
+
+  const selectedOrders = useMemo(
+    () =>
+      selectableOrders.filter((order) =>
+        selectedOrderIdSet.has(String(order?.id || "").trim()),
+      ),
+    [selectableOrders, selectedOrderIdSet],
+  );
+
+  useEffect(() => {
+    const selectableOrderIds = new Set(
+      selectableOrders
+        .map((order) => String(order?.id || "").trim())
+        .filter(Boolean),
+    );
+
+    setSelectedOrderIds((current) =>
+      current.filter((orderId) => selectableOrderIds.has(orderId)),
+    );
+  }, [selectableOrders]);
+
+  const allFilteredOrdersSelected =
+    filteredOrders.length > 0 &&
+    filteredOrders.every((order) =>
+      selectedOrderIdSet.has(String(order?.id || "").trim()),
+    );
+
   const summary = useMemo(() => {
     const totalOrderValue = filteredOrders.reduce(
       (sum, order) => sum + order._meta.totalPrice,
@@ -594,6 +638,44 @@ export default function Orders() {
 
   const resetFilters = () => {
     setFilters(INITIAL_FILTERS);
+  };
+
+  const toggleOrderSelection = (orderId) => {
+    const normalizedOrderId = String(orderId || "").trim();
+    if (!normalizedOrderId) {
+      return;
+    }
+
+    setSelectedOrderIds((current) =>
+      current.includes(normalizedOrderId)
+        ? current.filter((value) => value !== normalizedOrderId)
+        : [...current, normalizedOrderId],
+    );
+  };
+
+  const clearSelectedOrders = () => {
+    setSelectedOrderIds([]);
+  };
+
+  const toggleSelectAllFilteredOrders = () => {
+    const filteredOrderIds = filteredOrders
+      .map((order) => String(order?.id || "").trim())
+      .filter(Boolean);
+
+    if (filteredOrderIds.length === 0) {
+      return;
+    }
+
+    if (allFilteredOrdersSelected) {
+      setSelectedOrderIds((current) =>
+        current.filter((orderId) => !filteredOrderIds.includes(orderId)),
+      );
+      return;
+    }
+
+    setSelectedOrderIds((current) =>
+      Array.from(new Set([...current, ...filteredOrderIds])),
+    );
   };
 
   const formatDate = (dateString) => {
@@ -639,6 +721,62 @@ export default function Orders() {
     return "bg-slate-100 text-slate-700";
   };
 
+  const renderOrderItemPreview = (order) => {
+    const previews = Array.isArray(order?.item_previews)
+      ? order.item_previews.filter(
+          (item) =>
+            item &&
+            (String(item.image_url || "").trim() || String(item.title || "").trim()),
+        )
+      : [];
+
+    if (previews.length === 0) {
+      return (
+        <span className="text-sm text-slate-700">
+          {toNumber(order.items_count).toLocaleString()}
+        </span>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-3">
+        <div className="flex -space-x-2">
+          {previews.slice(0, 3).map((item, index) => (
+            <div
+              key={`${item.id || item.title || "item"}-${index}`}
+              className="h-10 w-10 overflow-hidden rounded-full border-2 border-white bg-slate-100 shadow-sm"
+              title={item.title || "Order item"}
+            >
+              {String(item.image_url || "").trim() ? (
+                <img
+                  src={item.image_url}
+                  alt={item.title || "Order item"}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-slate-400">
+                  <Package size={16} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-800">
+            {toNumber(order.items_count).toLocaleString()} item(s)
+          </p>
+          <p className="truncate text-xs text-slate-500">
+            {previews
+              .slice(0, 2)
+              .map((item) => item.title)
+              .filter(Boolean)
+              .join(", ")}
+          </p>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen bg-slate-100">
       <Sidebar />
@@ -670,15 +808,31 @@ export default function Orders() {
                   )}
                 </div>
               </div>
-              <button
-                onClick={() => fetchOrders({ forceSync: true })}
-                className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
-              >
-                <RefreshCw size={18} />
-                Refresh
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => fetchOrders({ forceSync: true })}
+                  className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
+                >
+                  <RefreshCw size={18} />
+                  Refresh
+                </button>
+                <button
+                  onClick={() => setIsExportPanelOpen((current) => !current)}
+                  className="border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 px-4 py-2 rounded-lg flex items-center gap-2"
+                >
+                  <Download size={18} />
+                  {isExportPanelOpen ? "Hide Export" : "Export"}
+                </button>
+              </div>
             </div>
           </div>
+
+          <OrdersExportPanel
+            isOpen={isExportPanelOpen}
+            filteredOrders={filteredOrders}
+            selectedOrders={selectedOrders}
+            onClearSelectedOrders={clearSelectedOrders}
+          />
 
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-2 text-red-700">
@@ -966,10 +1120,45 @@ export default function Orders() {
           </div>
 
           <div className="bg-white rounded-xl shadow overflow-hidden border border-slate-200">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-4">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Orders Table</p>
+                <p className="text-xs text-slate-500">
+                  {filteredOrders.length.toLocaleString()} filtered orders,{" "}
+                  {selectedOrders.length.toLocaleString()} selected for export.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={toggleSelectAllFilteredOrders}
+                  disabled={filteredOrders.length === 0}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {allFilteredOrdersSelected ? "Unselect filtered" : "Select filtered"}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelectedOrders}
+                  disabled={selectedOrders.length === 0}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Clear selected
+                </button>
+              </div>
+            </div>
+
             <div className="hidden lg:block overflow-x-auto">
-              <table className="data-table w-full min-w-[1220px]">
+              <table className="data-table w-full min-w-[1280px]">
                 <thead>
                   <tr className="bg-slate-50 border-b">
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={allFilteredOrdersSelected}
+                        onChange={toggleSelectAllFilteredOrders}
+                      />
+                    </th>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
                       Order
                     </th>
@@ -1005,7 +1194,7 @@ export default function Orders() {
                 <tbody>
                   {loadStatus.active && orders.length === 0 ? (
                     <tr>
-                      <td colSpan="10" className="px-6 py-10 text-center text-slate-500">
+                      <td colSpan="11" className="px-6 py-10 text-center text-slate-500">
                         Latest orders will appear here automatically.
                       </td>
                     </tr>
@@ -1016,6 +1205,13 @@ export default function Orders() {
                         className="border-b hover:bg-slate-50 transition cursor-pointer"
                         onClick={() => navigate(`/orders/${order.id}`)}
                       >
+                        <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedOrderIdSet.has(String(order?.id || "").trim())}
+                            onChange={() => toggleOrderSelection(order.id)}
+                          />
+                        </td>
                         <td className="px-4 py-3 text-sm font-semibold text-slate-800">
                           #{order.order_number || order.shopify_id}
                         </td>
@@ -1026,7 +1222,7 @@ export default function Orders() {
                           <p className="text-xs text-slate-500">{order.customer_email || "-"}</p>
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-700">
-                          {toNumber(order.items_count).toLocaleString()}
+                          {renderOrderItemPreview(order)}
                         </td>
                         <td className="px-4 py-3 text-sm font-semibold text-slate-800">
                           {formatAmount(order._meta.totalPrice)}
@@ -1094,7 +1290,7 @@ export default function Orders() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="10" className="px-6 py-12 text-center text-slate-500">
+                      <td colSpan="11" className="px-6 py-12 text-center text-slate-500">
                         <ShoppingCart size={44} className="mx-auto mb-3 text-slate-300" />
                         <p className="font-semibold mb-1">No matching orders found</p>
                         <p className="text-sm">Try adjusting or resetting filters.</p>
@@ -1129,6 +1325,15 @@ export default function Orders() {
                       </button>
                     </div>
 
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={selectedOrderIdSet.has(String(order?.id || "").trim())}
+                        onChange={() => toggleOrderSelection(order.id)}
+                      />
+                      Select for export
+                    </label>
+
                     <div>
                       <p className="text-sm font-medium text-slate-800">
                         {order.customer_name || "Unknown"}
@@ -1136,25 +1341,28 @@ export default function Orders() {
                       <p className="text-xs text-slate-500">{order.customer_email || "-"}</p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <p className="text-slate-600">
-                        Items:{" "}
-                        <span className="font-medium text-slate-900">
-                          {toNumber(order.items_count).toLocaleString()}
-                        </span>
-                      </p>
-                      <p className="text-slate-600">
-                        Total:{" "}
-                        <span className="font-medium text-slate-900">
-                          {formatAmount(order._meta.totalPrice)}
-                        </span>
-                      </p>
-                      <p className="text-slate-600">
-                        Date:{" "}
-                        <span className="font-medium text-slate-900">
-                          {formatDate(order.created_at)}
-                        </span>
-                      </p>
+                    <div className="space-y-3">
+                      <div>{renderOrderItemPreview(order)}</div>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <p className="text-slate-600">
+                          Items:{" "}
+                          <span className="font-medium text-slate-900">
+                            {toNumber(order.items_count).toLocaleString()}
+                          </span>
+                        </p>
+                        <p className="text-slate-600">
+                          Total:{" "}
+                          <span className="font-medium text-slate-900">
+                            {formatAmount(order._meta.totalPrice)}
+                          </span>
+                        </p>
+                        <p className="text-slate-600">
+                          Date:{" "}
+                          <span className="font-medium text-slate-900">
+                            {formatDate(order.created_at)}
+                          </span>
+                        </p>
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap gap-2">

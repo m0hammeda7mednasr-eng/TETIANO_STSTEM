@@ -14,8 +14,9 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
-import { suppliersAPI } from "../utils/api";
+import api, { getErrorMessage, suppliersAPI } from "../utils/api";
 import { formatCurrency, formatDateTime } from "../utils/helpers";
+import { fetchAllPages } from "../utils/pagination";
 import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
@@ -32,30 +33,51 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const PAYMENT_METHOD_LABELS = {
+  bank_transfer: "تحويل بنكي",
+  cash: "كاش",
+  wallet: "محفظة",
+  instapay: "إنستاباي",
+  other: "أخرى",
+};
+const PRODUCTS_PAGE_SIZE = 200;
+const DEFAULT_VARIANT_TITLES = new Set(["default", "default title"]);
+const normalizeText = (value) => String(value || "").trim();
 const formatCount = (value) => toNumber(value).toLocaleString("ar-EG");
 const getTodayValue = () => new Date().toISOString().slice(0, 10);
+const formatPaymentMethodLabel = (value) =>
+  PAYMENT_METHOD_LABELS[normalizeText(value).toLowerCase()] || normalizeText(value) || "-";
+const normalizeVariantTitle = (value) => {
+  const normalized = normalizeText(value);
+  if (!normalized || DEFAULT_VARIANT_TITLES.has(normalized.toLowerCase())) {
+    return "";
+  }
+
+  return normalized;
+};
+const buildCatalogOptionValue = (productId, variantId = "") =>
+  `${normalizeText(productId)}::${normalizeText(variantId)}`;
+const getDeliveryItemSelectionValue = (item) =>
+  buildCatalogOptionValue(item?.product_id, item?.variant_id);
 
 const createEmptySupplierForm = () => ({
   code: "",
   name: "",
   contact_name: "",
   phone: "",
-  email: "",
   address: "",
-  payment_terms: "",
-  bank_name: "",
-  account_holder: "",
-  account_number: "",
-  iban: "",
-  wallet_number: "",
   notes: "",
   opening_balance: "",
   is_active: true,
 });
 
 const createEmptyDeliveryItem = () => ({
+  product_id: "",
+  variant_id: "",
+  variant_title: "",
   product_name: "",
   sku: "",
+  catalog_query: "",
   material: "",
   quantity: "1",
   unit_cost: "",
@@ -68,8 +90,6 @@ const createEmptyDeliveryForm = () => ({
   reference_code: "",
   description: "",
   notes: "",
-  payment_method: "bank_transfer",
-  payment_account: "",
   items: [createEmptyDeliveryItem()],
 });
 
@@ -78,7 +98,7 @@ const createEmptyPaymentForm = () => ({
   reference_code: "",
   description: "",
   notes: "",
-  payment_method: "bank_transfer",
+  payment_method: "cash",
   payment_account: "",
   amount: "",
 });
@@ -97,14 +117,7 @@ const buildSupplierFormFromRecord = (supplier) => ({
   name: supplier?.name || "",
   contact_name: supplier?.contact_name || "",
   phone: supplier?.phone || "",
-  email: supplier?.email || "",
   address: supplier?.address || "",
-  payment_terms: supplier?.payment_terms || "",
-  bank_name: supplier?.bank_name || "",
-  account_holder: supplier?.account_holder || "",
-  account_number: supplier?.account_number || "",
-  iban: supplier?.iban || "",
-  wallet_number: supplier?.wallet_number || "",
   notes: supplier?.notes || "",
   opening_balance:
     supplier?.opening_balance !== null && supplier?.opening_balance !== undefined
@@ -115,27 +128,98 @@ const buildSupplierFormFromRecord = (supplier) => ({
 
 const isSuppliersRelatedUpdate = (event) =>
   String(event?.source || "").toLowerCase().includes("/suppliers");
+const isProductsRelatedUpdate = (event) => {
+  const source = String(event?.source || "").toLowerCase();
+  return source.includes("/shopify/products") || source.includes("/products/");
+};
+const buildProductCatalogOptions = (products = []) => {
+  const options = [];
+
+  for (const product of products) {
+    const productId = normalizeText(product?.id || product?.shopify_id);
+    const productTitle = normalizeText(product?.title) || "منتج بدون اسم";
+    const variants =
+      Array.isArray(product?.variants) && product.variants.length > 0
+        ? product.variants
+        : [{ id: "", sku: product?.sku || "", inventory_quantity: product?.inventory_quantity ?? 0 }];
+
+    for (const variant of variants) {
+      const variantId = normalizeText(variant?.id);
+      const variantTitle = normalizeVariantTitle(variant?.title);
+      const sku = normalizeText(variant?.sku || product?.sku);
+      const displayName = [productTitle, variantTitle].filter(Boolean).join(" - ");
+
+      options.push({
+        value: buildCatalogOptionValue(productId, variantId),
+        product_id: productId,
+        variant_id: variantId,
+        variant_title: variantTitle,
+        product_name: productTitle,
+        sku,
+        inventory_quantity: toNumber(
+          variant?.inventory_quantity ?? product?.inventory_quantity,
+        ),
+        label: sku ? `${displayName} | ${sku}` : displayName,
+        searchText: [productTitle, variantTitle, product?.vendor, product?.product_type, sku]
+          .join(" ")
+          .toLowerCase(),
+      });
+    }
+  }
+
+  return options.sort((left, right) => left.label.localeCompare(right.label, "ar"));
+};
+const filterCatalogOptions = (options, query, limit = 80) => {
+  const keyword = normalizeText(query).toLowerCase();
+  const filtered = keyword
+    ? options.filter((option) => option.searchText.includes(keyword))
+    : options;
+  return filtered.slice(0, limit);
+};
+const isDeliveryItemDirty = (item) =>
+  Boolean(
+    normalizeText(item?.product_name) ||
+      normalizeText(item?.catalog_query) ||
+      normalizeText(item?.material) ||
+      normalizeText(item?.unit_cost) ||
+      normalizeText(item?.total_cost) ||
+      normalizeText(item?.notes) ||
+      normalizeText(item?.sku) ||
+      (normalizeText(item?.quantity) && normalizeText(item?.quantity) !== "1"),
+  );
 
 export default function Suppliers() {
   const { hasPermission } = useAuth();
-  const canEditProducts = hasPermission("can_edit_products");
+  const canManageSuppliers = hasPermission("can_edit_products");
 
   const [suppliers, setSuppliers] = useState([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [error, setError] = useState("");
+  const [catalogError, setCatalogError] = useState("");
   const [message, setMessage] = useState({ type: "", text: "" });
   const [showSupplierForm, setShowSupplierForm] = useState(false);
   const [editingSupplierId, setEditingSupplierId] = useState("");
   const [supplierForm, setSupplierForm] = useState(createEmptySupplierForm);
   const [deliveryForm, setDeliveryForm] = useState(createEmptyDeliveryForm);
   const [paymentForm, setPaymentForm] = useState(createEmptyPaymentForm);
+  const [productCatalogRows, setProductCatalogRows] = useState([]);
   const [savingSupplier, setSavingSupplier] = useState(false);
   const [savingDelivery, setSavingDelivery] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
+
+  const productCatalogOptions = useMemo(
+    () => buildProductCatalogOptions(productCatalogRows),
+    [productCatalogRows],
+  );
+  const productCatalogByValue = useMemo(
+    () => new Map(productCatalogOptions.map((option) => [option.value, option])),
+    [productCatalogOptions],
+  );
 
   const loadSuppliers = useCallback(async () => {
     try {
@@ -158,6 +242,7 @@ export default function Suppliers() {
       setError(
         requestError?.response?.data?.error || "فشل تحميل بيانات الموردين",
       );
+      setError(getErrorMessage(requestError));
     } finally {
       setLoading(false);
     }
@@ -182,12 +267,51 @@ export default function Suppliers() {
       setError(
         requestError?.response?.data?.error || "فشل تحميل تفاصيل المورد",
       );
+      setError(getErrorMessage(requestError));
     } finally {
       if (!silent) {
         setDetailLoading(false);
       }
     }
   }, []);
+
+  const loadProductCatalog = useCallback(async ({ silent = false } = {}) => {
+    if (!canManageSuppliers) {
+      setProductCatalogRows([]);
+      setCatalogError("");
+      return;
+    }
+
+    try {
+      if (!silent) {
+        setCatalogLoading(true);
+      }
+      setCatalogError("");
+
+      const rows = await fetchAllPages(
+        ({ limit, offset }) =>
+          api.get("/shopify/products", {
+            params: {
+              limit,
+              offset,
+              sort_by: "title",
+              sort_dir: "asc",
+            },
+          }),
+        { limit: PRODUCTS_PAGE_SIZE },
+      );
+
+      setProductCatalogRows(rows);
+    } catch (requestError) {
+      console.error("Error loading supplier product catalog:", requestError);
+      setProductCatalogRows([]);
+      setCatalogError(getErrorMessage(requestError));
+    } finally {
+      if (!silent) {
+        setCatalogLoading(false);
+      }
+    }
+  }, [canManageSuppliers]);
 
   useEffect(() => {
     loadSuppliers();
@@ -198,19 +322,25 @@ export default function Suppliers() {
   }, [loadSupplierDetail, selectedSupplierId]);
 
   useEffect(() => {
+    loadProductCatalog();
+  }, [loadProductCatalog]);
+
+  useEffect(() => {
     const unsubscribe = subscribeToSharedDataUpdates((event) => {
-      if (!isSuppliersRelatedUpdate(event)) {
-        return;
+      if (isSuppliersRelatedUpdate(event)) {
+        loadSuppliers();
+        if (selectedSupplierId) {
+          loadSupplierDetail(selectedSupplierId, { silent: true });
+        }
       }
 
-      loadSuppliers();
-      if (selectedSupplierId) {
-        loadSupplierDetail(selectedSupplierId, { silent: true });
+      if (isProductsRelatedUpdate(event)) {
+        loadProductCatalog({ silent: true });
       }
     });
 
     return () => unsubscribe();
-  }, [loadSupplierDetail, loadSuppliers, selectedSupplierId]);
+  }, [loadProductCatalog, loadSupplierDetail, loadSuppliers, selectedSupplierId]);
 
   const filteredSuppliers = useMemo(() => {
     const keyword = String(searchTerm || "").trim().toLowerCase();
@@ -224,7 +354,7 @@ export default function Suppliers() {
         supplier?.code,
         supplier?.contact_name,
         supplier?.phone,
-        supplier?.email,
+        supplier?.address,
       ].some((value) => String(value || "").toLowerCase().includes(keyword)),
     );
   }, [searchTerm, suppliers]);
@@ -330,6 +460,40 @@ export default function Suppliers() {
     }));
   };
 
+  const selectDeliveryProduct = (index, selectedValue) => {
+    const selectedOption = productCatalogByValue.get(selectedValue);
+
+    setDeliveryForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) => {
+        if (itemIndex !== index) {
+          return item;
+        }
+
+        if (!selectedOption) {
+          return {
+            ...item,
+            product_id: "",
+            variant_id: "",
+            variant_title: "",
+            product_name: "",
+            sku: "",
+          };
+        }
+
+        return {
+          ...item,
+          product_id: selectedOption.product_id,
+          variant_id: selectedOption.variant_id,
+          variant_title: selectedOption.variant_title,
+          product_name: selectedOption.product_name,
+          sku: selectedOption.sku,
+          catalog_query: selectedOption.label,
+        };
+      }),
+    }));
+  };
+
   const addDeliveryItem = () => {
     setDeliveryForm((current) => ({
       ...current,
@@ -353,17 +517,28 @@ export default function Suppliers() {
       return;
     }
 
-    const normalizedItems = deliveryForm.items.filter(
-      (item) =>
-        String(item?.product_name || "").trim() ||
-        String(item?.sku || "").trim() ||
-        String(item?.material || "").trim(),
-    );
+    const normalizedItems = deliveryForm.items.filter(isDeliveryItemDirty);
 
     if (normalizedItems.length === 0) {
       setMessage({
         type: "error",
         text: "أضف منتجًا واحدًا على الأقل داخل الوارد",
+      });
+      return;
+    }
+
+    if (normalizedItems.some((item) => !normalizeText(item?.product_name))) {
+      setMessage({
+        type: "error",
+        text: "اختر منتجًا من القائمة لكل صنف قبل حفظ الوارد",
+      });
+      return;
+    }
+
+    if (normalizedItems.some((item) => toNumber(item?.quantity) <= 0)) {
+      setMessage({
+        type: "error",
+        text: "كمية كل صنف يجب أن تكون أكبر من صفر",
       });
       return;
     }
@@ -423,7 +598,254 @@ export default function Suppliers() {
     }
   };
 
-  return (
+  if (typeof window !== "undefined") {
+    return (
+    <div className="flex min-h-screen bg-slate-100">
+      <Sidebar />
+
+      <main className="flex-1 overflow-auto">
+        <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h1 className="flex items-center gap-3 text-3xl font-bold text-slate-900">
+                  <Truck className="text-sky-700" size={28} />
+                  الموردون والحسابات
+                </h1>
+                <p className="mt-2 text-slate-600">
+                  ملف المورد يركز على البيانات الأساسية، بينما تفاصيل الواردات والدفعات
+                  تُسجل داخل الحركات بكل تفاصيلها.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={loadSuppliers}
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-white hover:bg-slate-950"
+                >
+                  <RefreshCw size={18} />
+                  تحديث
+                </button>
+                {canManageSuppliers ? (
+                  <button
+                    onClick={startCreatingSupplier}
+                    className="inline-flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-white hover:bg-sky-800"
+                  >
+                    <Plus size={18} />
+                    مورد جديد
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          {error ? (
+            <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-700">
+              <AlertCircle size={18} />
+              {error}
+            </div>
+          ) : null}
+
+          {message.text ? (
+            <div
+              className={`flex items-center gap-2 rounded-xl border p-4 ${
+                message.type === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-amber-200 bg-amber-50 text-amber-700"
+              }`}
+            >
+              {message.type === "success" ? (
+                <CheckCircle2 size={18} />
+              ) : (
+                <AlertCircle size={18} />
+              )}
+              {message.text}
+            </div>
+          ) : null}
+
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <SummaryCard
+              title="إجمالي الموردين"
+              value={formatCount(summary.total_suppliers)}
+              subtitle={`${formatCount(summary.active_suppliers)} مورد نشط`}
+              icon={Building2}
+              tone="sky"
+            />
+            <SummaryCard
+              title="إجمالي الوارد"
+              value={formatCurrency(summary.total_deliveries)}
+              subtitle="قيمة كل الشحنات المسجلة"
+              icon={Package}
+              tone="blue"
+            />
+            <SummaryCard
+              title="إجمالي المدفوع"
+              value={formatCurrency(summary.total_payments)}
+              subtitle="كل الدفعات المسجلة للموردين"
+              icon={Wallet}
+              tone="emerald"
+            />
+            <SummaryCard
+              title="الرصيد المستحق"
+              value={formatCurrency(summary.outstanding_balance)}
+              subtitle="المتبقي على حساب الموردين"
+              icon={CreditCard}
+              tone="amber"
+            />
+          </section>
+
+          <section className="grid gap-6 xl:grid-cols-12">
+            <div className="space-y-6 xl:col-span-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="relative">
+                  <Search
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    size={16}
+                  />
+                  <input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="ابحث باسم المورد أو الكود أو الهاتف"
+                    className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-3 focus:border-sky-400 focus:outline-none"
+                  />
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {loading ? (
+                    <EmptyState text="جاري تحميل الموردين..." />
+                  ) : filteredSuppliers.length === 0 ? (
+                    <EmptyState text="لا يوجد موردون مطابقون للبحث الحالي." />
+                  ) : (
+                    filteredSuppliers.map((supplier) => {
+                      const isActive = supplier.id === selectedSupplierId;
+
+                      return (
+                        <button
+                          key={supplier.id}
+                          onClick={() => setSelectedSupplierId(supplier.id)}
+                          className={`w-full rounded-2xl border p-4 text-right transition ${
+                            isActive
+                              ? "border-sky-300 bg-sky-50 shadow-sm"
+                              : "border-slate-200 bg-white hover:border-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-base font-semibold text-slate-900">
+                                {supplier.name}
+                              </div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                الكود: {supplier.code || "-"}
+                              </div>
+                            </div>
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                                supplier.is_active !== false
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {supplier.is_active !== false ? "نشط" : "مؤرشف"}
+                            </span>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600">
+                            <KeyValueCompact label="الوارد" value={formatCurrency(supplier.total_deliveries)} />
+                            <KeyValueCompact label="المدفوع" value={formatCurrency(supplier.total_payments)} />
+                            <KeyValueCompact label="الرصيد" value={formatCurrency(supplier.outstanding_balance)} />
+                            <KeyValueCompact label="الكمية" value={formatCount(supplier.received_quantity)} />
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {canManageSuppliers ? (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-semibold text-slate-900">
+                        {editingSupplierId ? "تعديل المورد" : "إضافة مورد"}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        بيانات المورد الأساسية فقط. تفاصيل الدفع تُسجل داخل الدفعات.
+                      </p>
+                    </div>
+                    {showSupplierForm ? (
+                      <button
+                        onClick={closeSupplierForm}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                      >
+                        إغلاق
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {!showSupplierForm ? (
+                    <div className="space-y-3">
+                      <button
+                        onClick={startCreatingSupplier}
+                        className="w-full rounded-xl bg-sky-700 px-4 py-3 text-sm font-medium text-white hover:bg-sky-800"
+                      >
+                        إنشاء مورد جديد
+                      </button>
+                      {selectedSupplier ? (
+                        <button
+                          onClick={startEditingSupplier}
+                          className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          تعديل المورد الحالي
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <SupplierForm
+                      form={supplierForm}
+                      setForm={setSupplierForm}
+                      saving={savingSupplier}
+                      onSave={saveSupplier}
+                    />
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="space-y-6 xl:col-span-8">
+              {renderDetails({
+                selectedSupplierId,
+                selectedSupplier,
+                detailLoading,
+                canEditProducts: canManageSuppliers,
+                startEditingSupplier,
+                deliveryForm,
+                setDeliveryForm,
+                updateDeliveryItem,
+                selectDeliveryProduct,
+                removeDeliveryItem,
+                addDeliveryItem,
+                saveDelivery,
+                savingDelivery,
+                paymentForm,
+                setPaymentForm,
+                savePayment,
+                savingPayment,
+                catalogLoading,
+                catalogError,
+                productCatalogOptions,
+                productCatalogByValue,
+              })}
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    );
+  }
+
+  if (typeof window !== "undefined") {
+    return (
     <div className="flex min-h-screen bg-slate-100">
       <Sidebar />
 
@@ -450,7 +872,7 @@ export default function Suppliers() {
                   <RefreshCw size={18} />
                   تحديث
                 </button>
-                {canEditProducts && (
+                {canManageSuppliers && (
                   <button
                     onClick={startCreatingSupplier}
                     className="inline-flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-white hover:bg-sky-800"
@@ -597,7 +1019,7 @@ export default function Suppliers() {
                 </div>
               </div>
 
-              {canEditProducts && (
+              {canManageSuppliers && (
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <div>
@@ -652,11 +1074,12 @@ export default function Suppliers() {
                 selectedSupplierId,
                 selectedSupplier,
                 detailLoading,
-                canEditProducts,
+                canEditProducts: canManageSuppliers,
                 startEditingSupplier,
                 deliveryForm,
                 setDeliveryForm,
                 updateDeliveryItem,
+                selectDeliveryProduct,
                 removeDeliveryItem,
                 addDeliveryItem,
                 saveDelivery,
@@ -665,6 +1088,10 @@ export default function Suppliers() {
                 setPaymentForm,
                 savePayment,
                 savingPayment,
+                catalogLoading,
+                catalogError,
+                productCatalogOptions,
+                productCatalogByValue,
               })}
             </div>
           </section>
@@ -683,6 +1110,7 @@ function renderDetails({
   deliveryForm,
   setDeliveryForm,
   updateDeliveryItem,
+  selectDeliveryProduct,
   removeDeliveryItem,
   addDeliveryItem,
   saveDelivery,
@@ -691,6 +1119,10 @@ function renderDetails({
   setPaymentForm,
   savePayment,
   savingPayment,
+  catalogLoading,
+  catalogError,
+  productCatalogOptions,
+  productCatalogByValue,
 }) {
   if (!selectedSupplierId) {
     return (
@@ -716,7 +1148,134 @@ function renderDetails({
     );
   }
 
-  return (
+  if (typeof window !== "undefined") {
+    return (
+    <>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <SummaryCard
+          title="إجمالي الوارد"
+          value={formatCurrency(selectedSupplier.total_deliveries)}
+          subtitle={`${formatCount(selectedSupplier.deliveries_count)} حركة وارد`}
+          icon={Package}
+          tone="blue"
+        />
+        <SummaryCard
+          title="إجمالي المدفوع"
+          value={formatCurrency(selectedSupplier.total_payments)}
+          subtitle={`${formatCount(selectedSupplier.payments_count)} دفعة`}
+          icon={Wallet}
+          tone="emerald"
+        />
+        <SummaryCard
+          title="الرصيد الحالي"
+          value={formatCurrency(selectedSupplier.outstanding_balance)}
+          subtitle={`رصيد افتتاحي ${formatCurrency(selectedSupplier.opening_balance)}`}
+          icon={CreditCard}
+          tone="amber"
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <SectionCard
+          title={selectedSupplier.name}
+          subtitle={`الكود: ${selectedSupplier.code || "-"}`}
+          action={
+            canEditProducts ? (
+              <button
+                onClick={startEditingSupplier}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                تعديل المورد
+              </button>
+            ) : null
+          }
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <DetailLine label="المسؤول" value={selectedSupplier.contact_name} />
+            <DetailLine label="الهاتف" value={selectedSupplier.phone} />
+            <DetailLine label="العنوان" value={selectedSupplier.address} />
+            <DetailLine
+              label="الحالة"
+              value={selectedSupplier.is_active !== false ? "نشط" : "مؤرشف"}
+            />
+            <DetailLine
+              label="آخر وارد"
+              value={formatDateTime(selectedSupplier.last_delivery_at)}
+            />
+            <DetailLine
+              label="آخر دفعة"
+              value={formatDateTime(selectedSupplier.last_payment_at)}
+            />
+          </div>
+          {selectedSupplier.notes ? (
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+              {selectedSupplier.notes}
+            </div>
+          ) : null}
+        </SectionCard>
+
+        <SectionCard
+          title="ملخص المتابعة"
+          subtitle="الكميات والحساب الحالي لهذا المورد"
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <DetailLine
+              label="الأصناف المستلمة"
+              value={formatCount(selectedSupplier.received_items_count)}
+            />
+            <DetailLine
+              label="إجمالي الكمية"
+              value={formatCount(selectedSupplier.received_quantity)}
+            />
+            <DetailLine
+              label="إجمالي الوارد"
+              value={formatCurrency(selectedSupplier.total_deliveries)}
+            />
+            <DetailLine
+              label="إجمالي المدفوع"
+              value={formatCurrency(selectedSupplier.total_payments)}
+            />
+          </div>
+        </SectionCard>
+      </div>
+
+      {canEditProducts ? (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <DeliveryForm
+            form={deliveryForm}
+            setForm={setDeliveryForm}
+            updateItem={updateDeliveryItem}
+            selectProduct={selectDeliveryProduct}
+            removeItem={removeDeliveryItem}
+            addItem={addDeliveryItem}
+            onSave={saveDelivery}
+            saving={savingDelivery}
+            catalogLoading={catalogLoading}
+            catalogError={catalogError}
+            catalogOptions={productCatalogOptions}
+            catalogByValue={productCatalogByValue}
+          />
+          <PaymentForm
+            form={paymentForm}
+            setForm={setPaymentForm}
+            onSave={savePayment}
+            saving={savingPayment}
+          />
+        </div>
+      ) : null}
+
+      <ReceivedItemsTable items={selectedSupplier.received_items || []} />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <PaymentsList payments={selectedSupplier.payments || []} />
+        <EntriesTimeline entries={selectedSupplier.entries || []} />
+      </div>
+    </>
+    );
+  }
+
+  if (typeof window !== "undefined") {
+    return (
     <>
       <div className="grid gap-4 lg:grid-cols-3">
         <SummaryCard
@@ -824,6 +1383,34 @@ function renderDetails({
 }
 
 function SupplierForm({ form, setForm, saving, onSave }) {
+  if (typeof window !== "undefined") {
+    return (
+    <div className="space-y-3">
+      <div className="grid gap-3 md:grid-cols-2">
+        <TextInput label="اسم المورد" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} />
+        <TextInput label="الكود" value={form.code} onChange={(value) => setForm((current) => ({ ...current, code: value }))} />
+        <TextInput label="اسم المسؤول" value={form.contact_name} onChange={(value) => setForm((current) => ({ ...current, contact_name: value }))} />
+        <TextInput label="الهاتف" value={form.phone} onChange={(value) => setForm((current) => ({ ...current, phone: value }))} />
+        <TextInput label="العنوان" value={form.address} onChange={(value) => setForm((current) => ({ ...current, address: value }))} />
+        <TextInput label="الرصيد الافتتاحي" type="number" value={form.opening_balance} onChange={(value) => setForm((current) => ({ ...current, opening_balance: value }))} />
+      </div>
+      <TextArea label="ملاحظات" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+      <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
+        <input type="checkbox" checked={form.is_active} onChange={(event) => setForm((current) => ({ ...current, is_active: event.target.checked }))} />
+        المورد نشط ويظهر في القائمة
+      </label>
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Save size={18} />
+        {saving ? "جارٍ الحفظ..." : "حفظ بيانات المورد"}
+      </button>
+    </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       <div className="grid gap-3 md:grid-cols-2">
@@ -858,7 +1445,120 @@ function SupplierForm({ form, setForm, saving, onSave }) {
   );
 }
 
-function DeliveryForm({ form, setForm, updateItem, removeItem, addItem, onSave, saving }) {
+function DeliveryForm({
+  form,
+  setForm,
+  updateItem,
+  selectProduct,
+  removeItem,
+  addItem,
+  onSave,
+  saving,
+  catalogLoading,
+  catalogError,
+  catalogOptions,
+  catalogByValue,
+}) {
+  return (
+    <SectionCard
+      title="تسجيل وارد جديد"
+      subtitle="اختر الأصناف من قائمة منتجات المتجر ثم أضف الكمية والتكلفة"
+      action={
+        <span className="text-xs text-slate-500">
+          {catalogLoading
+            ? "جاري تحميل المنتجات..."
+            : `${formatCount(catalogOptions.length)} منتج متاح`}
+        </span>
+      }
+    >
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <TextInput label="تاريخ الوارد" type="date" value={form.entry_date} onChange={(value) => setForm((current) => ({ ...current, entry_date: value }))} />
+          <TextInput label="رقم المرجع" value={form.reference_code} onChange={(value) => setForm((current) => ({ ...current, reference_code: value }))} />
+        </div>
+        <TextInput label="وصف سريع" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} />
+        {catalogError ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+            {catalogError}
+          </div>
+        ) : null}
+        <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          {form.items.map((item, index) => {
+            const filteredOptions = filterCatalogOptions(catalogOptions, item.catalog_query);
+            const selectedOption = catalogByValue.get(getDeliveryItemSelectionValue(item));
+
+            return (
+              <div key={`delivery-item-${index}`} className="rounded-2xl border border-slate-200 bg-white p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-medium text-slate-800">صنف الوارد #{index + 1}</div>
+                  {form.items.length > 1 ? (
+                    <button onClick={() => removeItem(index)} className="text-xs text-rose-600 hover:text-rose-700">
+                      حذف
+                    </button>
+                  ) : null}
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <TextInput label="ابحث بالاسم أو SKU" value={item.catalog_query} onChange={(value) => updateItem(index, "catalog_query", value)} />
+                  <SelectInput
+                    label="اختر المنتج"
+                    value={getDeliveryItemSelectionValue(item)}
+                    disabled={catalogLoading}
+                    options={[
+                      {
+                        value: "",
+                        label: catalogLoading
+                          ? "جاري تحميل المنتجات..."
+                          : filteredOptions.length > 0
+                            ? "اختر منتجًا من القائمة"
+                            : "لا توجد نتائج مطابقة",
+                      },
+                      ...filteredOptions.map((option) => ({
+                        value: option.value,
+                        label: option.label,
+                      })),
+                    ]}
+                    onChange={(value) => selectProduct(index, value)}
+                  />
+                  <TextInput label="الخامة أو الوصف الفني" value={item.material} onChange={(value) => updateItem(index, "material", value)} />
+                  <TextInput label="الكمية" type="number" value={item.quantity} onChange={(value) => updateItem(index, "quantity", value)} />
+                  <TextInput label="سعر الوحدة" type="number" value={item.unit_cost} onChange={(value) => updateItem(index, "unit_cost", value)} />
+                  <TextInput label="الإجمالي" type="number" value={item.total_cost} onChange={(value) => updateItem(index, "total_cost", value)} />
+                </div>
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                  <div className="text-xs text-slate-500">المنتج المختار</div>
+                  <div className="mt-1 font-medium text-slate-900">{item.product_name || "-"}</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {item.variant_title || "بدون متغير"}
+                    {item.sku ? ` | SKU: ${item.sku}` : ""}
+                    {selectedOption ? ` | المخزون الحالي: ${formatCount(selectedOption.inventory_quantity)}` : ""}
+                  </div>
+                </div>
+                <TextInput label="ملاحظات الصنف" value={item.notes} onChange={(value) => updateItem(index, "notes", value)} />
+                <div className="mt-2 text-xs text-slate-500">
+                  الإجمالي المحسوب: {formatCurrency(getDeliveryItemTotal(item))}
+                </div>
+              </div>
+            );
+          })}
+          <button onClick={addItem} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
+            <Plus size={16} />
+            إضافة صنف جديد
+          </button>
+        </div>
+        <TextArea label="ملاحظات الوارد" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Save size={18} />
+          {saving ? "جارٍ الحفظ..." : "حفظ الوارد"}
+        </button>
+      </div>
+    </SectionCard>
+    );
+  }
+
   return (
     <SectionCard title="تسجيل وارد جديد" subtitle="أضف المنتجات التي وصلت من المورد وتكلفتها">
       <div className="space-y-3">
@@ -913,6 +1613,42 @@ function DeliveryForm({ form, setForm, updateItem, removeItem, addItem, onSave, 
 
 function PaymentForm({ form, setForm, onSave, saving }) {
   return (
+    <SectionCard
+      title="تسجيل دفعة"
+      subtitle="سجل كل دفعة بطريقة السداد والحساب المستخدم وتفاصيل المرجع"
+    >
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <TextInput label="تاريخ الدفعة" type="date" value={form.entry_date} onChange={(value) => setForm((current) => ({ ...current, entry_date: value }))} />
+          <TextInput label="رقم المرجع" value={form.reference_code} onChange={(value) => setForm((current) => ({ ...current, reference_code: value }))} />
+          <TextInput label="المبلغ" type="number" value={form.amount} onChange={(value) => setForm((current) => ({ ...current, amount: value }))} />
+          <SelectInput
+            label="طريقة الدفع"
+            value={form.payment_method}
+            options={PAYMENT_METHOD_OPTIONS.map((option) => ({
+              ...option,
+              label: PAYMENT_METHOD_LABELS[option.value] || option.label,
+            }))}
+            onChange={(value) => setForm((current) => ({ ...current, payment_method: value }))}
+          />
+          <TextInput label="الحساب المستخدم" value={form.payment_account} onChange={(value) => setForm((current) => ({ ...current, payment_account: value }))} />
+          <TextInput label="وصف سريع" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} />
+        </div>
+        <TextArea label="ملاحظات الدفعة" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Save size={18} />
+          {saving ? "جارٍ الحفظ..." : "حفظ الدفعة"}
+        </button>
+      </div>
+    </SectionCard>
+    );
+  }
+
+  return (
     <SectionCard title="تسجيل دفعة" subtitle="سجل كل دفعة وحسابها وطريقة السداد">
       <div className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -959,7 +1695,10 @@ function ReceivedItemsTable({ items }) {
               {items.map((item, index) => (
                 <tr key={`${item.delivery_id}-${item.sku}-${index}`} className="border-b border-slate-100 text-slate-700">
                   <td className="px-3 py-3">{formatDateTime(item.entry_date)}</td>
-                  <td className="px-3 py-3 font-medium text-slate-900">{item.product_name}</td>
+                  <td className="px-3 py-3 font-medium text-slate-900">
+                    <div>{item.product_name}</div>
+                    <div className="mt-1 text-xs text-slate-500">{item.variant_title || "-"}</div>
+                  </td>
                   <td className="px-3 py-3">{item.sku || "-"}</td>
                   <td className="px-3 py-3">{item.material || "-"}</td>
                   <td className="px-3 py-3">{formatCount(item.quantity)}</td>
@@ -991,7 +1730,7 @@ function PaymentsList({ payments }) {
                   <div className="mt-1 text-xs text-slate-500">{formatDateTime(payment.entry_date)}</div>
                 </div>
                 <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                  {payment.payment_method || "payment"}
+                  {formatPaymentMethodLabel(payment.payment_method)}
                 </span>
               </div>
               <div className="mt-3 grid gap-2 text-sm text-slate-600">
@@ -1112,14 +1851,15 @@ function TextInput({ label, value, onChange, type = "text" }) {
   );
 }
 
-function SelectInput({ label, value, options, onChange }) {
+function SelectInput({ label, value, options, onChange, disabled = false }) {
   return (
     <label className="block">
       <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
       <select
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none"
+        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

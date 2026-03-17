@@ -359,16 +359,108 @@ const getOrderFulfillments = (order) => {
   return Array.isArray(fulfillments) ? fulfillments : [];
 };
 
+const getOrderLineItems = (order) => {
+  const lineItems = parseOrderData(order)?.line_items;
+  return Array.isArray(lineItems) ? lineItems : [];
+};
+
+const getLineItemId = (item) =>
+  String(item?.line_item_id || item?.id || "").trim();
+
+const parsePositiveQuantity = (value) => {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
 const getFulfillableQuantity = (order) => {
-  const lineItems = Array.isArray(parseOrderData(order)?.line_items)
-    ? parseOrderData(order).line_items
-    : [];
+  const lineItems = getOrderLineItems(order);
 
   return lineItems.reduce((sum, item) => {
     const quantity = parseFloat(item?.fulfillable_quantity || 0);
     return sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0);
   }, 0);
 };
+
+const buildAvailableQuantityByLineItemId = (items = [], quantityResolver) => {
+  const quantities = new Map();
+
+  for (const item of items || []) {
+    const lineItemId = getLineItemId(item);
+    if (!lineItemId) {
+      continue;
+    }
+
+    const quantity = parsePositiveQuantity(quantityResolver(item));
+    if (quantity <= 0) {
+      continue;
+    }
+
+    quantities.set(lineItemId, (quantities.get(lineItemId) || 0) + quantity);
+  }
+
+  return quantities;
+};
+
+const buildOrderFulfillableQuantityByLineItemId = (order) =>
+  buildAvailableQuantityByLineItemId(
+    getOrderLineItems(order),
+    (item) => item?.fulfillable_quantity,
+  );
+
+const buildOrderFulfilledQuantityByLineItemId = (order) =>
+  buildAvailableQuantityByLineItemId(
+    getOrderFulfillments(order).flatMap((fulfillment) =>
+      Array.isArray(fulfillment?.line_items) ? fulfillment.line_items : [],
+    ),
+    (item) => item?.quantity,
+  );
+
+const buildRequestedLineItemQuantities = (
+  availableQuantitiesByLineItemId,
+  requestedLineItems = [],
+  actionLabel,
+) => {
+  const items = Array.isArray(requestedLineItems) ? requestedLineItems : [];
+  if (items.length === 0) {
+    return null;
+  }
+
+  const requestedQuantities = new Map();
+
+  for (const item of items) {
+    const lineItemId = getLineItemId(item);
+    if (!lineItemId) {
+      throw new Error("Each selected line item must include an id");
+    }
+
+    const availableQuantity =
+      parsePositiveQuantity(availableQuantitiesByLineItemId.get(lineItemId)) || 0;
+    if (availableQuantity <= 0) {
+      throw new Error(
+        `Line item ${lineItemId} has no ${actionLabel} quantity available`,
+      );
+    }
+
+    const requestedQuantity = parsePositiveQuantity(item?.quantity) || availableQuantity;
+    const existingRequested = requestedQuantities.get(lineItemId) || 0;
+    const nextRequestedQuantity = existingRequested + requestedQuantity;
+
+    if (nextRequestedQuantity > availableQuantity) {
+      throw new Error(
+        `Line item ${lineItemId} exceeds the available ${actionLabel} quantity`,
+      );
+    }
+
+    requestedQuantities.set(lineItemId, nextRequestedQuantity);
+  }
+
+  return requestedQuantities;
+};
+
+const getRemainingRequestedLineItemIds = (requestedQuantitiesByLineItemId) =>
+  Array.from((requestedQuantitiesByLineItemId || new Map()).entries())
+    .filter(([, quantity]) => parsePositiveQuantity(quantity) > 0)
+    .map(([lineItemId]) => lineItemId);
 
 const getOrderCurrency = (order, orderData = {}) =>
   String(orderData?.currency || order?.currency || "USD").trim() || "USD";
@@ -1589,7 +1681,12 @@ export class OrderManagementService {
     }
   }
 
-  static async updateOrderFulfillment(userId, orderId, requestedStatus) {
+  static async updateOrderFulfillment(
+    userId,
+    orderId,
+    requestedStatus,
+    options = {},
+  ) {
     try {
       const { data: order } = await Order.findByIdForUser(userId, orderId);
       if (!order || !order.shopify_id) {
@@ -1616,18 +1713,31 @@ export class OrderManagementService {
         };
       }
 
+      const selectedLineItems = Array.isArray(options?.lineItems)
+        ? options.lineItems
+        : [];
+
       await this.logSyncOperation(userId, orderId, "update_fulfillment_status", {
         fulfillment_status: normalizedRequestedStatus,
+        line_items: selectedLineItems,
       });
 
       let responseData = null;
 
       if (normalizedRequestedStatus === "fulfilled") {
+        const requestedQuantitiesByLineItemId = buildRequestedLineItemQuantities(
+          buildOrderFulfillableQuantityByLineItemId(order),
+          selectedLineItems,
+          "fulfillable",
+        );
         const fulfillmentOrders = await fetchShopifyFulfillmentOrders({
           tokenData,
           order,
         });
 
+        const remainingRequestedQuantities = requestedQuantitiesByLineItemId
+          ? new Map(requestedQuantitiesByLineItemId)
+          : null;
         const lineItemsByFulfillmentOrder = fulfillmentOrders
           .map((fulfillmentOrder) => {
             const lineItems = Array.isArray(fulfillmentOrder?.line_items)
@@ -1645,6 +1755,30 @@ export class OrderManagementService {
 
                 if (!Number.isFinite(remainingQuantity) || remainingQuantity <= 0) {
                   return null;
+                }
+
+                const lineItemId = getLineItemId(item);
+                if (remainingRequestedQuantities) {
+                  const requestedQuantity = parsePositiveQuantity(
+                    remainingRequestedQuantities.get(lineItemId),
+                  );
+                  if (requestedQuantity <= 0) {
+                    return null;
+                  }
+
+                  const quantityToFulfill = Math.min(
+                    remainingQuantity,
+                    requestedQuantity,
+                  );
+                  remainingRequestedQuantities.set(
+                    lineItemId,
+                    Math.max(0, requestedQuantity - quantityToFulfill),
+                  );
+
+                  return {
+                    id: item.id,
+                    quantity: quantityToFulfill,
+                  };
                 }
 
                 return {
@@ -1675,6 +1809,15 @@ export class OrderManagementService {
           );
         }
 
+        const unresolvedLineItemIds = getRemainingRequestedLineItemIds(
+          remainingRequestedQuantities,
+        );
+        if (unresolvedLineItemIds.length > 0) {
+          throw new Error(
+            `Some selected items cannot be fulfilled from Shopify right now: ${unresolvedLineItemIds.join(", ")}`,
+          );
+        }
+
         responseData = await createShopifyFulfillment({
           tokenData,
           order,
@@ -1694,16 +1837,85 @@ export class OrderManagementService {
           throw new Error("This order does not have any Shopify fulfillment to cancel");
         }
 
-        if (fulfillments.length > 1) {
-          throw new Error(
-            "Orders with multiple fulfillments must be adjusted directly in Shopify",
+        const requestedQuantitiesByLineItemId = buildRequestedLineItemQuantities(
+          buildOrderFulfilledQuantityByLineItemId(order),
+          selectedLineItems,
+          "fulfilled",
+        );
+        let fulfillmentsToCancel = fulfillments;
+
+        if (requestedQuantitiesByLineItemId) {
+          const remainingRequestedQuantities = new Map(requestedQuantitiesByLineItemId);
+
+          fulfillmentsToCancel = fulfillments.filter((fulfillment) => {
+            const lineItems = Array.isArray(fulfillment?.line_items)
+              ? fulfillment.line_items
+              : [];
+
+            if (lineItems.length === 0) {
+              return false;
+            }
+
+            const normalizedLineItems = lineItems
+              .map((lineItem) => ({
+                lineItemId: getLineItemId(lineItem),
+                quantity: parsePositiveQuantity(lineItem?.quantity),
+              }))
+              .filter(
+                (lineItem) =>
+                  lineItem.lineItemId && lineItem.quantity > 0,
+              );
+
+            if (normalizedLineItems.length === 0) {
+              return false;
+            }
+
+            const canCancelFulfillment = normalizedLineItems.every(
+              ({ lineItemId, quantity }) =>
+                parsePositiveQuantity(remainingRequestedQuantities.get(lineItemId)) >=
+                quantity,
+            );
+
+            if (!canCancelFulfillment) {
+              return false;
+            }
+
+            for (const { lineItemId, quantity } of normalizedLineItems) {
+              remainingRequestedQuantities.set(
+                lineItemId,
+                Math.max(
+                  0,
+                  parsePositiveQuantity(
+                    remainingRequestedQuantities.get(lineItemId),
+                  ) - quantity,
+                ),
+              );
+            }
+
+            return true;
+          });
+
+          const unresolvedLineItemIds = getRemainingRequestedLineItemIds(
+            remainingRequestedQuantities,
           );
+          if (
+            fulfillmentsToCancel.length === 0 ||
+            unresolvedLineItemIds.length > 0
+          ) {
+            throw new Error(
+              "Selected items cannot be restocked separately because they are grouped with other items in existing Shopify fulfillments",
+            );
+          }
         }
 
-        responseData = await cancelShopifyFulfillment({
-          tokenData,
-          fulfillmentId: fulfillments[0].id,
-        });
+        responseData = [];
+        for (const fulfillment of fulfillmentsToCancel) {
+          const cancellationResult = await cancelShopifyFulfillment({
+            tokenData,
+            fulfillmentId: fulfillment.id,
+          });
+          responseData.push(cancellationResult);
+        }
       }
 
       const refreshedOrderPayload = await fetchShopifyOrderById({

@@ -24,6 +24,8 @@ const toNumber = (value) => {
 const cloneVariantDrafts = (variants = []) =>
   variants.map((variant) => ({
     id: String(variant.id || ""),
+    price: String(variant.price ?? ""),
+    sku: String(variant.sku || ""),
     inventory_quantity: String(toNumber(variant.inventory_quantity)),
   }));
 
@@ -94,8 +96,10 @@ export default function ProductDetails() {
       const payload = {};
       const nextPrice = parseFloat(editedProduct.price);
       const nextInventory = parseInt(editedProduct.inventory_quantity, 10);
+      const nextSku = String(editedProduct.sku || "").trim();
 
       if (
+        !hasMultipleVariants &&
         Number.isFinite(nextPrice) &&
         nextPrice !== toNumber(product.price)
       ) {
@@ -120,26 +124,59 @@ export default function ProductDetails() {
         }
       }
 
-      const originalVariantInventoryById = new Map(
+      if (
+        !hasMultipleVariants &&
+        nextSku !== String(product.sku || "").trim()
+      ) {
+        payload.sku = nextSku;
+      }
+
+      const originalVariantsById = new Map(
         (product.variants || []).map((variant) => [
           String(variant.id || ""),
-          toNumber(variant.inventory_quantity),
+          {
+            inventory_quantity: toNumber(variant.inventory_quantity),
+            price: toNumber(variant.price),
+            sku: String(variant.sku || "").trim(),
+          },
         ]),
       );
 
       const variantUpdates = editedVariants
-        .filter((variant) => {
+        .map((variant) => {
           const variantId = String(variant.id || "");
-          return (
-            originalVariantInventoryById.has(variantId) &&
+          const originalVariant = originalVariantsById.get(variantId);
+
+          if (!originalVariant) {
+            return null;
+          }
+
+          const nextVariantUpdate = {
+            id: variant.id,
+          };
+
+          if (
             toNumber(variant.inventory_quantity) !==
-              originalVariantInventoryById.get(variantId)
-          );
+            originalVariant.inventory_quantity
+          ) {
+            nextVariantUpdate.inventory_quantity = toNumber(
+              variant.inventory_quantity,
+            );
+          }
+
+          if (toNumber(variant.price) !== originalVariant.price) {
+            nextVariantUpdate.price = toNumber(variant.price);
+          }
+
+          if (String(variant.sku || "").trim() !== originalVariant.sku) {
+            nextVariantUpdate.sku = String(variant.sku || "").trim();
+          }
+
+          return Object.keys(nextVariantUpdate).length > 1
+            ? nextVariantUpdate
+            : null;
         })
-        .map((variant) => ({
-          id: variant.id,
-          inventory_quantity: toNumber(variant.inventory_quantity),
-        }));
+        .filter(Boolean);
 
       if (variantUpdates.length > 0) {
         payload.variant_updates = variantUpdates;
@@ -177,13 +214,13 @@ export default function ProductDetails() {
     setEditing(false);
   };
 
-  const handleVariantInventoryChange = (variantId, value) => {
+  const handleVariantFieldChange = (variantId, field, value) => {
     setEditedVariants((currentVariants) =>
       currentVariants.map((variant) =>
         String(variant.id) === String(variantId)
           ? {
               ...variant,
-              inventory_quantity: value,
+              [field]: value,
             }
           : variant,
       ),
@@ -405,19 +442,38 @@ export default function ProductDetails() {
                     </div>
                   )}
                   <div className="space-y-3">
-                    {product.variants.map((variant, index) => (
+                    {product.variants.map((variant, index) => {
+                      const variantDraft =
+                        editedVariantsById.get(String(variant.id || "")) || {};
+                      const displayedVariantPrice =
+                        editing && hasMultipleVariants
+                          ? variantDraft.price ?? variant.price
+                          : variant.price;
+                      const displayedVariantSku =
+                        editing && hasMultipleVariants
+                          ? variantDraft.sku ?? variant.sku
+                          : variant.sku;
+                      const displayedVariantInventory = toNumber(
+                        editing && hasMultipleVariants
+                          ? variantDraft.inventory_quantity ??
+                              variant.inventory_quantity
+                          : variant.inventory_quantity,
+                      );
+
+                      return (
                       <div
                         key={index}
                         className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+                        data-variant-inventory={displayedVariantInventory}
                       >
                         <div className="flex justify-between items-start">
                           <div className="flex-1">
                             <p className="font-semibold text-gray-800">
                               {variant.title}
                             </p>
-                            {variant.sku && (
+                            {(displayedVariantSku || (editing && hasMultipleVariants)) && (
                               <p className="text-sm text-gray-600">
-                                SKU: {variant.sku}
+                                SKU: {displayedVariantSku || "-"}
                               </p>
                             )}
                             {variant.barcode && (
@@ -450,11 +506,11 @@ export default function ProductDetails() {
                           </div>
                           <div className="text-left">
                             <p className="text-lg font-bold text-gray-800">
-                              {variant.price} {CURRENCY_LABEL}
+                              {displayedVariantPrice} {CURRENCY_LABEL}
                             </p>
                             {variant.compare_at_price &&
                               parseFloat(variant.compare_at_price) >
-                                parseFloat(variant.price) && (
+                                parseFloat(displayedVariantPrice) && (
                                 <p className="text-sm text-gray-500 line-through">
                                   {variant.compare_at_price} {CURRENCY_LABEL}
                                 </p>
@@ -493,7 +549,45 @@ export default function ProductDetails() {
                               )}
                             </p>
                             {editing && canEditProducts && hasMultipleVariants && (
-                              <div className="mt-3">
+                              <div className="mt-3 space-y-3">
+                                <div>
+                                  <label className="mb-1 block text-xs font-medium text-gray-600">
+                                    SKU
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={variantDraft.sku ?? String(variant.sku || "")}
+                                    onChange={(event) =>
+                                      handleVariantFieldChange(
+                                        variant.id,
+                                        "sku",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="SKU-001"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-xs font-medium text-gray-600">
+                                    ØªØ¹Ø¯ÙŠÙ„ Ø§Ù„Ø³Ø¹Ø±
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={variantDraft.price ?? String(variant.price ?? "")}
+                                    onChange={(event) =>
+                                      handleVariantFieldChange(
+                                        variant.id,
+                                        "price",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </div>
+                                <div>
                                 <label className="mb-1 block text-xs font-medium text-gray-600">
                                   تعديل مخزون هذا الـ Variant
                                 </label>
@@ -508,13 +602,15 @@ export default function ProductDetails() {
                                     String(toNumber(variant.inventory_quantity))
                                   }
                                   onChange={(event) =>
-                                    handleVariantInventoryChange(
+                                    handleVariantFieldChange(
                                       variant.id,
+                                      "inventory_quantity",
                                       event.target.value,
                                     )
                                   }
                                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
+                              </div>
                               </div>
                             )}
                             {variant.requires_shipping && (
@@ -530,7 +626,8 @@ export default function ProductDetails() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -642,7 +739,7 @@ export default function ProductDetails() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       السعر ({CURRENCY_LABEL})
                     </label>
-                    {editing ? (
+                    {editing && !hasMultipleVariants ? (
                       <input
                         type="number"
                         value={editedProduct.price}
@@ -657,9 +754,16 @@ export default function ProductDetails() {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     ) : (
-                      <p className="text-2xl font-bold text-gray-800">
-                        {product.price} {CURRENCY_LABEL}
-                      </p>
+                      <>
+                        <p className="text-2xl font-bold text-gray-800">
+                          {product.price} {CURRENCY_LABEL}
+                        </p>
+                        {editing && hasMultipleVariants && (
+                          <p className="mt-2 text-sm text-slate-600">
+                            Edit each variant price in the variants section.
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
 
@@ -803,11 +907,34 @@ export default function ProductDetails() {
                       </p>
                     </div>
                   )}
-                  {product.sku && (
+                  {(editing && !hasMultipleVariants) || product.sku ? (
+                    <div>
+                      <p className="text-sm text-gray-600">SKU</p>
+                      {editing && !hasMultipleVariants ? (
+                        <input
+                          type="text"
+                          value={editedProduct.sku || ""}
+                          onChange={(e) =>
+                            setEditedProduct({
+                              ...editedProduct,
+                              sku: e.target.value,
+                            })
+                          }
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="SKU-001"
+                        />
+                      ) : (
+                        <p className="font-semibold text-gray-800">
+                          {product.sku || "-"}
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                  {editing && hasMultipleVariants && (
                     <div>
                       <p className="text-sm text-gray-600">SKU</p>
                       <p className="font-semibold text-gray-800">
-                        {product.sku}
+                        Edit each variant SKU in the variants section.
                       </p>
                     </div>
                   )}

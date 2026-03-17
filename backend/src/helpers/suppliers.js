@@ -34,14 +34,7 @@ export const sanitizeSupplierPayload = (payload = {}) => ({
   name: normalizeText(payload.name),
   contact_name: normalizeText(payload.contact_name),
   phone: normalizeText(payload.phone),
-  email: normalizeText(payload.email),
   address: normalizeText(payload.address),
-  payment_terms: normalizeText(payload.payment_terms),
-  bank_name: normalizeText(payload.bank_name),
-  account_holder: normalizeText(payload.account_holder),
-  account_number: normalizeText(payload.account_number),
-  iban: normalizeText(payload.iban),
-  wallet_number: normalizeText(payload.wallet_number),
   notes: normalizeText(payload.notes),
   opening_balance: roundCurrency(payload.opening_balance),
   is_active: payload.is_active !== undefined ? Boolean(payload.is_active) : true,
@@ -53,6 +46,9 @@ export const sanitizeDeliveryItems = (items) => {
   return list
     .map((item) => {
       const productName = normalizeText(item?.product_name);
+      const productId = normalizeText(item?.product_id);
+      const variantId = normalizeText(item?.variant_id);
+      const variantTitle = normalizeText(item?.variant_title);
       const sku = normalizeText(item?.sku);
       const material = normalizeText(item?.material);
       const quantity = toNumber(item?.quantity);
@@ -66,6 +62,9 @@ export const sanitizeDeliveryItems = (items) => {
       }
 
       return {
+        product_id: productId,
+        variant_id: variantId,
+        variant_title: variantTitle,
         product_name: productName,
         sku,
         material,
@@ -218,4 +217,3 @@ export const buildSupplierDetail = (supplier, entries = []) => {
     received_items: summary.received_items,
   };
 };
-

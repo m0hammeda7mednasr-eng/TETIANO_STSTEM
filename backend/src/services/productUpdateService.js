@@ -32,6 +32,11 @@ const parseNumeric = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const normalizeSku = (value) => String(value ?? "").trim();
+
+const hasOwn = (value, key) =>
+  Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
+
 const parseProductData = (value) => {
   if (!value) return {};
 
@@ -79,6 +84,10 @@ const applyPrimaryVariantUpdates = (productData, updates = {}) => {
     updatedFirstVariant.inventory_quantity = updates.inventory_quantity;
   }
 
+  if (updates.sku !== undefined) {
+    updatedFirstVariant.sku = normalizeSku(updates.sku);
+  }
+
   updatedFirstVariant.updated_at = new Date().toISOString();
 
   return {
@@ -87,7 +96,7 @@ const applyPrimaryVariantUpdates = (productData, updates = {}) => {
   };
 };
 
-const applyVariantInventoryUpdates = (productData, variantUpdates = []) => {
+const applyVariantUpdates = (productData, variantUpdates = []) => {
   const variants = getProductVariants(productData);
   if (variantUpdates.length === 0) {
     return productData;
@@ -115,11 +124,22 @@ const applyVariantInventoryUpdates = (productData, variantUpdates = []) => {
 
     seenVariantIds.add(variantId);
 
-    return {
+    const updatedVariant = {
       ...variant,
-      inventory_quantity: requestedUpdate.inventory_quantity,
       updated_at: new Date().toISOString(),
     };
+
+    if (requestedUpdate.inventory_quantity !== undefined) {
+      updatedVariant.inventory_quantity = requestedUpdate.inventory_quantity;
+    }
+    if (requestedUpdate.price !== undefined) {
+      updatedVariant.price = requestedUpdate.price?.toString();
+    }
+    if (requestedUpdate.sku !== undefined) {
+      updatedVariant.sku = normalizeSku(requestedUpdate.sku);
+    }
+
+    return updatedVariant;
   });
 
   for (const variantUpdate of variantUpdates) {
@@ -137,10 +157,10 @@ const applyVariantInventoryUpdates = (productData, variantUpdates = []) => {
 
 export class ProductUpdateService {
   /**
-   * Update product (price, cost_price, inventory) locally and sync with Shopify
+   * Update product (price, cost_price, inventory, sku) locally and sync with Shopify
    */
   static async updateProduct(userId, productId, updates) {
-    const { price, cost_price, inventory } = updates;
+    const { price, cost_price, inventory, sku } = updates;
     const variantUpdates = Array.isArray(updates?.variant_updates)
       ? updates.variant_updates
       : [];
@@ -165,22 +185,52 @@ export class ProductUpdateService {
       if (inventory > 1000000)
         throw new Error("Inventory exceeds maximum allowed value");
     }
+    if (sku !== undefined && normalizeSku(sku).length > 255) {
+      throw new Error("SKU exceeds maximum allowed length");
+    }
     for (const variantUpdate of variantUpdates) {
-      const inventoryQuantity = variantUpdate?.inventory_quantity;
-      if (inventoryQuantity === undefined || inventoryQuantity === null) {
-        throw new Error("Variant inventory is required");
-      }
-      if (!Number.isFinite(inventoryQuantity)) {
-        throw new Error("Variant inventory is invalid");
-      }
-      if (inventoryQuantity < 0) {
-        throw new Error("Variant inventory cannot be negative");
-      }
-      if (inventoryQuantity > 1000000) {
-        throw new Error("Variant inventory exceeds maximum allowed value");
-      }
       if (!variantUpdate?.id) {
         throw new Error("Variant ID is required");
+      }
+      if (
+        variantUpdate?.inventory_quantity === undefined &&
+        variantUpdate?.price === undefined &&
+        variantUpdate?.sku === undefined
+      ) {
+        throw new Error("Variant update must include inventory, price, or SKU");
+      }
+
+      const inventoryQuantity = variantUpdate?.inventory_quantity;
+      if (inventoryQuantity !== undefined) {
+        if (!Number.isFinite(inventoryQuantity)) {
+          throw new Error("Variant inventory is invalid");
+        }
+        if (inventoryQuantity < 0) {
+          throw new Error("Variant inventory cannot be negative");
+        }
+        if (inventoryQuantity > 1000000) {
+          throw new Error("Variant inventory exceeds maximum allowed value");
+        }
+      }
+
+      const variantPrice = variantUpdate?.price;
+      if (variantPrice !== undefined) {
+        if (!Number.isFinite(variantPrice)) {
+          throw new Error("Variant price is invalid");
+        }
+        if (variantPrice < 0) {
+          throw new Error("Variant price cannot be negative");
+        }
+        if (variantPrice > 1000000) {
+          throw new Error("Variant price exceeds maximum allowed value");
+        }
+      }
+
+      if (
+        variantUpdate?.sku !== undefined &&
+        normalizeSku(variantUpdate.sku).length > 255
+      ) {
+        throw new Error("Variant SKU exceeds maximum allowed length");
       }
     }
 
@@ -208,6 +258,10 @@ export class ProductUpdateService {
         updateData.price = price;
         oldValues.price = product.price;
       }
+      if (sku !== undefined) {
+        updateData.sku = normalizeSku(sku);
+        oldValues.sku = product.sku;
+      }
       if (cost_price !== undefined) {
         updateData.cost_price = cost_price;
         oldValues.cost_price = product.cost_price;
@@ -215,29 +269,56 @@ export class ProductUpdateService {
       if (inventory !== undefined || variantUpdates.length > 0) {
         oldValues.inventory_quantity = product.inventory_quantity;
       }
+      if (variantUpdates.length > 0) {
+        if (!hasOwn(oldValues, "price")) {
+          oldValues.price = product.price;
+        }
+        if (!hasOwn(oldValues, "sku")) {
+          oldValues.sku = product.sku;
+        }
+      }
 
-      if (price !== undefined || inventory !== undefined) {
+      if (price !== undefined || inventory !== undefined || sku !== undefined) {
         nextProductData = applyPrimaryVariantUpdates(nextProductData, {
           price,
           inventory_quantity: inventory,
+          sku,
         });
       }
 
       if (variantUpdates.length > 0) {
-        nextProductData = applyVariantInventoryUpdates(
+        nextProductData = applyVariantUpdates(
           nextProductData,
           variantUpdates,
         );
       }
 
       const hasVariantBackedData = getProductVariants(nextProductData).length > 0;
+      const primaryVariant = hasVariantBackedData
+        ? getProductVariants(nextProductData)[0] || null
+        : null;
       if (
         price !== undefined ||
         inventory !== undefined ||
+        sku !== undefined ||
         variantUpdates.length > 0
       ) {
         oldValues.data = cloneJsonValue(currentProductData);
         updateData.data = nextProductData;
+      }
+
+      if (primaryVariant) {
+        if (price !== undefined || variantUpdates.length > 0) {
+          updateData.price =
+            primaryVariant.price !== undefined &&
+            primaryVariant.price !== null &&
+            String(primaryVariant.price).trim() !== ""
+              ? parseNumeric(primaryVariant.price)
+              : product.price;
+        }
+        if (sku !== undefined || variantUpdates.length > 0) {
+          updateData.sku = normalizeSku(primaryVariant.sku);
+        }
       }
 
       if (inventory !== undefined || variantUpdates.length > 0) {
@@ -262,11 +343,14 @@ export class ProductUpdateService {
         old_values: oldValues,
       });
 
-      // Sync to Shopify asynchronously (only price and inventory, not cost_price)
+      // Sync to Shopify asynchronously (only price, inventory, and sku; not cost_price)
       const shopifyUpdates = {};
       if (price !== undefined) shopifyUpdates.price = price;
       if (inventory !== undefined)
         shopifyUpdates.inventory_quantity = inventory;
+      if (sku !== undefined) {
+        shopifyUpdates.sku = normalizeSku(sku);
+      }
       if (variantUpdates.length > 0) {
         shopifyUpdates.variant_updates = variantUpdates;
       }
@@ -289,6 +373,9 @@ export class ProductUpdateService {
           }
           if (Object.prototype.hasOwnProperty.call(oldValues, "inventory_quantity")) {
             rollbackData.inventory_quantity = oldValues.inventory_quantity;
+          }
+          if (Object.prototype.hasOwnProperty.call(oldValues, "sku")) {
+            rollbackData.sku = oldValues.sku;
           }
           if (Object.prototype.hasOwnProperty.call(oldValues, "data")) {
             rollbackData.data = oldValues.data;
@@ -393,6 +480,12 @@ export class ProductUpdateService {
           if (variantUpdate.inventory_quantity !== undefined) {
             payload.inventory_quantity = variantUpdate.inventory_quantity;
           }
+          if (variantUpdate.price !== undefined) {
+            payload.price = variantUpdate.price?.toString();
+          }
+          if (variantUpdate.sku !== undefined) {
+            payload.sku = normalizeSku(variantUpdate.sku);
+          }
 
           return payload;
         });
@@ -410,6 +503,9 @@ export class ProductUpdateService {
         }
         if (updates.inventory_quantity !== undefined) {
           variantPayload.inventory_quantity = updates.inventory_quantity;
+        }
+        if (updates.sku !== undefined) {
+          variantPayload.sku = normalizeSku(updates.sku);
         }
 
         variantPayloads = [variantPayload];
@@ -438,6 +534,30 @@ export class ProductUpdateService {
       const syncedProductData = response.data?.product || parsedProductData;
       const syncedVariants = getProductVariants(syncedProductData);
       const syncedPrimaryVariant = syncedVariants[0] || {};
+      const requestedPrimaryVariantUpdate = Array.isArray(updates.variant_updates)
+        ? updates.variant_updates.find(
+            (variantUpdate) =>
+              String(variantUpdate?.id || "") ===
+              String(syncedPrimaryVariant?.id || parsedProductData?.variants?.[0]?.id || ""),
+          ) || null
+        : null;
+      const resolvedPrimaryPrice =
+        syncedPrimaryVariant.price !== undefined &&
+        syncedPrimaryVariant.price !== null &&
+        String(syncedPrimaryVariant.price).trim() !== ""
+          ? parseNumeric(syncedPrimaryVariant.price)
+          : requestedPrimaryVariantUpdate?.price !== undefined
+            ? requestedPrimaryVariantUpdate.price
+            : updates.price !== undefined
+              ? updates.price
+              : product.price;
+      const resolvedPrimarySku = hasOwn(syncedPrimaryVariant, "sku")
+        ? normalizeSku(syncedPrimaryVariant.sku)
+        : requestedPrimaryVariantUpdate && hasOwn(requestedPrimaryVariantUpdate, "sku")
+          ? normalizeSku(requestedPrimaryVariantUpdate.sku)
+          : updates.sku !== undefined
+            ? normalizeSku(updates.sku)
+            : normalizeSku(product.sku);
 
       await Product.update(productId, {
         pending_sync: false,
@@ -449,15 +569,8 @@ export class ProductUpdateService {
           syncedVariants,
           product.inventory_quantity,
         ),
-        price:
-          updates.price !== undefined
-            ? updates.price
-            : syncedPrimaryVariant.price !== undefined &&
-                syncedPrimaryVariant.price !== null &&
-                String(syncedPrimaryVariant.price).trim() !== ""
-              ? parseNumeric(syncedPrimaryVariant.price)
-              : product.price,
-        sku: syncedPrimaryVariant.sku || product.sku,
+        price: resolvedPrimaryPrice,
+        sku: resolvedPrimarySku,
       });
 
       // Update sync operation log

@@ -226,6 +226,7 @@ const mapVariantRowToEditableProduct = (variantRow) => ({
       : `${variantRow.product_title} / ${variantRow.variant_title}`,
   price: variantRow.price,
   cost_price: variantRow.cost_price,
+  sku: variantRow.sku || "",
   inventory_quantity: variantRow.inventory_quantity,
   total_inventory: variantRow.inventory_quantity,
   has_multiple_variants: false,
@@ -638,6 +639,9 @@ export default function Products() {
           const nextProduct = {
             ...product,
             price: updates.price,
+            ...(updates.sku !== undefined
+              ? { sku: String(updates.sku || "").trim() }
+              : {}),
             ...(isAdmin && updates.cost_price !== undefined
               ? { cost_price: updates.cost_price }
               : {}),
@@ -654,6 +658,9 @@ export default function Products() {
             nextProduct.variants = nextProduct.variants.map((variant) => ({
               ...variant,
               price: updates.price,
+              ...(updates.sku !== undefined
+                ? { sku: String(updates.sku || "").trim() }
+                : {}),
               ...(isAdmin && updates.cost_price !== undefined
                 ? { cost_price: updates.cost_price }
                 : {}),
@@ -669,6 +676,7 @@ export default function Products() {
 
       const payload = {
         price: updates.price,
+        sku: String(updates.sku || "").trim(),
       };
       if (updates.inventory !== undefined) {
         payload.inventory = updates.inventory;

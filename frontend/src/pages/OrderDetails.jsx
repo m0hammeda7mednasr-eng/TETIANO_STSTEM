@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import OrderComments from "../components/OrderComments";
@@ -66,6 +66,13 @@ const getFulfillmentStatusLabel = (status) =>
   normalizeFulfillmentStatus(status) ||
   "Unfulfilled";
 
+const getLineItemId = (item) => String(item?.id || item?.line_item_id || "").trim();
+
+const toPositiveNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
 export default function OrderDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -77,6 +84,7 @@ export default function OrderDetails() {
   const [updatingPaymentMethod, setUpdatingPaymentMethod] = useState(false);
   const [updatingFulfillment, setUpdatingFulfillment] = useState(false);
   const [profitData, setProfitData] = useState(null);
+  const [selectedLineItemIds, setSelectedLineItemIds] = useState([]);
   const canEditOrders = hasPermission("can_edit_orders");
 
   useEffect(() => {
@@ -93,6 +101,7 @@ export default function OrderDetails() {
     setLoading(true);
     try {
       const response = await api.get(`/shopify/orders/${id}/details`);
+      setSelectedLineItemIds([]);
       setOrder(response.data);
     } catch (error) {
       console.error("Error fetching order details:", error);
@@ -196,7 +205,86 @@ export default function OrderDetails() {
     const fulfillments = Array.isArray(orderValue?.fulfillments)
       ? orderValue.fulfillments.filter((fulfillment) => fulfillment?.id)
       : [];
-    return fulfillments.length === 1;
+    return fulfillments.length > 0;
+  };
+
+  const selectedLineItemIdSet = useMemo(
+    () => new Set(selectedLineItemIds),
+    [selectedLineItemIds],
+  );
+
+  const fulfilledQuantityByLineItemId = useMemo(() => {
+    const quantityMap = new Map();
+    const fulfillments = Array.isArray(order?.fulfillments)
+      ? order.fulfillments
+      : [];
+
+    for (const fulfillment of fulfillments) {
+      const lineItems = Array.isArray(fulfillment?.line_items)
+        ? fulfillment.line_items
+        : [];
+
+      for (const lineItem of lineItems) {
+        const lineItemId = getLineItemId(lineItem);
+        const quantity = toPositiveNumber(lineItem?.quantity);
+        if (!lineItemId || quantity <= 0) {
+          continue;
+        }
+
+        quantityMap.set(lineItemId, (quantityMap.get(lineItemId) || 0) + quantity);
+      }
+    }
+
+    return quantityMap;
+  }, [order]);
+
+  const selectedLineItems = useMemo(
+    () =>
+      Array.isArray(order?.line_items)
+        ? order.line_items.filter((item) =>
+            selectedLineItemIdSet.has(getLineItemId(item)),
+          )
+        : [],
+    [order, selectedLineItemIdSet],
+  );
+
+  const allOrderLineItemsSelected =
+    Array.isArray(order?.line_items) &&
+    order.line_items.length > 0 &&
+    order.line_items.every((item) => selectedLineItemIdSet.has(getLineItemId(item)));
+
+  const clearSelectedLineItems = () => {
+    setSelectedLineItemIds([]);
+  };
+
+  const toggleSelectAllLineItems = () => {
+    if (!Array.isArray(order?.line_items) || order.line_items.length === 0) {
+      return;
+    }
+
+    if (allOrderLineItemsSelected) {
+      setSelectedLineItemIds([]);
+      return;
+    }
+
+    setSelectedLineItemIds(
+      order.line_items
+        .map((item) => getLineItemId(item))
+        .filter(Boolean),
+    );
+  };
+
+  const toggleLineItemSelection = (lineItemId) => {
+    const normalizedLineItemId = String(lineItemId || "").trim();
+    if (!normalizedLineItemId) {
+      return;
+    }
+
+    setSelectedLineItemIds((current) =>
+      current.includes(normalizedLineItemId)
+        ? current.filter((value) => value !== normalizedLineItemId)
+        : [...current, normalizedLineItemId],
+    );
   };
 
   const getFulfillmentOptions = (orderValue) => {
@@ -235,6 +323,11 @@ export default function OrderDetails() {
   const getFulfillmentHelperText = (orderValue) => {
     const currentStatus = getOrderFulfillmentStatus(orderValue);
     const remainingQuantity = getFulfillableQuantity(orderValue);
+    const selectedItemsCount = selectedLineItems.length;
+
+    if (selectedItemsCount > 0) {
+      return `Action will apply to ${selectedItemsCount} selected item(s) only. Clear selection to apply to the whole order.`;
+    }
 
     if (currentStatus === "partial" && remainingQuantity > 0) {
       return `${remainingQuantity} item(s) still need fulfillment on Shopify`;
@@ -313,11 +406,20 @@ export default function OrderDetails() {
 
     setUpdatingFulfillment(true);
     try {
-      await api.post(`/shopify/orders/${id}/update-fulfillment`, {
+      const payload = {
         fulfillment_status: fulfillmentStatus,
-      });
+      };
+
+      if (selectedLineItems.length > 0) {
+        payload.line_items = selectedLineItems.map((item) => ({
+          id: getLineItemId(item),
+        }));
+      }
+
+      await api.post(`/shopify/orders/${id}/update-fulfillment`, payload);
       markSharedDataUpdated();
       showNotification("Fulfillment updated successfully", "success");
+      clearSelectedLineItems();
       await fetchOrderDetails();
     } catch (error) {
       console.error("Error updating fulfillment:", error);
@@ -591,12 +693,66 @@ export default function OrderDetails() {
                   <Package size={20} />
                   المنتجات ({order.line_items?.length || 0})
                 </h2>
+                {canEditOrders && (order.line_items?.length || 0) > 0 && (
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium text-slate-700">
+                        Apply fulfill/restock to selected items only.
+                      </span>
+                      {selectedLineItems.length > 0 && (
+                        <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+                          {selectedLineItems.length} selected
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={toggleSelectAllLineItems}
+                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        {allOrderLineItemsSelected ? "Unselect all" : "Select all"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={clearSelectedLineItems}
+                        disabled={selectedLineItems.length === 0}
+                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-4">
-                  {order.line_items?.map((item, index) => (
+                  {order.line_items?.map((item, index) => {
+                    const lineItemId = getLineItemId(item);
+                    const isSelected = selectedLineItemIdSet.has(lineItemId);
+                    const fulfillableQuantity = toPositiveNumber(
+                      item?.fulfillable_quantity,
+                    );
+                    const fulfilledQuantity =
+                      fulfilledQuantityByLineItemId.get(lineItemId) || 0;
+
+                    return (
                     <div
                       key={index}
-                      className="flex gap-4 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+                      className={`flex gap-4 rounded-lg border p-4 transition ${
+                        isSelected
+                          ? "border-sky-300 bg-sky-50/60"
+                          : "border-gray-200 hover:bg-gray-50"
+                      }`}
                     >
+                      {canEditOrders && (
+                        <div className="pt-1">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleLineItemSelection(lineItemId)}
+                            className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+                          />
+                        </div>
+                      )}
                       <div className="w-20 h-20 bg-gray-100 rounded-lg flex items-center justify-center">
                         {item.image_url ? (
                           <img
@@ -622,14 +778,25 @@ export default function OrderDetails() {
                             SKU: {item.sku}
                           </p>
                         )}
-                        <div className="flex items-center gap-4 mt-2">
+                        <div className="mt-2 flex flex-wrap items-center gap-4">
                           <span className="text-sm text-gray-600">
                             الكمية: {item.quantity}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            Fulfillable: {fulfillableQuantity}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            Fulfilled: {fulfilledQuantity}
                           </span>
                           <span className="text-sm font-semibold text-gray-800">
                             {item.price} {CURRENCY_LABEL}
                           </span>
                         </div>
+                        {isSelected && (
+                          <p className="mt-2 text-xs font-medium text-sky-700">
+                            Fulfillment actions will target this item only.
+                          </p>
+                        )}
                       </div>
                       <div className="text-left">
                         <p className="text-lg font-bold text-gray-800">
@@ -638,7 +805,8 @@ export default function OrderDetails() {
                         </p>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* Order Totals */}

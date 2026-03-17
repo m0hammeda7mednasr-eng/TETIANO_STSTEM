@@ -1,6 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { getErrorMessage } from "../utils/api";
+import {
+  getPermissionDescription,
+  getPermissionLabel,
+} from "../utils/permissionLabels";
 import { extractArray } from "../utils/response";
 import Sidebar from "../components/Sidebar";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
@@ -66,6 +70,9 @@ const normalizePermissions = (rawPermissions) => {
     return acc;
   }, {});
 };
+
+const formatPermissionLabel = (key) => getPermissionLabel(key);
+const formatPermissionDescription = (key) => getPermissionDescription(key);
 
 export default function Users() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -475,11 +482,16 @@ export default function Users() {
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
-                            {request.permission_requested
-                              .replace(/_/g, " ")
-                              .replace("can ", "")}
-                          </span>
+                          <div className="space-y-2">
+                            <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm text-blue-800">
+                              {formatPermissionLabel(request.permission_requested)}
+                            </span>
+                            <p className="max-w-sm text-xs leading-5 text-gray-500">
+                              {formatPermissionDescription(
+                                request.permission_requested,
+                              )}
+                            </p>
+                          </div>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
                           {request.reason}
@@ -704,24 +716,20 @@ export default function Users() {
 
               <div className="border-t pt-4">
                 <h3 className="font-semibold mb-4">الصلاحيات</h3>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {Object.keys(permissions).map((key) => (
-                    <label key={key} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={permissions[key]}
-                        onChange={(e) =>
-                          setPermissions({
-                            ...permissions,
-                            [key]: e.target.checked,
-                          })
-                        }
-                        className="w-4 h-4"
-                      />
-                      <span className="text-sm">
-                        {key.replace(/_/g, " ").replace("can ", "")}
-                      </span>
-                    </label>
+                    <PermissionToggleCard
+                      key={key}
+                      label={formatPermissionLabel(key)}
+                      description={formatPermissionDescription(key)}
+                      checked={permissions[key]}
+                      onChange={(checked) =>
+                        setPermissions({
+                          ...permissions,
+                          [key]: checked,
+                        })
+                      }
+                    />
                   ))}
                 </div>
               </div>
@@ -778,24 +786,20 @@ export default function Users() {
 
               <div className="border-t pt-4">
                 <h3 className="font-semibold mb-4">الصلاحيات</h3>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {Object.keys(permissions).map((key) => (
-                    <label key={key} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={permissions[key]}
-                        onChange={(e) =>
-                          setPermissions({
-                            ...permissions,
-                            [key]: e.target.checked,
-                          })
-                        }
-                        className="w-4 h-4"
-                      />
-                      <span className="text-sm">
-                        {key.replace(/_/g, " ").replace("can ", "")}
-                      </span>
-                    </label>
+                    <PermissionToggleCard
+                      key={key}
+                      label={formatPermissionLabel(key)}
+                      description={formatPermissionDescription(key)}
+                      checked={permissions[key]}
+                      onChange={(checked) =>
+                        setPermissions({
+                          ...permissions,
+                          [key]: checked,
+                        })
+                      }
+                    />
                   ))}
                 </div>
               </div>
@@ -821,5 +825,30 @@ export default function Users() {
         </div>
       )}
     </div>
+  );
+}
+
+function PermissionToggleCard({ checked, description, label, onChange }) {
+  return (
+    <label
+      className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-3 transition ${
+        checked
+          ? "border-blue-300 bg-blue-50"
+          : "border-gray-200 bg-white hover:border-gray-300"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-1 h-4 w-4"
+      />
+      <span className="space-y-1">
+        <span className="block text-sm font-medium text-gray-900">{label}</span>
+        <span className="block text-xs leading-5 text-gray-500">
+          {description}
+        </span>
+      </span>
+    </label>
   );
 }

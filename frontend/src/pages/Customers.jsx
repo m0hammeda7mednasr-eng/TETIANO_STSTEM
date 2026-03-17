@@ -52,6 +52,33 @@ const parseJson = (value) => {
   return value;
 };
 
+const resolveCustomerPhone = (customer) => {
+  const data = parseJson(customer?.data);
+  const addresses = Array.isArray(data?.addresses) ? data.addresses : [];
+
+  return (
+    String(customer?.phone || "").trim() ||
+    String(data?.phone || "").trim() ||
+    String(data?.default_address?.phone || "").trim() ||
+    addresses.map((address) => String(address?.phone || "").trim()).find(Boolean) ||
+    ""
+  );
+};
+
+const normalizeCustomerRow = (customer) => ({
+  ...customer,
+  phone: resolveCustomerPhone(customer),
+  city:
+    String(customer?.city || "").trim() ||
+    String(parseJson(customer?.data)?.default_address?.city || "").trim(),
+  country:
+    String(customer?.country || "").trim() ||
+    String(parseJson(customer?.data)?.default_address?.country || "").trim(),
+  default_address:
+    String(customer?.default_address || "").trim() ||
+    String(parseJson(customer?.data)?.default_address?.address1 || "").trim(),
+});
+
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
 const getOrderCustomerId = (order) =>
@@ -88,7 +115,9 @@ export default function Customers() {
   const initialCachedSnapshot = useMemo(() => {
     const cached = peekCachedView(cacheKey);
     return {
-      rows: Array.isArray(cached?.value?.customers) ? cached.value.customers : [],
+      rows: Array.isArray(cached?.value?.customers)
+        ? cached.value.customers.map((customer) => normalizeCustomerRow(customer))
+        : [],
       updatedAt: cached?.updatedAt ? new Date(cached.updatedAt) : null,
     };
   }, [cacheKey]);
@@ -128,7 +157,7 @@ export default function Customers() {
         return;
       }
 
-      setCustomers(cachedCustomers);
+      setCustomers(cachedCustomers.map((customer) => normalizeCustomerRow(customer)));
       setOrders([]);
       setLastUpdatedAt(
         cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
@@ -187,18 +216,21 @@ export default function Customers() {
             },
           );
 
-          setCustomers(customersData);
+          const normalizedCustomers = customersData.map((customer) =>
+            normalizeCustomerRow(customer),
+          );
+          setCustomers(normalizedCustomers);
           setOrders([]);
           setLastUpdatedAt(new Date());
           setLoadStatus({
             active: false,
             message:
-              customersData.length > 0
-                ? `Loaded ${customersData.length.toLocaleString()} customers`
+              normalizedCustomers.length > 0
+                ? `Loaded ${normalizedCustomers.length.toLocaleString()} customers`
                 : "No customers found",
           });
           await writeCachedView(cacheKey, {
-            customers: customersData,
+            customers: normalizedCustomers,
           });
         } catch (requestError) {
           console.error("Failed to fetch customers:", requestError);
@@ -243,8 +275,8 @@ export default function Customers() {
 
       const hasCachedRows =
         Array.isArray(cached?.value?.customers) && cached.value.customers.length > 0;
-      if (!hasCachedRows && !isCacheFresh(cached, CUSTOMERS_CACHE_FRESH_MS)) {
-        await fetchData({ silent: true });
+      if (!hasCachedRows || !isCacheFresh(cached, CUSTOMERS_CACHE_FRESH_MS)) {
+        await fetchData({ silent: hasCachedRows });
       }
     })();
 

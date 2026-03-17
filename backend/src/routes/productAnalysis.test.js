@@ -287,4 +287,117 @@ describe("routes/productAnalysis buildAnalyticsPayload", () => {
     expect(payload.data[0].pending_quantity).toBe(1);
     expect(payload.data[0].net_delivered_quantity).toBe(0);
   });
+
+  it("applies scoped order filters and removes products with no matching order activity", async () => {
+    tableData.products = [
+      {
+        id: "product-1",
+        shopify_id: "shopify-product-1",
+        store_id: "store-1",
+        title: "Paid Product",
+        sku: "SKU-PAID",
+        inventory_quantity: 5,
+        data: {
+          variants: [
+            {
+              id: "variant-1",
+              title: "Default",
+              sku: "SKU-PAID",
+              inventory_quantity: 5,
+            },
+          ],
+        },
+      },
+      {
+        id: "product-2",
+        shopify_id: "shopify-product-2",
+        store_id: "store-1",
+        title: "Pending Product",
+        sku: "SKU-PENDING",
+        inventory_quantity: 4,
+        data: {
+          variants: [
+            {
+              id: "variant-2",
+              title: "Default",
+              sku: "SKU-PENDING",
+              inventory_quantity: 4,
+            },
+          ],
+        },
+      },
+    ];
+    tableData.orders = [
+      {
+        id: "order-paid",
+        store_id: "store-1",
+        financial_status: "paid",
+        fulfillment_status: "fulfilled",
+        total_price: 100,
+        created_at: "2026-03-01T09:00:00.000Z",
+        updated_at: "2026-03-01T12:00:00.000Z",
+        data: {
+          line_items: [
+            {
+              id: "line-paid",
+              product_id: "shopify-product-1",
+              variant_id: "variant-1",
+              sku: "SKU-PAID",
+              quantity: 1,
+              price: "100",
+            },
+          ],
+          fulfillments: [
+            {
+              created_at: "2026-03-01T10:00:00.000Z",
+              line_items: [{ id: "line-paid", quantity: 1 }],
+            },
+          ],
+        },
+      },
+      {
+        id: "order-pending",
+        store_id: "store-1",
+        financial_status: "pending",
+        fulfillment_status: "",
+        total_price: 200,
+        created_at: "2026-03-02T09:00:00.000Z",
+        updated_at: "2026-03-02T12:00:00.000Z",
+        data: {
+          line_items: [
+            {
+              id: "line-pending",
+              product_id: "shopify-product-2",
+              variant_id: "variant-2",
+              sku: "SKU-PENDING",
+              quantity: 2,
+              price: "100",
+            },
+          ],
+        },
+      },
+    ];
+
+    const payload = await buildAnalyticsPayload(
+      {
+        user: {
+          id: "admin-1",
+          role: "admin",
+          isAdmin: true,
+        },
+      },
+      "store-1",
+      {
+        payment_status: "paid",
+      },
+    );
+
+    expect(payload.meta.order_scope_active).toBe(true);
+    expect(payload.meta.filtered_orders_count).toBe(1);
+    expect(payload.summary.total_products).toBe(1);
+    expect(payload.summary.ordered_quantity).toBe(1);
+    expect(payload.summary.net_sales).toBe(100);
+    expect(payload.data).toHaveLength(1);
+    expect(payload.data[0].title).toBe("Paid Product");
+  });
 });

@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { Product, Order, Customer } from "../models/index.js";
 import { supabase } from "../supabaseClient.js";
 import { queueShopifyBackgroundSync } from "./shopifyBackgroundSyncService.js";
+import { extractCustomerPhone } from "../helpers/customerContact.js";
 
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
 const TETIANO_PAYMENT_TAG_PREFIXES = [
@@ -396,7 +397,7 @@ const mapCustomerFromShopify = (customer = {}) => ({
   shopify_id: toStringNumber(customer.id),
   name: `${customer.first_name || ""} ${customer.last_name || ""}`.trim(),
   email: customer.email || "",
-  phone: customer.phone || "",
+  phone: extractCustomerPhone(customer),
   total_spent: parseNumeric(customer.total_spent),
   orders_count: parseNumeric(customer.orders_count),
   default_address: customer.default_address?.address1 || "",

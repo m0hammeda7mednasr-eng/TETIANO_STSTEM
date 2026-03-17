@@ -11,6 +11,11 @@ import {
   requirePermission,
 } from "../middleware/permissions.js";
 import { supabase } from "../supabaseClient.js";
+import {
+  filterOrdersByScope,
+  getOrderScopeFiltersCacheKey,
+  hasActiveOrderScopeFilters,
+} from "../helpers/orderScope.js";
 
 const router = express.Router();
 const UUID_REGEX =
@@ -141,6 +146,10 @@ const DASHBOARD_ORDER_ANALYTICS_SELECTS = [
     "data",
   ].join(","),
 ];
+const DASHBOARD_ORDER_FILTERED_STATS_SELECTS = [
+  DASHBOARD_ORDER_ANALYTICS_SELECT,
+  ...DASHBOARD_ORDER_ANALYTICS_SELECTS,
+];
 
 const toNumber = (value) => {
   if (value === null || value === undefined || value === "") {
@@ -209,7 +218,11 @@ const getOrderFieldFallbacks = (primaryField, { allowUnordered = false } = {}) =
 };
 
 const getDashboardCacheKey = (req) =>
-  `${String(req.user?.id || "").trim()}::${String(getRequestedStoreId(req) || "all").trim()}`;
+  [
+    String(req.user?.id || "").trim(),
+    String(getRequestedStoreId(req) || "all").trim(),
+    getOrderScopeFiltersCacheKey(req.query || {}),
+  ].join("::");
 
 const getFreshCacheEntry = (cache, key) => {
   const entry = cache.get(key);
@@ -370,6 +383,54 @@ const parseLineItems = (order) => {
   }
 
   return [];
+};
+
+const getOrderCustomerKey = (order) => {
+  const data = parseOrderData(order);
+  const directCustomerId = String(
+    order?.customer_id || data?.customer?.id || "",
+  ).trim();
+  if (directCustomerId) {
+    return `id:${directCustomerId}`;
+  }
+
+  const email = String(order?.customer_email || data?.email || data?.customer?.email || "")
+    .trim()
+    .toLowerCase();
+  if (email) {
+    return `email:${email}`;
+  }
+
+  const name = String(order?.customer_name || data?.customer?.name || "")
+    .trim()
+    .toLowerCase();
+  return name ? `name:${name}` : "";
+};
+
+const buildFilteredOrderEntitySummary = (orders = []) => {
+  const productKeys = new Set();
+  const customerKeys = new Set();
+
+  for (const order of orders || []) {
+    const customerKey = getOrderCustomerKey(order);
+    if (customerKey) {
+      customerKeys.add(customerKey);
+    }
+
+    for (const item of parseLineItems(order)) {
+      const productKey = String(
+        item?.product_id || item?.sku || item?.id || "",
+      ).trim();
+      if (productKey) {
+        productKeys.add(productKey);
+      }
+    }
+  }
+
+  return {
+    totalProducts: productKeys.size,
+    totalCustomers: customerKeys.size,
+  };
 };
 
 const getOrderFinancialStatus = (order) => {
@@ -722,13 +783,16 @@ router.get("/stats", authenticateToken, async (req, res) => {
   }
 
   try {
+    const hasScopedOrderFilters = hasActiveOrderScopeFilters(req.query || {});
     const [products, orders, customers] = await Promise.all([
       getScopedRowsBatched(req, Product, {
         select: DASHBOARD_PRODUCT_COUNT_SELECT,
         allowUnorderedFallback: true,
       }),
       getScopedRowsBatched(req, Order, {
-        selects: DASHBOARD_ORDER_STATS_SELECTS,
+        selects: hasScopedOrderFilters
+          ? DASHBOARD_ORDER_FILTERED_STATS_SELECTS
+          : DASHBOARD_ORDER_STATS_SELECTS,
         allowUnorderedFallback: true,
       }),
       getScopedRowsBatched(req, Customer, {
@@ -737,10 +801,11 @@ router.get("/stats", authenticateToken, async (req, res) => {
       }),
     ]);
 
-    const saleOrders = orders.filter(
+    const filteredOrders = filterOrdersByScope(orders, req.query || {});
+    const saleOrders = filteredOrders.filter(
       (order) => getOrderNetSalesAmount(order) > 0,
     );
-    const totalOrderValue = orders.reduce(
+    const totalOrderValue = filteredOrders.reduce(
       (sum, order) => sum + getOrderGrossAmount(order),
       0,
     );
@@ -748,17 +813,23 @@ router.get("/stats", authenticateToken, async (req, res) => {
       (sum, order) => sum + getOrderNetSalesAmount(order),
       0,
     );
-    const pendingOrderValue = orders
+    const pendingOrderValue = filteredOrders
       .filter((order) => isPendingOrder(order))
       .reduce((sum, order) => sum + getOrderGrossAmount(order), 0);
+    const filteredEntitySummary = hasScopedOrderFilters
+      ? buildFilteredOrderEntitySummary(filteredOrders)
+      : {
+        totalProducts: products.length,
+        totalCustomers: customers.length,
+      };
 
     const payload = {
       total_sales: parseFloat(totalSales.toFixed(2)),
       total_order_value: parseFloat(totalOrderValue.toFixed(2)),
       pending_order_value: parseFloat(pendingOrderValue.toFixed(2)),
-      total_orders: orders.length,
-      total_products: products.length,
-      total_customers: customers.length,
+      total_orders: filteredOrders.length,
+      total_products: filteredEntitySummary.totalProducts,
+      total_customers: filteredEntitySummary.totalCustomers,
       avg_order_value:
         saleOrders.length > 0
           ? parseFloat((totalSales / saleOrders.length).toFixed(2))

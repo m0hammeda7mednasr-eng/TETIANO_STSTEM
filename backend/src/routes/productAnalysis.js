@@ -14,6 +14,11 @@ import {
   isCancelledOrder,
   parseOrderData,
 } from "../helpers/orderAnalytics.js";
+import {
+  filterOrdersByScope,
+  getOrderScopeFiltersCacheKey,
+  hasActiveOrderScopeFilters,
+} from "../helpers/orderScope.js";
 
 const router = express.Router();
 
@@ -596,6 +601,17 @@ const serializeTrackerEntry = (entry) => {
   return payload;
 };
 
+const hasScopedOrderActivity = (entry) =>
+  toNumber(entry?.ordered_quantity) > 0 ||
+  toNumber(entry?.delivered_quantity) > 0 ||
+  toNumber(entry?.returned_quantity) > 0 ||
+  toNumber(entry?.net_delivered_quantity) > 0 ||
+  toNumber(entry?.pending_quantity) > 0 ||
+  toNumber(entry?.cancelled_quantity) > 0 ||
+  toNumber(entry?.gross_sales) > 0 ||
+  toNumber(entry?.net_sales) > 0 ||
+  toNumber(entry?.orders_count) > 0;
+
 const getFreshCacheEntry = (key) => {
   const entry = analyticsCache.get(key);
   if (!entry) {
@@ -789,11 +805,13 @@ const buildOrderLineEntries = (order, refundDetails, fulfillmentDetails) => {
   return lineContexts;
 };
 
-export const buildAnalyticsPayload = async (req, storeId) => {
+export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) => {
   const [products, orders] = await Promise.all([
     loadScopedProducts(storeId),
     loadScopedOrders(storeId),
   ]);
+  const scopedOrderFiltersActive = hasActiveOrderScopeFilters(rawOrderFilters);
+  const filteredOrders = filterOrdersByScope(orders, rawOrderFilters);
 
   let tasks = [];
   let taskMetricsAvailable = true;
@@ -839,7 +857,7 @@ export const buildAnalyticsPayload = async (req, storeId) => {
     }
   }
 
-  for (const order of orders) {
+  for (const order of filteredOrders) {
     const orderId = normalizeKey(order?.id);
     const refundDetails = buildRefundDetails(order);
     const fulfillmentDetails = buildFulfillmentDetails(order);
@@ -962,6 +980,7 @@ export const buildAnalyticsPayload = async (req, storeId) => {
 
   const serializedProducts = productEntries
     .map((entry) => serializeTrackerEntry(entry))
+    .filter((entry) => !scopedOrderFiltersActive || hasScopedOrderActivity(entry))
     .sort((left, right) => {
       const rightActivity =
         new Date(right.last_order_at || right.updated_at || 0).getTime() || 0;
@@ -1013,6 +1032,9 @@ export const buildAnalyticsPayload = async (req, storeId) => {
       store_id: storeId,
       task_metrics_available: taskMetricsAvailable,
       task_match_basis: taskMetricsAvailable ? "sku" : "unavailable",
+      order_scope_active: scopedOrderFiltersActive,
+      filtered_orders_count: filteredOrders.length,
+      filters_key: getOrderScopeFiltersCacheKey(rawOrderFilters),
     },
   };
 };
@@ -1024,11 +1046,16 @@ router.get("/", async (req, res) => {
     const { storeId } = await resolveStoreContext(req);
     const forceRefresh =
       String(req.query.refresh || "").trim().toLowerCase() === "true";
-    const cacheKey = `${String(req.user?.id || "").trim()}::${storeId}`;
+    const orderFilters = req.query || {};
+    const cacheKey = [
+      String(req.user?.id || "").trim(),
+      storeId,
+      getOrderScopeFiltersCacheKey(orderFilters),
+    ].join("::");
 
     let payload = !forceRefresh ? getFreshCacheEntry(cacheKey) : null;
     if (!payload) {
-      payload = await buildAnalyticsPayload(req, storeId);
+      payload = await buildAnalyticsPayload(req, storeId, orderFilters);
       rememberCacheEntry(cacheKey, payload);
     }
 

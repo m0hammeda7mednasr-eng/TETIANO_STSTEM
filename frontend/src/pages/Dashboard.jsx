@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import api, { getErrorMessage, shopifyAPI } from "../utils/api";
 import Sidebar from "../components/Sidebar";
+import OrderInsightsFilterBar from "../components/OrderInsightsFilterBar";
 import { useAuth } from "../context/AuthContext";
 import { extractArray, extractObject } from "../utils/response";
 import {
@@ -31,6 +32,11 @@ import {
   HEAVY_VIEW_CACHE_FRESH_MS,
   shouldAutoRefreshView,
 } from "../utils/refreshPolicy";
+import {
+  buildOrderScopeApiParams,
+  hasActiveOrderScopeFilters,
+  INITIAL_ORDER_SCOPE_FILTERS,
+} from "../utils/orderScope";
 
 const CURRENCY_LABEL = "LE";
 const DASHBOARD_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
@@ -105,9 +111,22 @@ export default function Dashboard() {
   const canViewOrders = hasPermission("can_view_orders");
   const canManageUsers = hasPermission("can_manage_users");
   const canViewAllReports = hasPermission("can_view_all_reports");
+  const [scopeFilters, setScopeFilters] = useState(INITIAL_ORDER_SCOPE_FILTERS);
+  const scopeParams = useMemo(
+    () => buildOrderScopeApiParams(scopeFilters),
+    [scopeFilters],
+  );
+  const hasScopedOrderFilters = useMemo(
+    () => hasActiveOrderScopeFilters(scopeFilters),
+    [scopeFilters],
+  );
+  const scopeCacheToken = useMemo(
+    () => JSON.stringify(scopeParams),
+    [scopeParams],
+  );
   const cacheKey = useMemo(
-    () => buildStoreScopedCacheKey("dashboard:summary"),
-    [],
+    () => buildStoreScopedCacheKey(`dashboard:summary:${scopeCacheToken}`),
+    [scopeCacheToken],
   );
   const initialCachedSnapshot = useMemo(() => {
     const cached = peekCachedView(cacheKey);
@@ -158,11 +177,19 @@ export default function Dashboard() {
           setError("");
         }
 
-        const statsPromise = api.get("/dashboard/stats");
+        const statsPromise = api.get("/dashboard/stats", {
+          params: scopeParams,
+        });
         const ordersPromise = canViewOrders
-          ? api.get(
-              "/shopify/orders?limit=6&sort_by=created_at&sort_dir=desc&sync_recent=false",
-            )
+          ? api.get("/shopify/orders", {
+              params: {
+                limit: 6,
+                sort_by: "created_at",
+                sort_dir: "desc",
+                sync_recent: "false",
+                ...scopeParams,
+              },
+            })
           : Promise.resolve({ data: [] });
         const requestsPromise =
           isAdmin || canManageUsers
@@ -264,7 +291,14 @@ export default function Dashboard() {
         }
       }
     },
-    [cacheKey, canManageUsers, canViewAllReports, canViewOrders, isAdmin],
+    [
+      cacheKey,
+      canManageUsers,
+      canViewAllReports,
+      canViewOrders,
+      isAdmin,
+      scopeParams,
+    ],
   );
 
   useEffect(() => {
@@ -305,8 +339,8 @@ export default function Dashboard() {
       }
 
       const hasCachedSnapshot = Boolean(snapshot);
-      if (!hasCachedSnapshot && !isCacheFresh(cached, DASHBOARD_CACHE_FRESH_MS)) {
-        await loadData({ silent: Boolean(snapshot) });
+      if (!hasCachedSnapshot || !isCacheFresh(cached, DASHBOARD_CACHE_FRESH_MS)) {
+        await loadData({ silent: hasCachedSnapshot });
       }
     })();
 
@@ -486,43 +520,70 @@ export default function Dashboard() {
             </div>
           )}
 
+          <OrderInsightsFilterBar
+            filters={scopeFilters}
+            onChange={setScopeFilters}
+            onReset={() => setScopeFilters(INITIAL_ORDER_SCOPE_FILTERS)}
+            title="فلترة مؤشرات لوحة التحكم"
+            description="الأرقام وأحدث الطلبات سيعتمدوا على نفس نطاق الحالات والتواريخ المختار هنا."
+          />
+
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <StatCard
               title="Net Sales"
               value={formatCurrency(stats.total_sales)}
-              subtitle="Paid after refunds"
+              subtitle={
+                hasScopedOrderFilters
+                  ? "Filtered paid sales after refunds"
+                  : "Paid after refunds"
+              }
               icon={TrendingUp}
               color="from-emerald-500 to-emerald-700"
             />
             <StatCard
               title="Order Value"
               value={formatCurrency(stats.total_order_value)}
-              subtitle="All synced orders"
+              subtitle={
+                hasScopedOrderFilters
+                  ? "All orders inside the selected scope"
+                  : "All synced orders"
+              }
               icon={TrendingUp}
               color="from-amber-500 to-amber-700"
             />
             <StatCard
               title="Orders"
               value={toNumber(stats.total_orders).toLocaleString()}
+              subtitle={hasScopedOrderFilters ? "Matching current filters" : ""}
               icon={ShoppingCart}
               color="from-blue-500 to-blue-700"
             />
             <StatCard
               title="Products"
               value={toNumber(stats.total_products).toLocaleString()}
+              subtitle={
+                hasScopedOrderFilters ? "Referenced by matching orders" : ""
+              }
               icon={Package}
               color="from-indigo-500 to-indigo-700"
             />
             <StatCard
               title="Customers"
               value={toNumber(stats.total_customers).toLocaleString()}
+              subtitle={
+                hasScopedOrderFilters ? "Customers inside selected scope" : ""
+              }
               icon={Users}
               color="from-cyan-500 to-cyan-700"
             />
             <StatCard
               title="Avg Order"
               value={formatCurrency(stats.avg_order_value)}
-              subtitle="Net sales average"
+              subtitle={
+                hasScopedOrderFilters
+                  ? "Average net sales for matching paid orders"
+                  : "Net sales average"
+              }
               icon={TrendingUp}
               color="from-violet-500 to-violet-700"
             />
@@ -545,7 +606,16 @@ export default function Dashboard() {
           {canViewOrders && (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-                <h2 className="text-xl font-bold text-slate-900">Latest Orders</h2>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">
+                    {hasScopedOrderFilters ? "Latest Matching Orders" : "Latest Orders"}
+                  </h2>
+                  {hasScopedOrderFilters ? (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Only orders inside the current filter scope appear here.
+                    </p>
+                  ) : null}
+                </div>
                 <button
                   onClick={() => navigate("/orders")}
                   className="inline-flex items-center rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-semibold text-sky-700 hover:bg-sky-100"
@@ -555,7 +625,11 @@ export default function Dashboard() {
               </div>
 
               {recentOrders.length === 0 ? (
-                <p className="px-5 py-6 text-slate-500">No recent orders found.</p>
+                <p className="px-5 py-6 text-slate-500">
+                  {hasScopedOrderFilters
+                    ? "No orders match the selected filters."
+                    : "No recent orders found."}
+                </p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="data-table w-full min-w-[720px]">

@@ -1,5 +1,6 @@
 import axios from "axios";
 import { Product, Order, Customer } from "../models/index.js";
+import { extractCustomerPhone } from "../helpers/customerContact.js";
 
 export class ShopifyService {
   static #SHOPIFY_API_TIMEOUT_MS = 15000;
@@ -130,7 +131,7 @@ export class ShopifyService {
       shopify_id: customer.id.toString(),
       name: `${customer.first_name || ""} ${customer.last_name || ""}`.trim(),
       email: customer.email,
-      phone: customer.phone || "",
+      phone: extractCustomerPhone(customer),
       total_spent: customer.total_spent,
       orders_count: customer.orders_count,
       default_address: customer.default_address?.address1 || "",

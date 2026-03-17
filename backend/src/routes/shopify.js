@@ -24,6 +24,8 @@ import {
 } from "../middleware/permissions.js";
 import { authenticateToken } from "../middleware/auth.js";
 import { supabase as db } from "../supabaseClient.js";
+import { extractCustomerPhone } from "../helpers/customerContact.js";
+import { buildProductsSummaryExportPayload } from "../helpers/orderExport.js";
 
 const router = express.Router();
 
@@ -48,6 +50,7 @@ const MISSING_ORDER_NOTIFICATION_TYPES = new Set([
   "order_missing",
   "order_missing_escalated",
 ]);
+const MAX_EXPORT_ORDER_IDS = 10000;
 const PAID_LIKE_STATUSES = new Set([
   "paid",
   "partially_paid",
@@ -204,22 +207,6 @@ const CUSTOMER_LIST_SELECT = [
   "updated_at",
 ].join(",");
 const CUSTOMER_LIST_SELECTS = [
-  CUSTOMER_LIST_SELECT,
-  [
-    "id",
-    "shopify_id",
-    "store_id",
-    "name",
-    "email",
-    "phone",
-    "city",
-    "country",
-    "orders_count",
-    "total_spent",
-    "default_address",
-    "created_at",
-    "updated_at",
-  ].join(","),
   [
     "id",
     "shopify_id",
@@ -235,6 +222,22 @@ const CUSTOMER_LIST_SELECTS = [
     "created_at",
     "updated_at",
     "data",
+  ].join(","),
+  CUSTOMER_LIST_SELECT,
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "name",
+    "email",
+    "phone",
+    "city",
+    "country",
+    "orders_count",
+    "total_spent",
+    "default_address",
+    "created_at",
+    "updated_at",
   ].join(","),
   [
     "id",
@@ -1534,7 +1537,12 @@ const getFallbackCustomersPage = async (req) => {
     throw scopedRowsResult.error;
   }
 
-  return applyCustomersQueryFilters(scopedRowsResult?.data || [], req.query);
+  const normalizedCustomers = applyCustomersQueryFilters(
+    scopedRowsResult?.data || [],
+    req.query,
+  ).map((customer) => buildCustomerListItem(customer));
+
+  return await enrichCustomersWithOrderPhones(req, normalizedCustomers);
 };
 
 const applyOrdersQueryFilters = (rows, query = {}) => {
@@ -1844,6 +1852,100 @@ const buildMissingOrderRecord = (order, latestActionMap, nowTimestamp = Date.now
     ),
     requires_attention: true,
   };
+};
+
+const buildCustomerListItem = (customer) => {
+  const parsedData = parseJsonField(customer?.data);
+
+  return {
+    ...customer,
+    phone: extractCustomerPhone(customer),
+    default_address:
+      customer?.default_address ||
+      parsedData?.default_address?.address1 ||
+      "",
+    city: customer?.city || parsedData?.default_address?.city || "",
+    country: customer?.country || parsedData?.default_address?.country || "",
+  };
+};
+
+const getOrderCustomerPhone = (order) => {
+  const parsedData = parseJsonField(order?.data);
+
+  return String(
+    order?.customer_phone ||
+      parsedData?.customer?.phone ||
+      parsedData?.shipping_address?.phone ||
+      parsedData?.billing_address?.phone ||
+      "",
+  ).trim();
+};
+
+const enrichCustomersWithOrderPhones = async (req, customers = []) => {
+  const baseCustomers = Array.isArray(customers) ? customers : [];
+  const unresolvedEmails = Array.from(
+    new Set(
+      baseCustomers
+        .filter((customer) => !String(customer?.phone || "").trim())
+        .map((customer) => String(customer?.email || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (unresolvedEmails.length === 0) {
+    return baseCustomers;
+  }
+
+  try {
+    let query = db
+      .from("orders")
+      .select("customer_email,data,customer_phone,store_id,user_id,updated_at")
+      .in("customer_email", unresolvedEmails)
+      .order("updated_at", { ascending: false });
+
+    const requestedStoreId = getRequestedStoreId(req);
+    const isAdmin = await resolveIsAdmin(req);
+
+    if (requestedStoreId) {
+      query = query.eq("store_id", requestedStoreId);
+    } else if (!isAdmin) {
+      const accessibleStoreIds = await getAccessibleStoreIds(req.user.id);
+      if (accessibleStoreIds.length > 0) {
+        query = query.in("store_id", accessibleStoreIds);
+      } else {
+        query = query.eq("user_id", req.user.id);
+      }
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw error;
+    }
+
+    const phoneByEmail = new Map();
+    for (const order of data || []) {
+      const email = String(order?.customer_email || "").trim();
+      if (!email || phoneByEmail.has(email)) {
+        continue;
+      }
+
+      const phone = getOrderCustomerPhone(order);
+      if (phone) {
+        phoneByEmail.set(email, phone);
+      }
+    }
+
+    return baseCustomers.map((customer) => ({
+      ...customer,
+      phone:
+        String(customer?.phone || "").trim() ||
+        phoneByEmail.get(String(customer?.email || "").trim()) ||
+        "",
+    }));
+  } catch (error) {
+    console.warn("Customer phone order fallback failed:", error.message);
+    return baseCustomers;
+  }
 };
 
 const sortMissingOrders = (orders = []) =>
@@ -3060,7 +3162,14 @@ router.get(
       console.log(
         `Returning ${data?.length || 0} customers for user ${req.user.id}`,
       );
-      res.json(buildPaginatedCollection(data || [], pagination));
+      const normalizedCustomers = (data || []).map((customer) =>
+        buildCustomerListItem(customer),
+      );
+      const enrichedCustomers = await enrichCustomersWithOrderPhones(
+        req,
+        normalizedCustomers,
+      );
+      res.json(buildPaginatedCollection(enrichedCustomers, pagination));
     } catch (e) {
       console.error("Exception fetching customers:", e);
       res.status(500).json({ error: e.message });
@@ -3128,6 +3237,73 @@ router.get(
       res.json(data);
     } catch (e) {
       res.status(500).json({ error: e.message });
+    }
+  },
+);
+
+router.post(
+  "/orders/products-summary",
+  verifyToken,
+  requirePermission("can_view_orders"),
+  async (req, res) => {
+    try {
+      const requestedOrderIds = Array.isArray(req.body?.order_ids)
+        ? req.body.order_ids
+        : [];
+      const orderIds = Array.from(
+        new Set(
+          requestedOrderIds
+            .map((value) => String(value || "").trim())
+            .filter(Boolean),
+        ),
+      );
+
+      if (orderIds.length === 0) {
+        return res.status(400).json({ error: "order_ids is required" });
+      }
+
+      if (orderIds.length > MAX_EXPORT_ORDER_IDS) {
+        return res.status(400).json({
+          error: `A maximum of ${MAX_EXPORT_ORDER_IDS} order IDs can be exported at once`,
+        });
+      }
+
+      const scopedRowsResult = await getScopedEntityRows(req, Order);
+      if (scopedRowsResult?.error) {
+        return res.status(500).json({
+          error: scopedRowsResult.error.message || "Failed to load orders",
+        });
+      }
+
+      const orderMap = new Map(
+        (scopedRowsResult?.data || []).map((order) => [
+          String(order?.id || "").trim(),
+          order,
+        ]),
+      );
+      const matchedOrders = orderIds
+        .map((orderId) => orderMap.get(orderId))
+        .filter(Boolean);
+      const missingOrderIds = orderIds.filter((orderId) => !orderMap.has(orderId));
+
+      if (matchedOrders.length === 0) {
+        return res.status(404).json({
+          error: "No matching orders found for export",
+        });
+      }
+
+      const payload = buildProductsSummaryExportPayload(matchedOrders);
+      res.json({
+        ...payload,
+        meta: {
+          requested_order_count: orderIds.length,
+          matched_order_count: matchedOrders.length,
+          missing_order_ids: missingOrderIds,
+        },
+      });
+    } catch (error) {
+      console.error("Orders products summary export error:", error);
+      res.status(500).json({ error: error.message || "Failed to export orders" });
     }
   },
 );

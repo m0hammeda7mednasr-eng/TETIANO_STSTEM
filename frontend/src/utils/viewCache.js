@@ -63,10 +63,19 @@ export const buildStoreScopedCacheKey = (scope) => {
     return scope;
   }
 
+  let currentUserId = "anonymous";
+  try {
+    const rawUser = window.localStorage.getItem("user");
+    const parsedUser = rawUser ? JSON.parse(rawUser) : null;
+    currentUserId = String(parsedUser?.id || "").trim() || "anonymous";
+  } catch {
+    currentUserId = "anonymous";
+  }
+
   const currentStoreId =
     String(window.localStorage.getItem("currentStoreId") || "").trim() ||
     "global";
-  return `${scope}::${currentStoreId}`;
+  return `${scope}::${currentUserId}::${currentStoreId}`;
 };
 
 export const peekCachedView = (key) => readFromLocalStorage(key);

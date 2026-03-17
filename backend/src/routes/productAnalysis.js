@@ -4,19 +4,22 @@ import { authenticateToken } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { getAccessibleStoreIds } from "../models/index.js";
 import { applyUserFilter } from "../helpers/dataFilter.js";
+import {
+  PAID_LIKE_STATUSES,
+  getLineItemBookedAmount,
+  getOrderFinancialStatus,
+  getOrderFulfillmentStatus,
+  getOrderGrossAmount,
+  getOrderRefundedAmount,
+  isCancelledOrder,
+  parseOrderData,
+} from "../helpers/orderAnalytics.js";
 
 const router = express.Router();
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CACHE_TTL_MS = 3 * 60 * 1000;
-const PAID_LIKE_STATUSES = new Set([
-  "paid",
-  "partially_paid",
-  "partially_refunded",
-  "refunded",
-]);
-const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 const PRODUCTS_SELECT = [
   "id",
@@ -297,70 +300,15 @@ const getLineItems = (order) => {
     return order.line_items;
   }
 
-  const data = parseJsonField(order?.data);
+  const data = parseOrderData(order);
   return Array.isArray(data?.line_items) ? data.line_items : [];
 };
 
-const getOrderFinancialStatus = (order) => {
-  const data = parseJsonField(order?.data);
-  return String(
-    order?.financial_status || data?.financial_status || order?.status || data?.status || "",
-  )
-    .toLowerCase()
-    .trim();
-};
-
-const getOrderFulfillmentStatus = (order) => {
-  const data = parseJsonField(order?.data);
-  return String(order?.fulfillment_status || data?.fulfillment_status || "")
-    .toLowerCase()
-    .trim();
-};
-
-const isCancelledOrder = (order) => {
-  const data = parseJsonField(order?.data);
-  const status = getOrderFinancialStatus(order);
-  return (
-    Boolean(order?.cancelled_at) ||
-    Boolean(data?.cancelled_at) ||
-    CANCELLED_STATUSES.has(status)
-  );
-};
-
-const getOrderGrossAmount = (order) => {
-  const data = parseJsonField(order?.data);
-  return toNumber(order?.total_price ?? data?.total_price);
-};
-
-const getOrderRefundedAmount = (order) => {
-  const data = parseJsonField(order?.data);
-  const refunds = Array.isArray(data?.refunds) ? data.refunds : [];
-  const refundedFromTransactions = refunds.reduce((sum, refund) => {
-    const transactions = Array.isArray(refund?.transactions)
-      ? refund.transactions
-      : [];
-    return (
-      sum +
-      transactions.reduce(
-        (transactionSum, transaction) =>
-          transactionSum + toNumber(transaction?.amount),
-        0,
-      )
-    );
-  }, 0);
-
-  const refundedAmount = Math.max(
-    toNumber(order?.total_refunded),
-    refundedFromTransactions,
-  );
-
-  return Math.min(getOrderGrossAmount(order), Math.max(0, refundedAmount));
-};
-
 const buildRefundDetails = (order) => {
-  const data = parseJsonField(order?.data);
+  const data = parseOrderData(order);
   const refunds = Array.isArray(data?.refunds) ? data.refunds : [];
   const quantityByLineItemId = new Map();
+  const amountByLineItemId = new Map();
   const latestAtByLineItemId = new Map();
 
   for (const refund of refunds) {
@@ -381,6 +329,14 @@ const buildRefundDetails = (order) => {
         lineItemId,
         toNumber(quantityByLineItemId.get(lineItemId)) + toNumber(entry?.quantity),
       );
+      amountByLineItemId.set(
+        lineItemId,
+        toNumber(amountByLineItemId.get(lineItemId)) +
+          Math.max(
+            toNumber(entry?.subtotal),
+            toNumber(entry?.line_item?.price) * toNumber(entry?.quantity),
+          ),
+      );
 
       if (refundAt) {
         const previous = latestAtByLineItemId.get(lineItemId);
@@ -393,6 +349,7 @@ const buildRefundDetails = (order) => {
 
   return {
     quantityByLineItemId,
+    amountByLineItemId,
     latestAtByLineItemId,
     isFullyRefunded:
       getOrderGrossAmount(order) > 0 &&
@@ -401,7 +358,7 @@ const buildRefundDetails = (order) => {
 };
 
 const buildFulfillmentDetails = (order) => {
-  const data = parseJsonField(order?.data);
+  const data = parseOrderData(order);
   const fulfillments = Array.isArray(data?.fulfillments) ? data.fulfillments : [];
   const quantityByLineItemId = new Map();
   const latestAtByLineItemId = new Map();
@@ -452,9 +409,13 @@ const getItemRefundedQuantity = (item, refundDetails) => {
 
   const orderedQuantity = toNumber(item?.quantity);
   const currentQuantity = toNumber(item?.current_quantity);
+  const hasCurrentQuantity =
+    item?.current_quantity !== undefined &&
+    item?.current_quantity !== null &&
+    String(item.current_quantity).trim() !== "";
   if (
     orderedQuantity > 0 &&
-    currentQuantity > 0 &&
+    hasCurrentQuantity &&
     currentQuantity < orderedQuantity
   ) {
     return orderedQuantity - currentQuantity;
@@ -478,7 +439,16 @@ const getItemDeliveredQuantity = (order, item, fulfillmentDetails) => {
   }
 
   const fulfillableQuantity = toNumber(item?.fulfillable_quantity);
-  if (orderedQuantity > 0 && fulfillableQuantity >= 0 && fulfillableQuantity < orderedQuantity) {
+  const hasFulfillableQuantity =
+    item?.fulfillable_quantity !== undefined &&
+    item?.fulfillable_quantity !== null &&
+    String(item.fulfillable_quantity).trim() !== "";
+  if (
+    orderedQuantity > 0 &&
+    hasFulfillableQuantity &&
+    fulfillableQuantity >= 0 &&
+    fulfillableQuantity < orderedQuantity
+  ) {
     return Math.min(orderedQuantity, orderedQuantity - fulfillableQuantity);
   }
 
@@ -702,10 +672,14 @@ const loadScopedOrders = async (storeId) =>
     ascending: false,
   });
 
-const loadScopedTasks = async (req) => {
+const loadScopedTasks = async (req, storeId) => {
   let query = db.from("tasks").select(TASKS_SELECT).order("updated_at", {
     ascending: false,
   });
+
+  if (storeId) {
+    query = query.eq("store_id", storeId);
+  }
 
   if (!resolveIsAdmin(req)) {
     query = applyUserFilter(query, req.user?.id, req.user?.role || "user", "tasks");
@@ -719,7 +693,103 @@ const loadScopedTasks = async (req) => {
   return data || [];
 };
 
-const buildAnalyticsPayload = async (req, storeId) => {
+const buildOrderLineEntries = (order, refundDetails, fulfillmentDetails) => {
+  const orderCancelled = isCancelledOrder(order);
+  const orderRefundedAmount = getOrderRefundedAmount(order);
+  const isPaidLike = PAID_LIKE_STATUSES.has(getOrderFinancialStatus(order));
+  const lineContexts = [];
+  let explicitRefundAmountTotal = 0;
+  let refundableBaseTotal = 0;
+
+  for (const item of getLineItems(order)) {
+    const orderedQuantity = toNumber(item?.quantity);
+    if (orderedQuantity <= 0) {
+      continue;
+    }
+
+    const refundedQuantity = Math.min(
+      orderedQuantity,
+      getItemRefundedQuantity(item, refundDetails),
+    );
+    const deliveredQuantity = Math.min(
+      orderedQuantity,
+      getItemDeliveredQuantity(order, item, fulfillmentDetails),
+    );
+    const cancelledQuantity = orderCancelled
+      ? Math.max(0, orderedQuantity - deliveredQuantity)
+      : 0;
+    const pendingQuantity = Math.max(
+      0,
+      orderedQuantity - deliveredQuantity - cancelledQuantity,
+    );
+    const netDeliveredQuantity = Math.max(0, deliveredQuantity - refundedQuantity);
+    const saleableQuantity = Math.max(0, orderedQuantity - cancelledQuantity);
+    const orderLineAmount = getLineItemBookedAmount(item);
+    const grossSales =
+      isPaidLike && orderedQuantity > 0
+        ? (orderLineAmount * saleableQuantity) / orderedQuantity
+        : 0;
+    const explicitRefundAmount = Math.min(
+      grossSales,
+      Math.max(
+        0,
+        toNumber(
+          refundDetails.amountByLineItemId.get(
+            normalizeKey(item?.id || item?.line_item_id),
+          ),
+        ),
+      ),
+    );
+
+    explicitRefundAmountTotal += explicitRefundAmount;
+    if (grossSales > explicitRefundAmount) {
+      refundableBaseTotal += grossSales - explicitRefundAmount;
+    }
+
+    lineContexts.push({
+      item,
+      orderedQuantity,
+      refundedQuantity,
+      deliveredQuantity,
+      cancelledQuantity,
+      pendingQuantity,
+      netDeliveredQuantity,
+      saleableQuantity,
+      grossSales,
+      explicitRefundAmount,
+    });
+  }
+
+  const remainingRefundAmount = Math.max(
+    0,
+    Math.min(orderRefundedAmount, lineContexts.reduce((sum, line) => sum + line.grossSales, 0)) -
+      explicitRefundAmountTotal,
+  );
+
+  for (const lineContext of lineContexts) {
+    const allocatableBase = Math.max(
+      0,
+      lineContext.grossSales - lineContext.explicitRefundAmount,
+    );
+    const proportionalRefundAmount =
+      remainingRefundAmount > 0 && refundableBaseTotal > 0 && allocatableBase > 0
+        ? (remainingRefundAmount * allocatableBase) / refundableBaseTotal
+        : 0;
+
+    lineContext.refundedAmount = Math.min(
+      lineContext.grossSales,
+      lineContext.explicitRefundAmount + proportionalRefundAmount,
+    );
+    lineContext.netSales = Math.max(
+      0,
+      lineContext.grossSales - lineContext.refundedAmount,
+    );
+  }
+
+  return lineContexts;
+};
+
+export const buildAnalyticsPayload = async (req, storeId) => {
   const [products, orders] = await Promise.all([
     loadScopedProducts(storeId),
     loadScopedOrders(storeId),
@@ -728,7 +798,7 @@ const buildAnalyticsPayload = async (req, storeId) => {
   let tasks = [];
   let taskMetricsAvailable = true;
   try {
-    tasks = await loadScopedTasks(req);
+    tasks = await loadScopedTasks(req, storeId);
   } catch (error) {
     if (!isSchemaCompatibilityError(error)) {
       console.warn("Product analysis tasks fallback:", error.message);
@@ -771,13 +841,22 @@ const buildAnalyticsPayload = async (req, storeId) => {
 
   for (const order of orders) {
     const orderId = normalizeKey(order?.id);
-    const lineItems = getLineItems(order);
     const refundDetails = buildRefundDetails(order);
     const fulfillmentDetails = buildFulfillmentDetails(order);
-    const isPaidLike = PAID_LIKE_STATUSES.has(getOrderFinancialStatus(order));
-    const orderCancelled = isCancelledOrder(order);
+    const lineEntries = buildOrderLineEntries(order, refundDetails, fulfillmentDetails);
 
-    for (const item of lineItems) {
+    for (const lineEntry of lineEntries) {
+      const {
+        item,
+        orderedQuantity,
+        refundedQuantity,
+        deliveredQuantity,
+        cancelledQuantity,
+        pendingQuantity,
+        netDeliveredQuantity,
+        grossSales,
+        netSales,
+      } = lineEntry;
       const itemProductId = normalizeKey(item?.product_id);
       const itemVariantId = normalizeKey(item?.variant_id);
       const itemSku = normalizeSku(item?.sku);
@@ -795,35 +874,6 @@ const buildAnalyticsPayload = async (req, storeId) => {
       if (!variantEntry) {
         continue;
       }
-
-      const orderedQuantity = toNumber(item?.quantity);
-      const refundedQuantity = Math.min(
-        orderedQuantity,
-        getItemRefundedQuantity(item, refundDetails),
-      );
-      const deliveredQuantity = Math.min(
-        orderedQuantity,
-        getItemDeliveredQuantity(order, item, fulfillmentDetails),
-      );
-      const cancelledQuantity = orderCancelled
-        ? Math.max(0, orderedQuantity - deliveredQuantity)
-        : 0;
-      const pendingQuantity = Math.max(
-        0,
-        orderedQuantity - deliveredQuantity - cancelledQuantity,
-      );
-      const netDeliveredQuantity = Math.max(
-        0,
-        deliveredQuantity - refundedQuantity,
-      );
-      const linePrice = toNumber(item?.price);
-      const saleableQuantity = Math.max(0, orderedQuantity - cancelledQuantity);
-      const netSaleableQuantity = Math.max(
-        0,
-        saleableQuantity - refundedQuantity,
-      );
-      const grossSales = isPaidLike ? linePrice * saleableQuantity : 0;
-      const netSales = isPaidLike ? linePrice * netSaleableQuantity : 0;
       const orderCreatedAt = order?.created_at || null;
       const lineItemId = normalizeKey(item?.id || item?.line_item_id);
       const lineFulfillmentAt =
@@ -846,7 +896,7 @@ const buildAnalyticsPayload = async (req, storeId) => {
         target.net_sales += netSales;
         target.orderIds.add(orderId);
 
-        if (isPaidLike) {
+        if (grossSales > 0) {
           target.paidOrderIds.add(orderId);
         }
         if (deliveredQuantity > 0) {

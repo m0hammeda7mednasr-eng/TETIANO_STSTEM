@@ -16,6 +16,7 @@ import {
   Settings,
   Shield,
   ShoppingCart,
+  Truck,
   UserPlus,
   Users,
   X,
@@ -29,6 +30,7 @@ const AR = {
   orders: "\u0627\u0644\u0637\u0644\u0628\u0627\u062A",
   missingOrders: "\u0627\u0644\u0637\u0644\u0628\u0627\u062A \u0627\u0644\u0645\u0641\u0642\u0648\u062F\u0629",
   products: "\u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A",
+  suppliers: "\u0627\u0644\u0645\u0648\u0631\u062F\u064A\u0646",
   productAnalysis: "\u062A\u062D\u0644\u064A\u0644 \u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A",
   warehouse: "\u0627\u0644\u0645\u062E\u0632\u0646",
   scanner: "\u0627\u0644\u0633\u0643\u0627\u0646\u0631",
@@ -90,6 +92,12 @@ const SHARED_NAV = [
         icon: Package,
         label: AR.products,
         path: "/products",
+        permission: "can_view_products",
+      },
+      {
+        icon: Truck,
+        label: AR.suppliers,
+        path: "/suppliers",
         permission: "can_view_products",
       },
       {
@@ -198,7 +206,7 @@ const ADMIN_NAV = [
 
 const getAutoExpandedGroups = (pathname) => ({
   orders: pathname.startsWith("/orders"),
-  catalog: pathname.startsWith("/products"),
+  catalog: pathname.startsWith("/products") || pathname.startsWith("/suppliers"),
   inventory: pathname.startsWith("/warehouse"),
 });
 
@@ -228,6 +236,7 @@ export default function Sidebar() {
     getAutoExpandedGroups(window.location.pathname),
   );
   const { user, logout, hasPermission, isAdmin } = useAuth();
+  const canManageSettings = hasPermission("can_manage_settings");
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -396,7 +405,7 @@ export default function Sidebar() {
         </nav>
 
         <div className="mt-auto p-4 border-t border-slate-800 bg-slate-950/70 backdrop-blur shrink-0 space-y-2">
-          {isAdmin && (
+          {canManageSettings && (
             <Link
               to="/settings"
               onClick={handleItemClick}

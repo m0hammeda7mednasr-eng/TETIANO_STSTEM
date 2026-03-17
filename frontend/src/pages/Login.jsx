@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock } from "lucide-react";
 import { authAPI, getErrorMessage } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 import tetianoLogo from "../assets/tetiano-logo.jpeg";
 
 export default function Login() {
@@ -12,6 +13,7 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { refreshAuth } = useAuth();
 
   const handleChange = (e) => {
     setFormData({
@@ -26,6 +28,7 @@ export default function Login() {
     setLoading(true);
 
     try {
+      localStorage.removeItem("currentStoreId");
       const response = await authAPI.login(formData);
       localStorage.setItem("token", response.data.token);
       localStorage.setItem("user", JSON.stringify(response.data.user));
@@ -37,6 +40,7 @@ export default function Login() {
         );
       }
 
+      await refreshAuth();
       navigate("/dashboard");
     } catch (err) {
       console.error("Login error:", err);

@@ -123,11 +123,12 @@ jest.unstable_mockModule("../supabaseClient.js", () => ({
   supabase: supabaseMock,
 }));
 
-const { Product } = await import("./index.js");
+const { Product, getAccessibleStoreIds } = await import("./index.js");
 
 describe("models/index Shopify scoping", () => {
   beforeEach(() => {
     tableData = {
+      users: [],
       user_stores: [],
       shopify_tokens: [],
       products: [],
@@ -139,7 +140,7 @@ describe("models/index Shopify scoping", () => {
     supabaseMock.from.mockClear();
   });
 
-  it("does not fall back to unscoped Shopify product lists for users without store access", async () => {
+  it("falls back to user-scoped product lists only when no shared store scope can be discovered", async () => {
     tableData.products = [
       { id: "product-1", shopify_id: "shopify-1", user_id: "owner-1" },
       { id: "product-2", shopify_id: "shopify-2", user_id: "owner-2" },
@@ -154,19 +155,19 @@ describe("models/index Shopify scoping", () => {
     );
 
     expect(productQueries.length).toBeGreaterThan(0);
-    for (const query of productQueries) {
-      expect(query.filters).toContainEqual({
-        type: "eq",
-        column: "user_id",
-        value: "employee-1",
-      });
-      expect(
+    expect(
+      productQueries.some((query) =>
         query.filters.some(
           (filter) =>
-            filter.type === "in" && filter.column === "store_id",
+            filter.type === "eq" &&
+            filter.column === "user_id" &&
+            filter.value === "employee-1",
         ),
-      ).toBe(false);
-    }
+      ),
+    ).toBe(true);
+    expect(
+      productQueries.some((query) => query.filters.length === 0),
+    ).toBe(false);
   });
 
   it("does not fall back to unscoped Shopify product lookup by id", async () => {
@@ -288,5 +289,110 @@ describe("models/index Shopify scoping", () => {
           ),
       ),
     ).toBe(true);
+  });
+
+  it("inherits store access from the creator account when explicit user-store mappings are missing", async () => {
+    tableData.users = [
+      { id: "employee-1", created_by: "admin-1" },
+      { id: "admin-1", created_by: null },
+    ];
+    tableData.user_stores = [{ user_id: "admin-1", store_id: "store-1" }];
+
+    const storeIds = await getAccessibleStoreIds("employee-1");
+
+    expect(storeIds).toEqual(["store-1"]);
+  });
+
+  it("returns creator store products for employees without leaking unrelated legacy rows", async () => {
+    tableData.users = [
+      { id: "employee-1", created_by: "admin-1" },
+      { id: "admin-1", created_by: null },
+    ];
+    tableData.user_stores = [{ user_id: "admin-1", store_id: "store-1" }];
+    tableData.products = [
+      {
+        id: "shared-product",
+        shopify_id: "shared-1",
+        store_id: "store-1",
+        user_id: "owner-1",
+      },
+      {
+        id: "legacy-product",
+        shopify_id: "legacy-1",
+        user_id: "employee-1",
+      },
+    ];
+
+    const result = await Product.findByUser("employee-1");
+
+    expect(result).toEqual({
+      data: [
+        {
+          id: "shared-product",
+          shopify_id: "shared-1",
+          store_id: "store-1",
+          user_id: "owner-1",
+        },
+      ],
+      error: null,
+    });
+    expect(
+      executedQueries.some(
+        (query) =>
+          query.table === "products" &&
+          query.mode === "list" &&
+          query.filters.some(
+            (filter) =>
+              filter.type === "in" &&
+              filter.column === "store_id" &&
+              filter.values.includes("store-1"),
+          ),
+      ),
+    ).toBe(true);
+    expect(
+      executedQueries.some(
+        (query) =>
+          query.table === "products" &&
+          query.mode === "list" &&
+          query.filters.some(
+            (filter) =>
+              filter.type === "eq" &&
+              filter.column === "user_id" &&
+              filter.value === "employee-1",
+          ),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not fall back to legacy user-scoped rows when store access exists but the store has no matching products", async () => {
+    tableData.users = [
+      { id: "employee-1", created_by: "admin-1" },
+      { id: "admin-1", created_by: null },
+    ];
+    tableData.user_stores = [{ user_id: "admin-1", store_id: "store-1" }];
+    tableData.products = [
+      {
+        id: "legacy-product",
+        shopify_id: "legacy-1",
+        user_id: "employee-1",
+      },
+    ];
+
+    const result = await Product.findByUser("employee-1");
+
+    expect(result).toEqual({ data: [], error: null });
+    expect(
+      executedQueries.some(
+        (query) =>
+          query.table === "products" &&
+          query.mode === "list" &&
+          query.filters.some(
+            (filter) =>
+              filter.type === "eq" &&
+              filter.column === "user_id" &&
+              filter.value === "employee-1",
+          ),
+      ),
+    ).toBe(false);
   });
 });

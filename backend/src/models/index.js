@@ -160,8 +160,11 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
       { continueOnUnexpectedError: true },
     );
 
-    if (!primaryScopeResult.error && hasMeaningfulData(primaryScopeResult.data)) {
-      return { data: primaryScopeResult.data, error: null };
+    if (!primaryScopeResult.error) {
+      return {
+        data: Array.isArray(primaryScopeResult.data) ? primaryScopeResult.data : [],
+        error: null,
+      };
     }
   }
 
@@ -209,8 +212,8 @@ const findRowByIdForUserWithFallback = async (tableName, userId, id) => {
       { continueOnUnexpectedError: true },
     );
 
-    if (!primaryScopeResult.error && hasMeaningfulData(primaryScopeResult.data)) {
-      return { data: primaryScopeResult.data, error: null };
+    if (!primaryScopeResult.error) {
+      return { data: primaryScopeResult.data || null, error: null };
     }
   }
 
@@ -400,8 +403,17 @@ const upsertRowsWithManualFallback = async (tableName, rows, itemLabel) => {
   };
 };
 
-export const getAccessibleStoreIds = async (userId) => {
+export const getAccessibleStoreIds = async (userId, context = {}) => {
   if (!userId) return [];
+
+  const inheritanceTrail = context?.inheritanceTrail || new Set();
+  const normalizedUserId = String(userId || "").trim();
+  if (inheritanceTrail.has(normalizedUserId)) {
+    return [];
+  }
+
+  const nextTrail = new Set(inheritanceTrail);
+  nextTrail.add(normalizedUserId);
 
   const cachedStoreIds = getCachedAccessibleStoreIds(userId);
   if (cachedStoreIds) {
@@ -486,6 +498,37 @@ export const getAccessibleStoreIds = async (userId) => {
     } catch (inferenceError) {
       console.log("Store inference fallback failed:", inferenceError.message);
     }
+
+    // Inherit store access from the account creator so secondary users work on
+    // the same store data without leaking unrelated stores.
+    try {
+      const { data: userRow, error: userError } = await supabase
+        .from("users")
+        .select("created_by")
+        .eq("id", userId)
+        .limit(1)
+        .maybeSingle();
+
+      if (!userError) {
+        const creatorId = String(userRow?.created_by || "").trim();
+        if (creatorId && creatorId !== normalizedUserId) {
+          const inheritedStoreIds = await getAccessibleStoreIds(creatorId, {
+            inheritanceTrail: nextTrail,
+          });
+
+          if (inheritedStoreIds.length > 0) {
+            rememberAccessibleStoreIds(userId, inheritedStoreIds);
+            return inheritedStoreIds;
+          }
+        }
+      }
+    } catch (inheritanceError) {
+      console.log(
+        "Creator store inheritance fallback failed:",
+        inheritanceError.message,
+      );
+    }
+
     return [];
   } catch (error) {
     console.error("getAccessibleStoreIds error:", error);

@@ -1,9 +1,11 @@
 import React, { createContext, useState, useContext } from 'react';
 
 const StoreContext = createContext(null);
+const getInitialStoreId = () =>
+  typeof window !== "undefined" ? window.localStorage.getItem("currentStoreId") : null;
 
 export const StoreProvider = ({ children }) => {
-  const [currentStoreId, setCurrentStoreId] = useState(null);
+  const [currentStoreId, setCurrentStoreId] = useState(getInitialStoreId);
 
   const setStoreId = (storeId) => {
     setCurrentStoreId(storeId);

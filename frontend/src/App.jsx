@@ -12,6 +12,7 @@ import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Customers from "./pages/Customers";
 import Products from "./pages/Products";
+import Suppliers from "./pages/Suppliers";
 import ProductAnalysis from "./pages/ProductAnalysis";
 import ProductDetails from "./pages/ProductDetails";
 import Orders from "./pages/Orders";
@@ -68,6 +69,14 @@ function App() {
               element={
                 <ProtectedRoute permission="can_view_products">
                   <Products />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/suppliers"
+              element={
+                <ProtectedRoute permission="can_view_products">
+                  <Suppliers />
                 </ProtectedRoute>
               }
             />
@@ -130,9 +139,9 @@ function App() {
             <Route
               path="/settings"
               element={
-                <AdminRoute>
+                <ProtectedRoute permission="can_manage_settings">
                   <Settings />
-                </AdminRoute>
+                </ProtectedRoute>
               }
             />
             <Route

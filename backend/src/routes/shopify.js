@@ -2333,7 +2333,11 @@ const applyProductsQueryFilters = (rows, query = {}) => {
 };
 
 // 1. Get Shopify Authorization URL
-router.post("/auth-url", authenticateToken, async (req, res) => {
+router.post(
+  "/auth-url",
+  authenticateToken,
+  requirePermission("can_manage_settings"),
+  async (req, res) => {
   try {
     const inputShop = normalizeShopDomain(req.body?.shop);
     const userId = req.user.id; // Changed from req.user.userId
@@ -2364,7 +2368,8 @@ router.post("/auth-url", authenticateToken, async (req, res) => {
       .status(500)
       .json({ error: "Failed to create Shopify authorization URL." });
   }
-});
+  },
+);
 
 // 2. OAuth Callback
 router.get("/callback", async (req, res) => {
@@ -2472,7 +2477,7 @@ router.get("/callback", async (req, res) => {
 router.post(
   "/sync",
   authenticateToken,
-  requireAdminRole,
+  requirePermission("can_manage_settings"),
   async (req, res) => {
     try {
       console.log("🔄 Starting Shopify sync process...");
@@ -2636,7 +2641,11 @@ router.post(
 );
 
 // 4. Check Shopify connection status
-router.get("/status", authenticateToken, async (req, res) => {
+router.get(
+  "/status",
+  authenticateToken,
+  requirePermission("can_manage_settings"),
+  async (req, res) => {
   try {
     const requestedStoreId = getRequestedStoreId(req);
     const isAdmin = await resolveIsAdmin(req);
@@ -2684,12 +2693,13 @@ router.get("/status", authenticateToken, async (req, res) => {
       webhookAddress: getWebhookAddress(req),
     });
   }
-});
+  },
+);
 
 router.post(
   "/disconnect",
   authenticateToken,
-  requireAdminRole,
+  requirePermission("can_manage_settings"),
   async (req, res) => {
     try {
       const requestedStoreId = getRequestedStoreId(req);
@@ -2772,7 +2782,11 @@ router.post(
 );
 
 // 5. Save Shopify API credentials
-router.post("/save-credentials", verifyToken, async (req, res) => {
+router.post(
+  "/save-credentials",
+  verifyToken,
+  requirePermission("can_manage_settings"),
+  async (req, res) => {
   try {
     const userId = req.user.id; // Changed from req.user.userId
     const { apiKey, apiSecret } = req.body;
@@ -2813,17 +2827,23 @@ router.post("/save-credentials", verifyToken, async (req, res) => {
     console.error("Save credentials error:", error);
     res.status(500).json({ error: "Failed to save credentials." });
   }
-});
+  },
+);
 
 // 6. Get Shopify credentials for current user
-router.get("/get-credentials", verifyToken, async (req, res) => {
+router.get(
+  "/get-credentials",
+  verifyToken,
+  requirePermission("can_manage_settings"),
+  async (req, res) => {
   try {
     const { apiKey } = await getShopifyCredentials(req.user.id); // Changed from req.user.userId
     res.json({ hasCredentials: true, apiKey });
   } catch (error) {
     res.json({ hasCredentials: false });
   }
-});
+  },
+);
 
 // Other data-fetching routes remain unchanged...
 router.get(

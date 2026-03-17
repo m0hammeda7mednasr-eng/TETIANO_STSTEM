@@ -14,6 +14,7 @@ import {
   isTransientSupabaseError,
   withSupabaseRetry,
 } from "../helpers/supabaseRetry.js";
+import { getAccessibleStoreIds } from "../models/index.js";
 
 const router = express.Router();
 const MAX_USERS_LIST_LIMIT = 200;
@@ -41,6 +42,115 @@ const shouldIncludeCount = (value) =>
 
 const shouldUseCompactSelect = (value) =>
   ["1", "true", "yes"].includes(String(value || "").toLowerCase());
+
+const getStoreFallbackName = (storeId) =>
+  `Store ${String(storeId || "").trim().slice(0, 8)}`;
+
+const rememberDiscoveredStore = (storesMap, storeId, preferredName = "") => {
+  const normalizedId = String(storeId || "").trim();
+  if (!normalizedId) {
+    return;
+  }
+
+  const normalizedName = String(preferredName || "").trim();
+  const nextStore = {
+    id: normalizedId,
+    name: normalizedName || getStoreFallbackName(normalizedId),
+  };
+  const existingStore = storesMap.get(normalizedId);
+
+  if (!existingStore) {
+    storesMap.set(normalizedId, nextStore);
+    return;
+  }
+
+  const existingUsesFallbackName =
+    existingStore.name === getStoreFallbackName(normalizedId);
+
+  if (normalizedName && existingUsesFallbackName) {
+    storesMap.set(normalizedId, nextStore);
+  }
+};
+
+export const getAdminVisibleStores = async () => {
+  const discoveredStores = new Map();
+
+  try {
+    const { data, error } = await supabase
+      .from("stores")
+      .select("id, name")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching admin stores:", error);
+    } else {
+      (data || []).forEach((store) =>
+        rememberDiscoveredStore(discoveredStores, store?.id, store?.name),
+      );
+    }
+  } catch (error) {
+    console.error("Admin stores lookup failed:", error);
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("shopify_tokens")
+      .select("store_id, shop")
+      .not("store_id", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(200);
+
+    if (error) {
+      console.error("Error inferring admin stores from Shopify tokens:", error);
+    } else {
+      (data || []).forEach((token) =>
+        rememberDiscoveredStore(
+          discoveredStores,
+          token?.store_id,
+          token?.shop,
+        ),
+      );
+    }
+  } catch (error) {
+    console.error("Admin token-based store lookup failed:", error);
+  }
+
+  try {
+    const inferredResults = await Promise.all([
+      supabase
+        .from("products")
+        .select("store_id")
+        .not("store_id", "is", null)
+        .limit(200),
+      supabase
+        .from("orders")
+        .select("store_id")
+        .not("store_id", "is", null)
+        .limit(200),
+      supabase
+        .from("customers")
+        .select("store_id")
+        .not("store_id", "is", null)
+        .limit(200),
+    ]);
+
+    inferredResults.forEach((result) => {
+      if (result?.error) {
+        throw result.error;
+      }
+
+      (result?.data || []).forEach((row) =>
+        rememberDiscoveredStore(discoveredStores, row?.store_id),
+      );
+    });
+  } catch (error) {
+    console.error("Admin data-based store inference failed:", error);
+  }
+
+  return Array.from(discoveredStores.values()).sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+};
 
 // Get all users (Admin only)
 router.get(
@@ -279,15 +389,40 @@ router.delete(
 // Get current user's stores
 router.get("/me/stores", authenticateToken, async (req, res) => {
   try {
+    const normalizedRole = String(req.user?.role || "").toLowerCase();
+
+    if (normalizedRole === "admin") {
+      const adminStores = await getAdminVisibleStores();
+      if (adminStores.length > 0) {
+        return res.json(adminStores);
+      }
+    }
+
+    const accessibleStoreIds = await getAccessibleStoreIds(req.user.id);
+    if (!Array.isArray(accessibleStoreIds) || accessibleStoreIds.length === 0) {
+      return res.json([]);
+    }
+
     const { data, error } = await supabase
-      .from("user_stores")
-      .select("stores (*)")
-      .eq("user_id", req.user.id);
+      .from("stores")
+      .select("*")
+      .in("id", accessibleStoreIds)
+      .order("name", { ascending: true });
 
-    if (error) throw error;
+    if (!error && Array.isArray(data) && data.length > 0) {
+      return res.json(data);
+    }
 
-    const stores = data.map((item) => item.stores);
-    res.json(stores);
+    if (error) {
+      console.error("Error fetching accessible stores:", error);
+    }
+
+    return res.json(
+      accessibleStoreIds.map((storeId) => ({
+        id: storeId,
+        name: `Store ${String(storeId).slice(0, 8)}`,
+      })),
+    );
   } catch (error) {
     console.error("Error fetching user stores:", error);
     res.status(500).json({ error: error.message });

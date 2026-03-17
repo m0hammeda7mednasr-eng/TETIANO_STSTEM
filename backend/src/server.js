@@ -20,6 +20,7 @@ import shopifyWebhooksRoutes from "./routes/shopifyWebhooks.js";
 import eventsRoutes from "./routes/events.js";
 import warehouseRoutes from "./routes/warehouse.js";
 import productAnalysisRoutes from "./routes/productAnalysis.js";
+import suppliersRoutes from "./routes/suppliers.js";
 import { supabase } from "./supabaseClient.js";
 import { setRlsContext } from "./middleware/rls.js";
 import { emitRealtimeEvent } from "./services/realtimeEventService.js";
@@ -122,6 +123,7 @@ app.use("/api/order-comments", orderCommentsRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/warehouse", warehouseRoutes);
 app.use("/api/product-analysis", productAnalysisRoutes);
+app.use("/api/suppliers", suppliersRoutes);
 
 // Health Check
 app.get("/api/health", (req, res) => {

@@ -1,0 +1,1181 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  Building2,
+  CheckCircle2,
+  CreditCard,
+  Package,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Truck,
+  Wallet,
+} from "lucide-react";
+import Sidebar from "../components/Sidebar";
+import { useAuth } from "../context/AuthContext";
+import { suppliersAPI } from "../utils/api";
+import { formatCurrency, formatDateTime } from "../utils/helpers";
+import { extractArray } from "../utils/response";
+import { subscribeToSharedDataUpdates } from "../utils/realtime";
+
+const PAYMENT_METHOD_OPTIONS = [
+  { value: "bank_transfer", label: "تحويل بنكي" },
+  { value: "cash", label: "كاش" },
+  { value: "wallet", label: "محفظة" },
+  { value: "instapay", label: "إنستاباي" },
+  { value: "other", label: "أخرى" },
+];
+
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatCount = (value) => toNumber(value).toLocaleString("ar-EG");
+const getTodayValue = () => new Date().toISOString().slice(0, 10);
+
+const createEmptySupplierForm = () => ({
+  code: "",
+  name: "",
+  contact_name: "",
+  phone: "",
+  email: "",
+  address: "",
+  payment_terms: "",
+  bank_name: "",
+  account_holder: "",
+  account_number: "",
+  iban: "",
+  wallet_number: "",
+  notes: "",
+  opening_balance: "",
+  is_active: true,
+});
+
+const createEmptyDeliveryItem = () => ({
+  product_name: "",
+  sku: "",
+  material: "",
+  quantity: "1",
+  unit_cost: "",
+  total_cost: "",
+  notes: "",
+});
+
+const createEmptyDeliveryForm = () => ({
+  entry_date: getTodayValue(),
+  reference_code: "",
+  description: "",
+  notes: "",
+  payment_method: "bank_transfer",
+  payment_account: "",
+  items: [createEmptyDeliveryItem()],
+});
+
+const createEmptyPaymentForm = () => ({
+  entry_date: getTodayValue(),
+  reference_code: "",
+  description: "",
+  notes: "",
+  payment_method: "bank_transfer",
+  payment_account: "",
+  amount: "",
+});
+
+const getDeliveryItemTotal = (item) => {
+  const explicitTotal = toNumber(item?.total_cost);
+  if (explicitTotal > 0) {
+    return explicitTotal;
+  }
+
+  return toNumber(item?.quantity) * toNumber(item?.unit_cost);
+};
+
+const buildSupplierFormFromRecord = (supplier) => ({
+  code: supplier?.code || "",
+  name: supplier?.name || "",
+  contact_name: supplier?.contact_name || "",
+  phone: supplier?.phone || "",
+  email: supplier?.email || "",
+  address: supplier?.address || "",
+  payment_terms: supplier?.payment_terms || "",
+  bank_name: supplier?.bank_name || "",
+  account_holder: supplier?.account_holder || "",
+  account_number: supplier?.account_number || "",
+  iban: supplier?.iban || "",
+  wallet_number: supplier?.wallet_number || "",
+  notes: supplier?.notes || "",
+  opening_balance:
+    supplier?.opening_balance !== null && supplier?.opening_balance !== undefined
+      ? String(supplier.opening_balance)
+      : "",
+  is_active: supplier?.is_active !== false,
+});
+
+const isSuppliersRelatedUpdate = (event) =>
+  String(event?.source || "").toLowerCase().includes("/suppliers");
+
+export default function Suppliers() {
+  const { hasPermission } = useAuth();
+  const canEditProducts = hasPermission("can_edit_products");
+
+  const [suppliers, setSuppliers] = useState([]);
+  const [selectedSupplierId, setSelectedSupplierId] = useState("");
+  const [selectedSupplier, setSelectedSupplier] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState({ type: "", text: "" });
+  const [showSupplierForm, setShowSupplierForm] = useState(false);
+  const [editingSupplierId, setEditingSupplierId] = useState("");
+  const [supplierForm, setSupplierForm] = useState(createEmptySupplierForm);
+  const [deliveryForm, setDeliveryForm] = useState(createEmptyDeliveryForm);
+  const [paymentForm, setPaymentForm] = useState(createEmptyPaymentForm);
+  const [savingSupplier, setSavingSupplier] = useState(false);
+  const [savingDelivery, setSavingDelivery] = useState(false);
+  const [savingPayment, setSavingPayment] = useState(false);
+
+  const loadSuppliers = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const response = await suppliersAPI.list();
+      const list = extractArray(response?.data);
+      setSuppliers(list);
+      setSelectedSupplierId((current) => {
+        if (current && list.some((supplier) => supplier.id === current)) {
+          return current;
+        }
+        return list[0]?.id || "";
+      });
+    } catch (requestError) {
+      console.error("Error loading suppliers:", requestError);
+      setSuppliers([]);
+      setSelectedSupplierId("");
+      setSelectedSupplier(null);
+      setError(
+        requestError?.response?.data?.error || "فشل تحميل بيانات الموردين",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadSupplierDetail = useCallback(async (supplierId, { silent = false } = {}) => {
+    if (!supplierId) {
+      setSelectedSupplier(null);
+      return;
+    }
+
+    try {
+      if (!silent) {
+        setDetailLoading(true);
+      }
+
+      const response = await suppliersAPI.getById(supplierId);
+      setSelectedSupplier(response?.data?.supplier || null);
+    } catch (requestError) {
+      console.error("Error loading supplier detail:", requestError);
+      setSelectedSupplier(null);
+      setError(
+        requestError?.response?.data?.error || "فشل تحميل تفاصيل المورد",
+      );
+    } finally {
+      if (!silent) {
+        setDetailLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSuppliers();
+  }, [loadSuppliers]);
+
+  useEffect(() => {
+    loadSupplierDetail(selectedSupplierId);
+  }, [loadSupplierDetail, selectedSupplierId]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToSharedDataUpdates((event) => {
+      if (!isSuppliersRelatedUpdate(event)) {
+        return;
+      }
+
+      loadSuppliers();
+      if (selectedSupplierId) {
+        loadSupplierDetail(selectedSupplierId, { silent: true });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [loadSupplierDetail, loadSuppliers, selectedSupplierId]);
+
+  const filteredSuppliers = useMemo(() => {
+    const keyword = String(searchTerm || "").trim().toLowerCase();
+    if (!keyword) {
+      return suppliers;
+    }
+
+    return suppliers.filter((supplier) =>
+      [
+        supplier?.name,
+        supplier?.code,
+        supplier?.contact_name,
+        supplier?.phone,
+        supplier?.email,
+      ].some((value) => String(value || "").toLowerCase().includes(keyword)),
+    );
+  }, [searchTerm, suppliers]);
+
+  const summary = useMemo(
+    () =>
+      suppliers.reduce(
+        (acc, supplier) => {
+          acc.total_suppliers += 1;
+          if (supplier?.is_active !== false) {
+            acc.active_suppliers += 1;
+          }
+          acc.total_deliveries += toNumber(supplier?.total_deliveries);
+          acc.total_payments += toNumber(supplier?.total_payments);
+          acc.outstanding_balance += toNumber(supplier?.outstanding_balance);
+          return acc;
+        },
+        {
+          total_suppliers: 0,
+          active_suppliers: 0,
+          total_deliveries: 0,
+          total_payments: 0,
+          outstanding_balance: 0,
+        },
+      ),
+    [suppliers],
+  );
+
+  const startCreatingSupplier = () => {
+    setEditingSupplierId("");
+    setSupplierForm(createEmptySupplierForm());
+    setShowSupplierForm(true);
+  };
+
+  const startEditingSupplier = () => {
+    if (!selectedSupplier) {
+      return;
+    }
+
+    setEditingSupplierId(selectedSupplier.id);
+    setSupplierForm(buildSupplierFormFromRecord(selectedSupplier));
+    setShowSupplierForm(true);
+  };
+
+  const closeSupplierForm = () => {
+    setEditingSupplierId("");
+    setSupplierForm(createEmptySupplierForm());
+    setShowSupplierForm(false);
+  };
+
+  const saveSupplier = async () => {
+    if (!supplierForm.name.trim()) {
+      setMessage({ type: "error", text: "اسم المورد مطلوب" });
+      return;
+    }
+
+    try {
+      setSavingSupplier(true);
+      setMessage({ type: "", text: "" });
+
+      const payload = {
+        ...supplierForm,
+        opening_balance: supplierForm.opening_balance || 0,
+      };
+
+      let nextSupplierId = editingSupplierId;
+      if (editingSupplierId) {
+        await suppliersAPI.update(editingSupplierId, payload);
+      } else {
+        const response = await suppliersAPI.create(payload);
+        nextSupplierId = response?.data?.id || "";
+      }
+
+      await loadSuppliers();
+      if (nextSupplierId) {
+        setSelectedSupplierId(nextSupplierId);
+        await loadSupplierDetail(nextSupplierId);
+      }
+      setMessage({
+        type: "success",
+        text: editingSupplierId
+          ? "تم تحديث بيانات المورد"
+          : "تم إضافة المورد بنجاح",
+      });
+      closeSupplierForm();
+    } catch (requestError) {
+      console.error("Error saving supplier:", requestError);
+      setMessage({
+        type: "error",
+        text: requestError?.response?.data?.error || "فشل حفظ بيانات المورد",
+      });
+    } finally {
+      setSavingSupplier(false);
+    }
+  };
+
+  const updateDeliveryItem = (index, field, value) => {
+    setDeliveryForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, [field]: value } : item,
+      ),
+    }));
+  };
+
+  const addDeliveryItem = () => {
+    setDeliveryForm((current) => ({
+      ...current,
+      items: [...current.items, createEmptyDeliveryItem()],
+    }));
+  };
+
+  const removeDeliveryItem = (index) => {
+    setDeliveryForm((current) => ({
+      ...current,
+      items:
+        current.items.length > 1
+          ? current.items.filter((_, itemIndex) => itemIndex !== index)
+          : current.items,
+    }));
+  };
+
+  const saveDelivery = async () => {
+    if (!selectedSupplierId) {
+      setMessage({ type: "error", text: "اختر مورد أولًا" });
+      return;
+    }
+
+    const normalizedItems = deliveryForm.items.filter(
+      (item) =>
+        String(item?.product_name || "").trim() ||
+        String(item?.sku || "").trim() ||
+        String(item?.material || "").trim(),
+    );
+
+    if (normalizedItems.length === 0) {
+      setMessage({
+        type: "error",
+        text: "أضف منتجًا واحدًا على الأقل داخل الوارد",
+      });
+      return;
+    }
+
+    try {
+      setSavingDelivery(true);
+      setMessage({ type: "", text: "" });
+
+      await suppliersAPI.addDelivery(selectedSupplierId, {
+        ...deliveryForm,
+        items: normalizedItems.map((item) => ({
+          ...item,
+          total_cost: item.total_cost || getDeliveryItemTotal(item),
+        })),
+      });
+
+      await Promise.all([loadSuppliers(), loadSupplierDetail(selectedSupplierId)]);
+      setDeliveryForm(createEmptyDeliveryForm());
+      setMessage({ type: "success", text: "تم تسجيل الوارد بنجاح" });
+    } catch (requestError) {
+      console.error("Error saving delivery:", requestError);
+      setMessage({
+        type: "error",
+        text: requestError?.response?.data?.error || "فشل تسجيل الوارد",
+      });
+    } finally {
+      setSavingDelivery(false);
+    }
+  };
+
+  const savePayment = async () => {
+    if (!selectedSupplierId) {
+      setMessage({ type: "error", text: "اختر مورد أولًا" });
+      return;
+    }
+
+    if (toNumber(paymentForm.amount) <= 0) {
+      setMessage({ type: "error", text: "قيمة الدفعة يجب أن تكون أكبر من صفر" });
+      return;
+    }
+
+    try {
+      setSavingPayment(true);
+      setMessage({ type: "", text: "" });
+      await suppliersAPI.addPayment(selectedSupplierId, paymentForm);
+      await Promise.all([loadSuppliers(), loadSupplierDetail(selectedSupplierId)]);
+      setPaymentForm(createEmptyPaymentForm());
+      setMessage({ type: "success", text: "تم تسجيل الدفعة بنجاح" });
+    } catch (requestError) {
+      console.error("Error saving payment:", requestError);
+      setMessage({
+        type: "error",
+        text: requestError?.response?.data?.error || "فشل تسجيل الدفعة",
+      });
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen bg-slate-100">
+      <Sidebar />
+
+      <main className="flex-1 overflow-auto">
+        <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h1 className="flex items-center gap-3 text-3xl font-bold text-slate-900">
+                  <Truck className="text-sky-700" size={28} />
+                  الموردين والحسابات
+                </h1>
+                <p className="mt-2 text-slate-600">
+                  سجل الموردين، الواردات، المنتجات المستلمة، الـ SKU، الخامات،
+                  والدفعات والحسابات في مكان واحد مرتبط بالستور الحالي.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={loadSuppliers}
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-white hover:bg-slate-950"
+                >
+                  <RefreshCw size={18} />
+                  تحديث
+                </button>
+                {canEditProducts && (
+                  <button
+                    onClick={startCreatingSupplier}
+                    className="inline-flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-white hover:bg-sky-800"
+                  >
+                    <Plus size={18} />
+                    مورد جديد
+                  </button>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {error && (
+            <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-700">
+              <AlertCircle size={18} />
+              {error}
+            </div>
+          )}
+
+          {message.text && (
+            <div
+              className={`flex items-center gap-2 rounded-xl border p-4 ${
+                message.type === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-amber-200 bg-amber-50 text-amber-700"
+              }`}
+            >
+              {message.type === "success" ? (
+                <CheckCircle2 size={18} />
+              ) : (
+                <AlertCircle size={18} />
+              )}
+              {message.text}
+            </div>
+          )}
+
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <SummaryCard
+              title="إجمالي الموردين"
+              value={formatCount(summary.total_suppliers)}
+              subtitle={`${formatCount(summary.active_suppliers)} مورد نشط`}
+              icon={Building2}
+              tone="sky"
+            />
+            <SummaryCard
+              title="إجمالي الوارد"
+              value={formatCurrency(summary.total_deliveries)}
+              subtitle="قيمة كل الشحنات المسجلة"
+              icon={Package}
+              tone="blue"
+            />
+            <SummaryCard
+              title="إجمالي المدفوع"
+              value={formatCurrency(summary.total_payments)}
+              subtitle="كل الدفعات المسجلة للموردين"
+              icon={Wallet}
+              tone="emerald"
+            />
+            <SummaryCard
+              title="الرصيد المستحق"
+              value={formatCurrency(summary.outstanding_balance)}
+              subtitle="المتبقي على حساب الموردين"
+              icon={CreditCard}
+              tone="amber"
+            />
+          </section>
+
+          <section className="grid gap-6 xl:grid-cols-12">
+            <div className="space-y-6 xl:col-span-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="relative">
+                  <Search
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    size={16}
+                  />
+                  <input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="ابحث باسم المورد أو الكود أو التليفون"
+                    className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-3 focus:border-sky-400 focus:outline-none"
+                  />
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {loading ? (
+                    <EmptyState text="جاري تحميل الموردين..." />
+                  ) : filteredSuppliers.length === 0 ? (
+                    <EmptyState text="لا يوجد موردون مطابقون للبحث الحالي." />
+                  ) : (
+                    filteredSuppliers.map((supplier) => {
+                      const isActive = supplier.id === selectedSupplierId;
+                      return (
+                        <button
+                          key={supplier.id}
+                          onClick={() => setSelectedSupplierId(supplier.id)}
+                          className={`w-full rounded-2xl border p-4 text-right transition ${
+                            isActive
+                              ? "border-sky-300 bg-sky-50 shadow-sm"
+                              : "border-slate-200 bg-white hover:border-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-base font-semibold text-slate-900">
+                                {supplier.name}
+                              </div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                الكود: {supplier.code || "-"}
+                              </div>
+                            </div>
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                                supplier.is_active !== false
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {supplier.is_active !== false ? "نشط" : "مؤرشف"}
+                            </span>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600">
+                            <KeyValueCompact
+                              label="الوارد"
+                              value={formatCurrency(supplier.total_deliveries)}
+                            />
+                            <KeyValueCompact
+                              label="المدفوع"
+                              value={formatCurrency(supplier.total_payments)}
+                            />
+                            <KeyValueCompact
+                              label="الرصيد"
+                              value={formatCurrency(supplier.outstanding_balance)}
+                            />
+                            <KeyValueCompact
+                              label="الكمية"
+                              value={formatCount(supplier.received_quantity)}
+                            />
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {canEditProducts && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-semibold text-slate-900">
+                        {editingSupplierId ? "تعديل المورد" : "إضافة مورد"}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        احفظ بيانات التواصل والحسابات والرصيد الافتتاحي.
+                      </p>
+                    </div>
+                    {showSupplierForm && (
+                      <button
+                        onClick={closeSupplierForm}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                      >
+                        إغلاق
+                      </button>
+                    )}
+                  </div>
+
+                  {!showSupplierForm ? (
+                    <div className="space-y-3">
+                      <button
+                        onClick={startCreatingSupplier}
+                        className="w-full rounded-xl bg-sky-700 px-4 py-3 text-sm font-medium text-white hover:bg-sky-800"
+                      >
+                        إنشاء مورد جديد
+                      </button>
+                      {selectedSupplier && (
+                        <button
+                          onClick={startEditingSupplier}
+                          className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          تعديل المورد الحالي
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <SupplierForm
+                      form={supplierForm}
+                      setForm={setSupplierForm}
+                      saving={savingSupplier}
+                      onSave={saveSupplier}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-6 xl:col-span-8">
+              {renderDetails({
+                selectedSupplierId,
+                selectedSupplier,
+                detailLoading,
+                canEditProducts,
+                startEditingSupplier,
+                deliveryForm,
+                setDeliveryForm,
+                updateDeliveryItem,
+                removeDeliveryItem,
+                addDeliveryItem,
+                saveDelivery,
+                savingDelivery,
+                paymentForm,
+                setPaymentForm,
+                savePayment,
+                savingPayment,
+              })}
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function renderDetails({
+  selectedSupplierId,
+  selectedSupplier,
+  detailLoading,
+  canEditProducts,
+  startEditingSupplier,
+  deliveryForm,
+  setDeliveryForm,
+  updateDeliveryItem,
+  removeDeliveryItem,
+  addDeliveryItem,
+  saveDelivery,
+  savingDelivery,
+  paymentForm,
+  setPaymentForm,
+  savePayment,
+  savingPayment,
+}) {
+  if (!selectedSupplierId) {
+    return (
+      <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
+        اختر موردًا من القائمة أو أضف موردًا جديدًا للبدء.
+      </div>
+    );
+  }
+
+  if (detailLoading && !selectedSupplier) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
+        جاري تحميل تفاصيل المورد...
+      </div>
+    );
+  }
+
+  if (!selectedSupplier) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
+        تعذر تحميل المورد الحالي.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <SummaryCard
+          title="إجمالي الوارد"
+          value={formatCurrency(selectedSupplier.total_deliveries)}
+          subtitle={`${formatCount(selectedSupplier.deliveries_count)} حركة وارد`}
+          icon={Package}
+          tone="blue"
+        />
+        <SummaryCard
+          title="إجمالي المدفوع"
+          value={formatCurrency(selectedSupplier.total_payments)}
+          subtitle={`${formatCount(selectedSupplier.payments_count)} دفعة`}
+          icon={Wallet}
+          tone="emerald"
+        />
+        <SummaryCard
+          title="الرصيد الحالي"
+          value={formatCurrency(selectedSupplier.outstanding_balance)}
+          subtitle={`رصيد افتتاحي ${formatCurrency(selectedSupplier.opening_balance)}`}
+          icon={CreditCard}
+          tone="amber"
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <SectionCard
+          title={selectedSupplier.name}
+          subtitle={`الكود: ${selectedSupplier.code || "-"}`}
+          action={
+            canEditProducts ? (
+              <button
+                onClick={startEditingSupplier}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                تعديل المورد
+              </button>
+            ) : null
+          }
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <DetailLine label="المسؤول" value={selectedSupplier.contact_name} />
+            <DetailLine label="التليفون" value={selectedSupplier.phone} />
+            <DetailLine label="الإيميل" value={selectedSupplier.email} />
+            <DetailLine label="شروط الدفع" value={selectedSupplier.payment_terms} />
+            <DetailLine label="العنوان" value={selectedSupplier.address} />
+            <DetailLine
+              label="آخر وارد"
+              value={formatDateTime(selectedSupplier.last_delivery_at)}
+            />
+          </div>
+          {selectedSupplier.notes && (
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+              {selectedSupplier.notes}
+            </div>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="حسابات الدفع"
+          subtitle="البيانات المستخدمة في السداد والمتابعة"
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <DetailLine label="البنك" value={selectedSupplier.bank_name} />
+            <DetailLine label="صاحب الحساب" value={selectedSupplier.account_holder} />
+            <DetailLine label="رقم الحساب" value={selectedSupplier.account_number} />
+            <DetailLine label="IBAN" value={selectedSupplier.iban} />
+            <DetailLine label="المحفظة" value={selectedSupplier.wallet_number} />
+            <DetailLine
+              label="آخر دفعة"
+              value={formatDateTime(selectedSupplier.last_payment_at)}
+            />
+          </div>
+        </SectionCard>
+      </div>
+
+      {canEditProducts && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <DeliveryForm
+            form={deliveryForm}
+            setForm={setDeliveryForm}
+            updateItem={updateDeliveryItem}
+            removeItem={removeDeliveryItem}
+            addItem={addDeliveryItem}
+            onSave={saveDelivery}
+            saving={savingDelivery}
+          />
+          <PaymentForm
+            form={paymentForm}
+            setForm={setPaymentForm}
+            onSave={savePayment}
+            saving={savingPayment}
+          />
+        </div>
+      )}
+
+      <ReceivedItemsTable items={selectedSupplier.received_items || []} />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <PaymentsList payments={selectedSupplier.payments || []} />
+        <EntriesTimeline entries={selectedSupplier.entries || []} />
+      </div>
+    </>
+  );
+}
+
+function SupplierForm({ form, setForm, saving, onSave }) {
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 md:grid-cols-2">
+        <TextInput label="اسم المورد" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} />
+        <TextInput label="الكود" value={form.code} onChange={(value) => setForm((current) => ({ ...current, code: value }))} />
+        <TextInput label="اسم المسؤول" value={form.contact_name} onChange={(value) => setForm((current) => ({ ...current, contact_name: value }))} />
+        <TextInput label="التليفون" value={form.phone} onChange={(value) => setForm((current) => ({ ...current, phone: value }))} />
+        <TextInput label="البريد الإلكتروني" value={form.email} onChange={(value) => setForm((current) => ({ ...current, email: value }))} />
+        <TextInput label="شروط الدفع" value={form.payment_terms} onChange={(value) => setForm((current) => ({ ...current, payment_terms: value }))} />
+        <TextInput label="البنك" value={form.bank_name} onChange={(value) => setForm((current) => ({ ...current, bank_name: value }))} />
+        <TextInput label="صاحب الحساب" value={form.account_holder} onChange={(value) => setForm((current) => ({ ...current, account_holder: value }))} />
+        <TextInput label="رقم الحساب" value={form.account_number} onChange={(value) => setForm((current) => ({ ...current, account_number: value }))} />
+        <TextInput label="IBAN" value={form.iban} onChange={(value) => setForm((current) => ({ ...current, iban: value }))} />
+        <TextInput label="المحفظة" value={form.wallet_number} onChange={(value) => setForm((current) => ({ ...current, wallet_number: value }))} />
+        <TextInput label="الرصيد الافتتاحي" type="number" value={form.opening_balance} onChange={(value) => setForm((current) => ({ ...current, opening_balance: value }))} />
+      </div>
+      <TextInput label="العنوان" value={form.address} onChange={(value) => setForm((current) => ({ ...current, address: value }))} />
+      <TextArea label="ملاحظات" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+      <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
+        <input type="checkbox" checked={form.is_active} onChange={(event) => setForm((current) => ({ ...current, is_active: event.target.checked }))} />
+        المورد نشط ويظهر في القائمة
+      </label>
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Save size={18} />
+        {saving ? "جارٍ الحفظ..." : "حفظ بيانات المورد"}
+      </button>
+    </div>
+  );
+}
+
+function DeliveryForm({ form, setForm, updateItem, removeItem, addItem, onSave, saving }) {
+  return (
+    <SectionCard title="تسجيل وارد جديد" subtitle="أضف المنتجات التي وصلت من المورد وتكلفتها">
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <TextInput label="تاريخ الوارد" type="date" value={form.entry_date} onChange={(value) => setForm((current) => ({ ...current, entry_date: value }))} />
+          <TextInput label="رقم المرجع" value={form.reference_code} onChange={(value) => setForm((current) => ({ ...current, reference_code: value }))} />
+        </div>
+        <TextInput label="وصف سريع" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} />
+        <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          {form.items.map((item, index) => (
+            <div key={`delivery-item-${index}`} className="rounded-2xl border border-slate-200 bg-white p-3">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-sm font-medium text-slate-800">صنف الوارد #{index + 1}</div>
+                {form.items.length > 1 && (
+                  <button onClick={() => removeItem(index)} className="text-xs text-rose-600 hover:text-rose-700">
+                    حذف
+                  </button>
+                )}
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <TextInput label="اسم المنتج" value={item.product_name} onChange={(value) => updateItem(index, "product_name", value)} />
+                <TextInput label="SKU" value={item.sku} onChange={(value) => updateItem(index, "sku", value)} />
+                <TextInput label="الخامة" value={item.material} onChange={(value) => updateItem(index, "material", value)} />
+                <TextInput label="الكمية" type="number" value={item.quantity} onChange={(value) => updateItem(index, "quantity", value)} />
+                <TextInput label="سعر الوحدة" type="number" value={item.unit_cost} onChange={(value) => updateItem(index, "unit_cost", value)} />
+                <TextInput label="الإجمالي" type="number" value={item.total_cost} onChange={(value) => updateItem(index, "total_cost", value)} />
+              </div>
+              <TextInput label="ملاحظات الصنف" value={item.notes} onChange={(value) => updateItem(index, "notes", value)} />
+              <div className="mt-2 text-xs text-slate-500">
+                الإجمالي المحسوب: {formatCurrency(getDeliveryItemTotal(item))}
+              </div>
+            </div>
+          ))}
+          <button onClick={addItem} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
+            <Plus size={16} />
+            إضافة صنف جديد
+          </button>
+        </div>
+        <TextArea label="ملاحظات الوارد" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Save size={18} />
+          {saving ? "جارٍ الحفظ..." : "حفظ الوارد"}
+        </button>
+      </div>
+    </SectionCard>
+  );
+}
+
+function PaymentForm({ form, setForm, onSave, saving }) {
+  return (
+    <SectionCard title="تسجيل دفعة" subtitle="سجل كل دفعة وحسابها وطريقة السداد">
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <TextInput label="تاريخ الدفعة" type="date" value={form.entry_date} onChange={(value) => setForm((current) => ({ ...current, entry_date: value }))} />
+          <TextInput label="رقم المرجع" value={form.reference_code} onChange={(value) => setForm((current) => ({ ...current, reference_code: value }))} />
+          <TextInput label="المبلغ" type="number" value={form.amount} onChange={(value) => setForm((current) => ({ ...current, amount: value }))} />
+          <SelectInput label="طريقة الدفع" value={form.payment_method} options={PAYMENT_METHOD_OPTIONS} onChange={(value) => setForm((current) => ({ ...current, payment_method: value }))} />
+          <TextInput label="الحساب المستخدم" value={form.payment_account} onChange={(value) => setForm((current) => ({ ...current, payment_account: value }))} />
+          <TextInput label="وصف سريع" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} />
+        </div>
+        <TextArea label="ملاحظات الدفعة" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Save size={18} />
+          {saving ? "جارٍ الحفظ..." : "حفظ الدفعة"}
+        </button>
+      </div>
+    </SectionCard>
+  );
+}
+
+function ReceivedItemsTable({ items }) {
+  return (
+    <SectionCard title="المنتجات المستلمة من المورد" subtitle="كل الأصناف المرتبطة بحركات الوارد للمورد الحالي">
+      {items.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-right text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-600">
+                <th className="px-3 py-2 font-semibold">التاريخ</th>
+                <th className="px-3 py-2 font-semibold">المنتج</th>
+                <th className="px-3 py-2 font-semibold">SKU</th>
+                <th className="px-3 py-2 font-semibold">الخامة</th>
+                <th className="px-3 py-2 font-semibold">الكمية</th>
+                <th className="px-3 py-2 font-semibold">سعر الوحدة</th>
+                <th className="px-3 py-2 font-semibold">الإجمالي</th>
+                <th className="px-3 py-2 font-semibold">المرجع</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, index) => (
+                <tr key={`${item.delivery_id}-${item.sku}-${index}`} className="border-b border-slate-100 text-slate-700">
+                  <td className="px-3 py-3">{formatDateTime(item.entry_date)}</td>
+                  <td className="px-3 py-3 font-medium text-slate-900">{item.product_name}</td>
+                  <td className="px-3 py-3">{item.sku || "-"}</td>
+                  <td className="px-3 py-3">{item.material || "-"}</td>
+                  <td className="px-3 py-3">{formatCount(item.quantity)}</td>
+                  <td className="px-3 py-3">{formatCurrency(item.unit_cost)}</td>
+                  <td className="px-3 py-3">{formatCurrency(item.total_cost)}</td>
+                  <td className="px-3 py-3">{item.reference_code || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState text="لا توجد حركات وارد مسجلة لهذا المورد حتى الآن." />
+      )}
+    </SectionCard>
+  );
+}
+
+function PaymentsList({ payments }) {
+  return (
+    <SectionCard title="الدفعات المسجلة" subtitle="كل المدفوعات المرتبطة بالمورد">
+      {payments.length > 0 ? (
+        <div className="space-y-3">
+          {payments.map((payment) => (
+            <div key={payment.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">{formatCurrency(payment.amount)}</div>
+                  <div className="mt-1 text-xs text-slate-500">{formatDateTime(payment.entry_date)}</div>
+                </div>
+                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                  {payment.payment_method || "payment"}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                <DetailLineCompact label="الحساب" value={payment.payment_account || "-"} />
+                <DetailLineCompact label="المرجع" value={payment.reference_code || "-"} />
+                <DetailLineCompact label="الوصف" value={payment.description || payment.notes || "-"} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState text="لا توجد دفعات مسجلة للمورد الحالي." />
+      )}
+    </SectionCard>
+  );
+}
+
+function EntriesTimeline({ entries }) {
+  return (
+    <SectionCard title="الحركة المحاسبية" subtitle="Timeline مختصر للواردات والدفعات">
+      {entries.length > 0 ? (
+        <div className="space-y-3">
+          {entries.map((entry) => (
+            <div key={entry.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    {entry.entry_type === "delivery"
+                      ? "وارد"
+                      : entry.entry_type === "payment"
+                        ? "دفعة"
+                        : "تسوية"}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {formatDateTime(entry.entry_date)}
+                  </div>
+                </div>
+                <div
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                    entry.entry_type === "payment"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : entry.entry_type === "delivery"
+                        ? "bg-sky-100 text-sky-700"
+                        : "bg-amber-100 text-amber-700"
+                  }`}
+                >
+                  {formatCurrency(entry.amount)}
+                </div>
+              </div>
+              <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                <DetailLineCompact label="المرجع" value={entry.reference_code || "-"} />
+                <DetailLineCompact label="الوصف" value={entry.description || entry.notes || "-"} />
+                <DetailLineCompact
+                  label="العناصر"
+                  value={entry.entry_type === "delivery" ? formatCount(entry.items?.length || 0) : "-"}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState text="لا توجد حركات مسجلة لهذا المورد بعد." />
+      )}
+    </SectionCard>
+  );
+}
+
+function SummaryCard({ title, value, subtitle, icon: Icon, tone = "sky" }) {
+  const tones = {
+    sky: "border-sky-100 bg-sky-50 text-sky-700",
+    blue: "border-cyan-100 bg-cyan-50 text-cyan-700",
+    emerald: "border-emerald-100 bg-emerald-50 text-emerald-700",
+    amber: "border-amber-100 bg-amber-50 text-amber-700",
+  };
+
+  return (
+    <div className={`rounded-2xl border p-5 shadow-sm ${tones[tone] || tones.sky}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium opacity-80">{title}</div>
+          <div className="mt-2 text-2xl font-bold">{value}</div>
+          <div className="mt-2 text-xs opacity-80">{subtitle}</div>
+        </div>
+        <div className="rounded-2xl bg-white/70 p-3">
+          <Icon size={22} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionCard({ title, subtitle, action, children }) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+          {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function TextInput({ label, value, onChange, type = "text" }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none"
+      />
+    </label>
+  );
+}
+
+function SelectInput({ label, value, options, onChange }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function TextArea({ label, value, onChange }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={3}
+        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none"
+      />
+    </label>
+  );
+}
+
+function DetailLine({ label, value }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-3">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-2 text-sm font-medium text-slate-900">{value || "-"}</div>
+    </div>
+  );
+}
+
+function DetailLineCompact({ label, value }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="text-xs font-medium text-slate-700">{value || "-"}</div>
+    </div>
+  );
+}
+
+function KeyValueCompact({ label, value }) {
+  return (
+    <div className="rounded-xl bg-slate-50 px-3 py-2">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-slate-800">{value}</div>
+    </div>
+  );
+}
+
+function EmptyState({ text }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+      {text}
+    </div>
+  );
+}

@@ -11,6 +11,8 @@ import api from "../utils/api";
 const AuthContext = createContext(null);
 const AUTH_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const MIN_AUTH_REFRESH_GAP_MS = 5000;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_CLIENT_PERMISSIONS = {
   can_view_dashboard: true,
   can_view_products: true,
@@ -34,6 +36,33 @@ const readJsonFromStorage = (key) => {
   } catch {
     return null;
   }
+};
+
+const normalizeStoreId = (value) => {
+  const normalized = String(value || "").trim();
+  return UUID_REGEX.test(normalized) ? normalized : "";
+};
+
+const syncCurrentStoreId = (stores = []) => {
+  const accessibleStoreIds = (Array.isArray(stores) ? stores : [])
+    .map((store) => normalizeStoreId(store?.id))
+    .filter(Boolean);
+
+  const currentStoreId = normalizeStoreId(localStorage.getItem("currentStoreId"));
+
+  if (accessibleStoreIds.length === 0) {
+    localStorage.removeItem("currentStoreId");
+    return null;
+  }
+
+  if (currentStoreId && accessibleStoreIds.includes(currentStoreId)) {
+    localStorage.setItem("currentStoreId", currentStoreId);
+    return currentStoreId;
+  }
+
+  const nextStoreId = accessibleStoreIds[0];
+  localStorage.setItem("currentStoreId", nextStoreId);
+  return nextStoreId;
 };
 
 const buildCachedPermissions = (cachedUser, cachedPermissions) => {
@@ -62,6 +91,7 @@ export const AuthProvider = ({ children }) => {
   const resetAuthState = useCallback(() => {
     localStorage.removeItem("user");
     localStorage.removeItem("permissions");
+    localStorage.removeItem("currentStoreId");
     setUser(null);
     setPermissions({});
     setIsAdmin(false);
@@ -120,6 +150,16 @@ export const AuthProvider = ({ children }) => {
           nextUser,
           perms || buildCachedPermissions(nextUser, readJsonFromStorage("permissions")),
         );
+
+        try {
+          const storesResponse = await api.get("/users/me/stores");
+          const stores = Array.isArray(storesResponse?.data)
+            ? storesResponse.data
+            : [];
+          syncCurrentStoreId(stores);
+        } catch (storesError) {
+          console.error("Failed to sync current store", storesError);
+        }
       } catch (error) {
         console.error("Failed to refresh auth state", error);
 

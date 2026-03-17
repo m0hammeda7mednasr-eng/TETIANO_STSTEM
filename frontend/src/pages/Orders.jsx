@@ -57,6 +57,118 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const normalizeSearchValue = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
+const normalizePhoneSearch = (value) =>
+  String(value || "").replace(/\D/g, "");
+
+const splitSearchTokens = (value) =>
+  Array.from(
+    new Set(
+      normalizeSearchValue(value)
+        .split(/\s+/)
+        .filter(Boolean),
+    ),
+  );
+
+const parseJsonObject = (value) => {
+  if (!value) {
+    return {};
+  }
+
+  if (typeof value === "object") {
+    return value;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const buildOrderSearchIndex = (order) => {
+  const parsedData = parseJsonObject(order?.data);
+  const lineItems = Array.isArray(parsedData?.line_items) ? parsedData.line_items : [];
+  const itemPreviewTitles = Array.isArray(order?.item_previews)
+    ? order.item_previews.map((item) => item?.title)
+    : [];
+  const searchValues = [
+    order?.customer_name,
+    order?.customer_email,
+    order?.customer_phone,
+    order?.order_number,
+    order?.shopify_id,
+    order?.financial_status,
+    order?.fulfillment_status,
+    order?.payment_method,
+    order?.status,
+    parsedData?.name,
+    parsedData?.tags,
+    parsedData?.note,
+    parsedData?.customer?.first_name,
+    parsedData?.customer?.last_name,
+    parsedData?.customer?.email,
+    parsedData?.customer?.phone,
+    parsedData?.shipping_address?.name,
+    parsedData?.shipping_address?.phone,
+    parsedData?.shipping_address?.address1,
+    parsedData?.shipping_address?.address2,
+    parsedData?.shipping_address?.city,
+    parsedData?.shipping_address?.province,
+    parsedData?.shipping_address?.country,
+    parsedData?.shipping_address?.zip,
+    parsedData?.billing_address?.name,
+    parsedData?.billing_address?.phone,
+    parsedData?.billing_address?.address1,
+    parsedData?.billing_address?.address2,
+    parsedData?.billing_address?.city,
+    parsedData?.billing_address?.province,
+    parsedData?.billing_address?.country,
+    parsedData?.billing_address?.zip,
+    ...itemPreviewTitles,
+    ...lineItems.flatMap((item) => [
+      item?.title,
+      item?.name,
+      item?.variant_title,
+      item?.sku,
+      item?.vendor,
+      item?.fulfillment_status,
+    ]),
+  ]
+    .map(normalizeSearchValue)
+    .filter(Boolean);
+
+  return {
+    textValues: searchValues,
+    numericValues: Array.from(
+      new Set(searchValues.map(normalizePhoneSearch).filter(Boolean)),
+    ),
+  };
+};
+
+const matchesOrderSearch = (searchIndex, searchTerm) => {
+  const tokens = splitSearchTokens(searchTerm);
+  if (tokens.length === 0) {
+    return true;
+  }
+
+  return tokens.every((token) => {
+    const normalizedPhoneToken = normalizePhoneSearch(token);
+    return (
+      searchIndex.textValues.some((value) => value.includes(token)) ||
+      (normalizedPhoneToken &&
+        searchIndex.numericValues.some((value) =>
+          value.includes(normalizedPhoneToken),
+        ))
+    );
+  });
+};
+
 const formatAmount = (value) => `${toNumber(value).toFixed(2)} ${CURRENCY_LABEL}`;
 
 const PAYMENT_METHOD_LABELS = {
@@ -436,6 +548,7 @@ export default function Orders() {
       orders.map((order) => ({
         ...order,
         _meta: getOrderMeta(order),
+        _searchIndex: buildOrderSearchIndex(order),
       })),
     [orders],
   );
@@ -446,18 +559,8 @@ export default function Orders() {
     );
 
     if (filters.searchTerm.trim()) {
-      const keyword = filters.searchTerm.trim().toLowerCase();
       result = result.filter((order) => {
-        const customerName = String(order.customer_name || "").toLowerCase();
-        const customerEmail = String(order.customer_email || "").toLowerCase();
-        const orderNumber = String(order.order_number || "");
-        const shopifyId = String(order.shopify_id || "");
-        return (
-          customerName.includes(keyword) ||
-          customerEmail.includes(keyword) ||
-          orderNumber.includes(keyword) ||
-          shopifyId.includes(keyword)
-        );
+        return matchesOrderSearch(order._searchIndex, filters.searchTerm);
       });
     }
 
@@ -924,7 +1027,7 @@ export default function Orders() {
                   <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
                   <input
                     type="text"
-                    placeholder="Customer, email, order #..."
+                    placeholder="Customer, phone, email, product, SKU, order #..."
                     value={filters.searchTerm}
                     onChange={(event) =>
                       handleFilterChange("searchTerm", event.target.value)
@@ -932,6 +1035,10 @@ export default function Orders() {
                     className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Multi-word search supports customer, phone, email, product title, SKU,
+                  payment, fulfillment, and order number.
+                </p>
               </div>
 
               <div>

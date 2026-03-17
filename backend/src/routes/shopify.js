@@ -103,30 +103,22 @@ const ORDER_LIST_SELECT = [
   "order_number",
   "customer_name",
   "customer_email",
+  "customer_phone",
   "total_price",
   "total_refunded",
   "financial_status",
   "fulfillment_status",
   "payment_method",
   "manual_payment_method",
+  "status",
+  "items_count",
   "cancelled_at",
   "created_at",
   "updated_at",
+  "data",
 ].join(",");
 const ORDER_LIST_SELECTS = [
-  [
-    "id",
-    "shopify_id",
-    "store_id",
-    "order_number",
-    "customer_name",
-    "customer_email",
-    "total_price",
-    "status",
-    "fulfillment_status",
-    "created_at",
-    "updated_at",
-  ].join(","),
+  ORDER_LIST_SELECT,
   [
     "id",
     "shopify_id",
@@ -141,7 +133,19 @@ const ORDER_LIST_SELECTS = [
     "updated_at",
     "data",
   ].join(","),
-  ORDER_LIST_SELECT,
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "total_price",
+    "status",
+    "fulfillment_status",
+    "created_at",
+    "updated_at",
+  ].join(","),
   [
     "id",
     "shopify_id",
@@ -1241,6 +1245,23 @@ const normalizeOrderReference = (value) =>
     .trim()
     .toLowerCase();
 
+const normalizeSearchValue = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
+const normalizePhoneSearch = (value) =>
+  String(value || "").replace(/\D/g, "");
+
+const splitSearchTokens = (value) =>
+  Array.from(
+    new Set(
+      normalizeSearchValue(value)
+        .split(/\s+/)
+        .filter(Boolean),
+    ),
+  );
+
 const findOrderByReferenceForUser = async (userId, orderReference) => {
   const normalizedReference = String(orderReference || "").trim();
   if (!normalizedReference) {
@@ -1409,6 +1430,87 @@ const getOrderLineItems = (order) => {
   return Array.isArray(parsedData?.line_items) ? parsedData.line_items : [];
 };
 
+const buildOrderSearchIndex = (order) => {
+  const parsedData = parseJsonField(order?.data);
+  const lineItems = getOrderLineItems(order);
+  const previewTitles = buildOrderItemPreviews(order).map((item) => item?.title);
+  const searchValues = [
+    order?.customer_name,
+    order?.customer_email,
+    getOrderCustomerPhone(order),
+    order?.order_number,
+    order?.shopify_id,
+    order?.financial_status,
+    order?.fulfillment_status,
+    order?.payment_method,
+    order?.manual_payment_method,
+    resolveOrderPaymentMethod(order),
+    order?.status,
+    order?.tags,
+    order?.customer_note,
+    parsedData?.name,
+    parsedData?.tags,
+    parsedData?.note,
+    parsedData?.customer?.first_name,
+    parsedData?.customer?.last_name,
+    parsedData?.customer?.email,
+    parsedData?.customer?.phone,
+    parsedData?.shipping_address?.name,
+    parsedData?.shipping_address?.phone,
+    parsedData?.shipping_address?.address1,
+    parsedData?.shipping_address?.address2,
+    parsedData?.shipping_address?.city,
+    parsedData?.shipping_address?.province,
+    parsedData?.shipping_address?.country,
+    parsedData?.shipping_address?.zip,
+    parsedData?.billing_address?.name,
+    parsedData?.billing_address?.phone,
+    parsedData?.billing_address?.address1,
+    parsedData?.billing_address?.address2,
+    parsedData?.billing_address?.city,
+    parsedData?.billing_address?.province,
+    parsedData?.billing_address?.country,
+    parsedData?.billing_address?.zip,
+    ...previewTitles,
+    ...lineItems.flatMap((item) => [
+      item?.title,
+      item?.name,
+      item?.variant_title,
+      item?.sku,
+      item?.vendor,
+      item?.fulfillment_status,
+    ]),
+  ]
+    .map(normalizeSearchValue)
+    .filter(Boolean);
+
+  return {
+    textValues: searchValues,
+    numericValues: Array.from(
+      new Set(searchValues.map(normalizePhoneSearch).filter(Boolean)),
+    ),
+  };
+};
+
+const matchesOrderSearch = (order, searchTerm) => {
+  const tokens = splitSearchTokens(searchTerm);
+  if (tokens.length === 0) {
+    return true;
+  }
+
+  const searchIndex = buildOrderSearchIndex(order);
+  return tokens.every((token) => {
+    const normalizedPhoneToken = normalizePhoneSearch(token);
+    return (
+      searchIndex.textValues.some((value) => value.includes(token)) ||
+      (normalizedPhoneToken &&
+        searchIndex.numericValues.some((value) =>
+          value.includes(normalizedPhoneToken),
+        ))
+    );
+  });
+};
+
 const getOrderLineItemImageUrl = (item) => {
   const propertyImageUrl = Array.isArray(item?.properties)
     ? item.properties.find((entry) => String(entry?.name || "").trim() === "_image_url")?.value
@@ -1473,7 +1575,7 @@ const buildOrderListItem = (order) => {
     order_number: order?.order_number || null,
     customer_name: order?.customer_name || "",
     customer_email: order?.customer_email || "",
-    customer_phone: order?.customer_phone || "",
+    customer_phone: getOrderCustomerPhone(order),
     status: order?.status || "",
     total_price: order?.total_price ?? 0,
     total_refunded: order?.total_refunded ?? 0,
@@ -1581,19 +1683,7 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
   let filtered = [...(rows || [])];
 
   if (query.search) {
-    const keyword = String(query.search).toLowerCase().trim();
-    filtered = filtered.filter((order) => {
-      const customerName = String(order.customer_name || "").toLowerCase();
-      const customerEmail = String(order.customer_email || "").toLowerCase();
-      const orderNumber = String(order.order_number || "");
-      const shopifyId = String(order.shopify_id || "");
-      return (
-        customerName.includes(keyword) ||
-        customerEmail.includes(keyword) ||
-        orderNumber.includes(keyword) ||
-        shopifyId.includes(keyword)
-      );
-    });
+    filtered = filtered.filter((order) => matchesOrderSearch(order, query.search));
   }
 
   if (query.date_from) {

@@ -106,6 +106,67 @@ const getUniqueStoreIds = (rows) =>
     ),
   );
 
+const getUniqueRowIds = (rows, fieldName) =>
+  Array.from(
+    new Set(
+      (rows || [])
+        .map((row) => String(row?.[fieldName] || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+const discoverSingleSharedStoreIds = async () => {
+  const discoveredStoreIds = new Set();
+  const rememberStoreIds = (storeIds = []) => {
+    for (const storeId of storeIds) {
+      discoveredStoreIds.add(storeId);
+      if (discoveredStoreIds.size > 1) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const discoveryStrategies = [
+    async () => {
+      const { data, error } = await supabase.from("stores").select("id");
+      if (error) {
+        throw error;
+      }
+      return getUniqueRowIds(data, "id");
+    },
+    async () => {
+      const { data, error } = await supabase
+        .from("shopify_tokens")
+        .select("store_id")
+        .not("store_id", "is", null);
+      if (error) {
+        throw error;
+      }
+      return getUniqueStoreIds(data);
+    },
+  ];
+
+  for (const discover of discoveryStrategies) {
+    try {
+      const storeIds = await discover();
+      if (!rememberStoreIds(storeIds)) {
+        return [];
+      }
+    } catch (error) {
+      if (!isSchemaCompatibilityError(error)) {
+        console.warn(
+          "Single shared store discovery fallback failed:",
+          error.message,
+        );
+      }
+    }
+  }
+
+  return discoveredStoreIds.size === 1 ? Array.from(discoveredStoreIds) : [];
+};
+
 const getCachedAccessibleStoreIds = (userId) => {
   const cacheKey = String(userId || "").trim();
   if (!cacheKey) {
@@ -526,6 +587,21 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
       console.log(
         "Creator store inheritance fallback failed:",
         inheritanceError.message,
+      );
+    }
+
+    // Single-store deployments should keep shared Shopify data visible to all
+    // authenticated users even if explicit user-store mappings are missing.
+    try {
+      const sharedStoreIds = await discoverSingleSharedStoreIds();
+      if (sharedStoreIds.length === 1) {
+        rememberAccessibleStoreIds(userId, sharedStoreIds);
+        return sharedStoreIds;
+      }
+    } catch (sharedStoreError) {
+      console.log(
+        "Single shared store fallback failed:",
+        sharedStoreError.message,
       );
     }
 

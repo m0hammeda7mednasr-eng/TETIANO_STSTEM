@@ -502,7 +502,6 @@ const getScopedEntityPage = async ({
   if (
     requestedStoreId &&
     !isAdmin &&
-    accessibleStoreIds.length > 0 &&
     !accessibleStoreIds.includes(requestedStoreId)
   ) {
     return {
@@ -640,7 +639,6 @@ const resolveSyncToken = async ({ userId, requestedStoreId, isAdmin }) => {
   if (requestedStoreId) {
     if (
       !isAdmin &&
-      accessibleStoreIds.length > 0 &&
       !accessibleStoreIds.includes(requestedStoreId)
     ) {
       return null;

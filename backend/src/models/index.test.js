@@ -128,6 +128,7 @@ const { Product, getAccessibleStoreIds } = await import("./index.js");
 describe("models/index Shopify scoping", () => {
   beforeEach(() => {
     tableData = {
+      stores: [],
       users: [],
       user_stores: [],
       shopify_tokens: [],
@@ -303,6 +304,22 @@ describe("models/index Shopify scoping", () => {
     expect(storeIds).toEqual(["store-1"]);
   });
 
+  it("falls back to the single shared store when no explicit mapping exists", async () => {
+    tableData.stores = [{ id: "store-1" }];
+
+    const storeIds = await getAccessibleStoreIds("shared-store-user");
+
+    expect(storeIds).toEqual(["store-1"]);
+  });
+
+  it("does not guess a store when multiple shared stores exist", async () => {
+    tableData.stores = [{ id: "store-1" }, { id: "store-2" }];
+
+    const storeIds = await getAccessibleStoreIds("multi-store-user");
+
+    expect(storeIds).toEqual([]);
+  });
+
   it("returns creator store products for employees without leaking unrelated legacy rows", async () => {
     tableData.users = [
       { id: "employee-1", created_by: "admin-1" },
@@ -362,6 +379,32 @@ describe("models/index Shopify scoping", () => {
           ),
       ),
     ).toBe(false);
+  });
+
+  it("returns shared-store products for unmapped users when the deployment has exactly one store", async () => {
+    tableData.stores = [{ id: "store-1" }];
+    tableData.products = [
+      {
+        id: "shared-product",
+        shopify_id: "shared-1",
+        store_id: "store-1",
+        user_id: "owner-1",
+      },
+    ];
+
+    const result = await Product.findByUser("shared-store-products-user");
+
+    expect(result).toEqual({
+      data: [
+        {
+          id: "shared-product",
+          shopify_id: "shared-1",
+          store_id: "store-1",
+          user_id: "owner-1",
+        },
+      ],
+      error: null,
+    });
   });
 
   it("does not fall back to legacy user-scoped rows when store access exists but the store has no matching products", async () => {

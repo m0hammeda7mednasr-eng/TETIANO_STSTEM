@@ -268,17 +268,17 @@ export default function Sidebar() {
       }).filter((entry) =>
         entry.type === "group" ? entry.items.length > 0 : canSeeItem(entry),
       ),
-    [hasPermission, isAdmin],
+    [canSeeItem],
   );
 
   const visibleEmployeeItems = useMemo(
     () => (isAdmin ? [] : EMPLOYEE_NAV.filter(canSeeItem)),
-    [hasPermission, isAdmin],
+    [canSeeItem, isAdmin],
   );
 
   const visibleAdminItems = useMemo(
     () => (isAdmin ? ADMIN_NAV.filter(canSeeItem) : []),
-    [hasPermission, isAdmin],
+    [canSeeItem, isAdmin],
   );
 
   const handleLogout = () => {

@@ -1289,6 +1289,85 @@ const isShopifyPaidOrder = (order) => {
   return status === "paid" || status === "partially_paid";
 };
 
+const getOrderGrossAmount = (order) => {
+  const data = parseJsonField(order?.data);
+  return toNumber(order?.total_price ?? data?.total_price);
+};
+
+const getOrderCurrentAmount = (order) => {
+  const data = parseJsonField(order?.data);
+  return toNumber(order?.current_total_price ?? data?.current_total_price);
+};
+
+const getRefundedAmountFromTransactions = (order) => {
+  const data = parseJsonField(order?.data);
+  const refunds = Array.isArray(data?.refunds) ? data.refunds : [];
+
+  return refunds.reduce((sum, refund) => {
+    const transactions = Array.isArray(refund?.transactions)
+      ? refund.transactions
+      : [];
+
+    return (
+      sum +
+      transactions.reduce(
+        (transactionSum, transaction) =>
+          transactionSum + toNumber(transaction?.amount),
+        0,
+      )
+    );
+  }, 0);
+};
+
+const getOrderRefundedAmount = (order) => {
+  const financialStatus = getOrderFinancialStatus(order);
+  const grossAmount = getOrderGrossAmount(order);
+  const currentAmount = getOrderCurrentAmount(order);
+  const refundedFromColumn = toNumber(order?.total_refunded);
+  const refundedFromTransactions = getRefundedAmountFromTransactions(order);
+  const refundedFromCurrentAmount =
+    grossAmount > 0 && currentAmount > 0 && currentAmount <= grossAmount
+      ? grossAmount - currentAmount
+      : 0;
+
+  let refundedAmount = Math.max(
+    refundedFromColumn,
+    refundedFromTransactions,
+    refundedFromCurrentAmount,
+  );
+
+  if (financialStatus === "refunded" && refundedAmount <= 0 && grossAmount > 0) {
+    refundedAmount = grossAmount;
+  }
+
+  return Math.min(grossAmount, Math.max(0, refundedAmount));
+};
+
+const isCancelledOrder = (order) => {
+  const data = parseJsonField(order?.data);
+  const financialStatus = getOrderFinancialStatus(order);
+
+  return (
+    Boolean(order?.cancelled_at) ||
+    Boolean(data?.cancelled_at) ||
+    financialStatus === "voided" ||
+    financialStatus === "cancelled"
+  );
+};
+
+const getOrderNetSalesAmount = (order) => {
+  const grossAmount = getOrderGrossAmount(order);
+  if (grossAmount <= 0 || isCancelledOrder(order)) {
+    return 0;
+  }
+
+  if (!PAID_LIKE_STATUSES.has(getOrderFinancialStatus(order))) {
+    return 0;
+  }
+
+  return Math.max(0, grossAmount - getOrderRefundedAmount(order));
+};
+
 const resolveOrderPaymentMethod = (order) => {
   const explicitPaymentMethod = normalizePaymentMethod(order?.payment_method);
   if (

@@ -33,6 +33,23 @@ const PRODUCTS_SELECT = [
   "last_synced_at",
   "data",
 ].join(",");
+const PRODUCTS_SELECTS = [
+  PRODUCTS_SELECT,
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "title",
+    "vendor",
+    "product_type",
+    "sku",
+    "price",
+    "inventory_quantity",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+];
 const ORDERS_SELECT = [
   "id",
   "store_id",
@@ -49,6 +66,36 @@ const ORDERS_SELECT = [
   "updated_at",
   "data",
 ].join(",");
+const ORDERS_SELECTS = [
+  ORDERS_SELECT,
+  [
+    "id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "financial_status",
+    "status",
+    "fulfillment_status",
+    "total_price",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+  [
+    "id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "status",
+    "fulfillment_status",
+    "total_price",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+];
 const TASKS_SELECT = "id,title,description,status,due_date,created_at,updated_at";
 
 const analyticsCache = new Map();
@@ -619,33 +666,60 @@ const rememberCacheEntry = (key, payload) => {
   });
 };
 
-const loadScopedProducts = async (storeId) => {
-  const { data, error } = await db
-    .from("products")
-    .select(PRODUCTS_SELECT)
-    .eq("store_id", storeId)
-    .order("title", { ascending: true });
+const loadScopedRowsWithFallback = async ({
+  tableName,
+  selectCandidates,
+  storeId,
+  orderBy,
+  ascending,
+}) => {
+  let lastError = null;
 
-  if (error) {
-    throw error;
+  for (const selectColumns of selectCandidates) {
+    let query = db
+      .from(tableName)
+      .select(selectColumns)
+      .eq("store_id", storeId);
+
+    if (orderBy) {
+      query = query.order(orderBy, { ascending });
+    }
+
+    const { data, error } = await query;
+    if (!error) {
+      return data || [];
+    }
+
+    lastError = error;
+    if (!isSchemaCompatibilityError(error)) {
+      throw error;
+    }
   }
 
-  return data || [];
-};
-
-const loadScopedOrders = async (storeId) => {
-  const { data, error } = await db
-    .from("orders")
-    .select(ORDERS_SELECT)
-    .eq("store_id", storeId)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    throw error;
+  if (lastError) {
+    throw lastError;
   }
 
-  return data || [];
+  return [];
 };
+
+const loadScopedProducts = async (storeId) =>
+  loadScopedRowsWithFallback({
+    tableName: "products",
+    selectCandidates: PRODUCTS_SELECTS,
+    storeId,
+    orderBy: "title",
+    ascending: true,
+  });
+
+const loadScopedOrders = async (storeId) =>
+  loadScopedRowsWithFallback({
+    tableName: "orders",
+    selectCandidates: ORDERS_SELECTS,
+    storeId,
+    orderBy: "created_at",
+    ascending: false,
+  });
 
 const loadScopedTasks = async (req) => {
   let query = db.from("tasks").select(TASKS_SELECT).order("updated_at", {

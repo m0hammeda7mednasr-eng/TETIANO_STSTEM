@@ -357,25 +357,6 @@ const getOrderRefundedAmount = (order) => {
   return Math.min(getOrderGrossAmount(order), Math.max(0, refundedAmount));
 };
 
-const getOrderNetAmountRatio = (order) => {
-  if (isCancelledOrder(order)) {
-    return 0;
-  }
-
-  const grossAmount = getOrderGrossAmount(order);
-  if (grossAmount <= 0) {
-    return 0;
-  }
-
-  const financialStatus = getOrderFinancialStatus(order);
-  if (!PAID_LIKE_STATUSES.has(financialStatus)) {
-    return 0;
-  }
-
-  const netAmount = Math.max(0, grossAmount - getOrderRefundedAmount(order));
-  return Math.min(1, Math.max(0, netAmount / grossAmount));
-};
-
 const buildRefundDetails = (order) => {
   const data = parseJsonField(order?.data);
   const refunds = Array.isArray(data?.refunds) ? data.refunds : [];
@@ -793,7 +774,6 @@ const buildAnalyticsPayload = async (req, storeId) => {
     const lineItems = getLineItems(order);
     const refundDetails = buildRefundDetails(order);
     const fulfillmentDetails = buildFulfillmentDetails(order);
-    const orderNetRatio = getOrderNetAmountRatio(order);
     const isPaidLike = PAID_LIKE_STATUSES.has(getOrderFinancialStatus(order));
     const orderCancelled = isCancelledOrder(order);
 
@@ -837,8 +817,13 @@ const buildAnalyticsPayload = async (req, storeId) => {
         deliveredQuantity - refundedQuantity,
       );
       const linePrice = toNumber(item?.price);
-      const grossSales = orderCancelled ? 0 : linePrice * orderedQuantity;
-      const netSales = grossSales * orderNetRatio;
+      const saleableQuantity = Math.max(0, orderedQuantity - cancelledQuantity);
+      const netSaleableQuantity = Math.max(
+        0,
+        saleableQuantity - refundedQuantity,
+      );
+      const grossSales = isPaidLike ? linePrice * saleableQuantity : 0;
+      const netSales = isPaidLike ? linePrice * netSaleableQuantity : 0;
       const orderCreatedAt = order?.created_at || null;
       const lineItemId = normalizeKey(item?.id || item?.line_item_id);
       const lineFulfillmentAt =
@@ -943,6 +928,7 @@ const buildAnalyticsPayload = async (req, storeId) => {
         : 0;
       acc.ordered_quantity += toNumber(product?.ordered_quantity);
       acc.delivered_quantity += toNumber(product?.delivered_quantity);
+      acc.net_delivered_quantity += toNumber(product?.net_delivered_quantity);
       acc.returned_quantity += toNumber(product?.returned_quantity);
       acc.pending_quantity += toNumber(product?.pending_quantity);
       acc.cancelled_quantity += toNumber(product?.cancelled_quantity);
@@ -956,6 +942,7 @@ const buildAnalyticsPayload = async (req, storeId) => {
       total_variants: 0,
       ordered_quantity: 0,
       delivered_quantity: 0,
+      net_delivered_quantity: 0,
       returned_quantity: 0,
       pending_quantity: 0,
       cancelled_quantity: 0,

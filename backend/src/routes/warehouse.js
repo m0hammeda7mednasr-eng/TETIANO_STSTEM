@@ -9,13 +9,19 @@ const router = express.Router();
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CATALOG_CACHE_TTL_MS = 15 * 1000;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 200;
 const MOVEMENT_TYPES = new Set(["in", "out"]);
 const STOCK_SORT_FIELDS = new Set([
   "title",
+  "sku",
   "updated_at",
   "inventory_quantity",
+  "warehouse_quantity",
+  "shopify_inventory_quantity",
+  "stock_difference",
+  "last_scanned_at",
   "price",
 ]);
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
@@ -32,7 +38,10 @@ const PRODUCT_LOOKUP_SELECT = [
   "updated_at",
   "last_synced_at",
   "created_at",
+  "data",
 ].join(",");
+const DEFAULT_VARIANT_TITLES = new Set(["default", "default title"]);
+const productCatalogCache = new Map();
 
 const createHttpError = (status, message) => {
   const error = new Error(message);
@@ -84,6 +93,22 @@ const normalizeSku = (value) =>
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const parseJsonField = (value) => {
+  if (!value) {
+    return {};
+  }
+
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+
+  return value;
 };
 
 const toPositiveInteger = (value, fallback = 1) => {
@@ -139,6 +164,37 @@ const buildWarehouseSetupResponse = ({ limit, offset, storeId, message }) => ({
   setup_required: true,
   message,
 });
+
+const getFreshProductCatalog = (storeId) => {
+  const cacheKey = String(storeId || "").trim();
+  if (!cacheKey) {
+    return null;
+  }
+
+  const entry = productCatalogCache.get(cacheKey);
+  if (!entry) {
+    return null;
+  }
+
+  if (Date.now() - entry.updatedAt > CATALOG_CACHE_TTL_MS) {
+    productCatalogCache.delete(cacheKey);
+    return null;
+  }
+
+  return entry.value;
+};
+
+const rememberProductCatalog = (storeId, value) => {
+  const cacheKey = String(storeId || "").trim();
+  if (!cacheKey) {
+    return;
+  }
+
+  productCatalogCache.set(cacheKey, {
+    updatedAt: Date.now(),
+    value,
+  });
+};
 
 const getAdminStoreIds = async () => {
   const strategies = [
@@ -243,71 +299,220 @@ const resolveStoreContext = async (req) => {
   throw createHttpError(400, "Select a store first before using warehouse tools");
 };
 
-const mapInventoryRowsByProductId = (rows = []) =>
-  new Map(
-    (rows || [])
-      .filter((row) => row?.product_id)
-      .map((row) => [String(row.product_id), row]),
-  );
+const getProductVariantRows = (product) => {
+  const parsedData = parseJsonField(product?.data);
+  return Array.isArray(parsedData?.variants) ? parsedData.variants : [];
+};
 
-const serializeWarehouseProductRow = (product, inventoryRow) => {
-  const warehouseQuantity = toNumber(inventoryRow?.quantity);
-  const shopifyQuantity = toNumber(product?.inventory_quantity);
-  const difference = warehouseQuantity - shopifyQuantity;
+const getProductImageRows = (product) => {
+  const parsedData = parseJsonField(product?.data);
+  const images = Array.isArray(parsedData?.images) ? parsedData.images : [];
+
+  return images.map((image) => ({
+    id: image?.id || null,
+    src: image?.src || "",
+    variant_ids: Array.isArray(image?.variant_ids) ? image.variant_ids : [],
+  }));
+};
+
+const getProductPrimaryImageUrl = (product) => {
+  const parsedData = parseJsonField(product?.data);
+  return (
+    parsedData?.image?.src ||
+    parsedData?.featured_image?.src ||
+    String(product?.image_url || "").trim() ||
+    ""
+  );
+};
+
+const resolveVariantImageUrl = (variant, imageRows = [], fallbackImageUrl = "") => {
+  const variantId = String(variant?.id || "").trim();
+  const variantImageId = String(variant?.image_id || "").trim();
+
+  if (variantImageId) {
+    const directImage = imageRows.find(
+      (image) => String(image?.id || "").trim() === variantImageId,
+    );
+    if (directImage?.src) {
+      return directImage.src;
+    }
+  }
+
+  if (variantId) {
+    const linkedImage = imageRows.find((image) =>
+      Array.isArray(image?.variant_ids) &&
+      image.variant_ids.some((value) => String(value || "").trim() === variantId),
+    );
+    if (linkedImage?.src) {
+      return linkedImage.src;
+    }
+  }
+
+  return fallbackImageUrl;
+};
+
+const getVariantDisplayTitle = (product, variant, index) => {
+  const rawTitle = String(variant?.title || "").trim();
+  if (!rawTitle) {
+    return `Variant ${index + 1}`;
+  }
+
+  const normalizedTitle = rawTitle.toLowerCase();
+  if (DEFAULT_VARIANT_TITLES.has(normalizedTitle)) {
+    return "Default Variant";
+  }
+
+  const normalizedProductTitle = String(product?.title || "").trim().toLowerCase();
+  if (normalizedProductTitle && normalizedTitle === normalizedProductTitle) {
+    return "Default Variant";
+  }
+
+  return rawTitle;
+};
+
+const buildFallbackVariant = (product) => ({
+  id: product?.shopify_id || product?.id || null,
+  title: product?.title || "Default Variant",
+  sku: product?.sku || "",
+  barcode: "",
+  price: product?.price ?? null,
+  inventory_quantity: product?.inventory_quantity ?? 0,
+  created_at: product?.created_at || null,
+  updated_at: product?.updated_at || null,
+});
+
+const buildWarehouseVariantCatalogEntry = (product, variant, index, variantsCount) => {
+  const rawSku = String(variant?.sku || product?.sku || "").trim();
+  const normalizedSku = normalizeSku(rawSku);
+  if (!normalizedSku) {
+    return null;
+  }
+
+  const imageRows = getProductImageRows(product);
+  const fallbackImageUrl = getProductPrimaryImageUrl(product);
+  const variantTitle = getVariantDisplayTitle(product, variant, index);
+  const isDefaultVariant = variantTitle === "Default Variant";
+  const productTitle = product?.title || "Untitled product";
 
   return {
-    id: product?.id || null,
+    key: `${product?.id || "product"}:${variant?.id || normalizedSku}:${index}`,
+    id: variant?.id || normalizedSku,
+    product_id: product?.id || null,
+    variant_id: variant?.id || null,
     shopify_id: product?.shopify_id || null,
     store_id: product?.store_id || null,
-    title: product?.title || "Untitled product",
+    title: productTitle,
+    product_title: productTitle,
+    variant_title: variantTitle,
+    display_title: isDefaultVariant ? productTitle : `${productTitle} / ${variantTitle}`,
     vendor: product?.vendor || "",
     product_type: product?.product_type || "",
-    sku: product?.sku || "",
-    normalized_sku: normalizeSku(product?.sku),
-    price: product?.price ?? null,
-    shopify_inventory_quantity: shopifyQuantity,
-    warehouse_quantity: warehouseQuantity,
-    stock_difference: difference,
-    stock_state: difference === 0 ? "matched" : difference > 0 ? "warehouse_higher" : "shopify_higher",
-    last_scanned_at: inventoryRow?.last_scanned_at || null,
-    last_movement_type: inventoryRow?.last_movement_type || null,
-    last_movement_quantity: toNumber(inventoryRow?.last_movement_quantity),
+    sku: rawSku || normalizedSku,
+    normalized_sku: normalizedSku,
+    barcode: String(variant?.barcode || "").trim(),
+    image_url: resolveVariantImageUrl(variant, imageRows, fallbackImageUrl),
+    price: variant?.price ?? product?.price ?? null,
+    shopify_inventory_quantity: toNumber(
+      variant?.inventory_quantity ?? product?.inventory_quantity,
+    ),
+    has_multiple_variants: variantsCount > 1,
+    variants_count: variantsCount,
+    option_values: [variant?.option1, variant?.option2, variant?.option3]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
     last_synced_at: product?.last_synced_at || null,
-    created_at: product?.created_at || null,
-    updated_at: product?.updated_at || null,
+    created_at: variant?.created_at || product?.created_at || null,
+    updated_at: variant?.updated_at || product?.updated_at || null,
   };
 };
 
-const getProductsPage = async ({ storeId, pagination, sortOptions }) => {
-  let query = db
-    .from("products")
-    .select(PRODUCT_LOOKUP_SELECT)
-    .eq("store_id", storeId)
-    .not("sku", "is", null)
-    .neq("sku", "")
-    .order(sortOptions.sortBy, { ascending: sortOptions.ascending })
-    .range(pagination.offset, pagination.offset + pagination.limit - 1);
+const buildWarehouseVariantCatalog = (products = []) => {
+  const rows = [];
+  const rowsBySku = new Map();
+  const duplicateSkus = new Set();
 
-  const { data, error } = await query;
-  if (error) {
-    throw error;
+  for (const product of products) {
+    const variants = getProductVariantRows(product);
+    const normalizedVariants =
+      variants.length > 0 ? variants : [buildFallbackVariant(product)];
+
+    normalizedVariants.forEach((variant, index) => {
+      const entry = buildWarehouseVariantCatalogEntry(
+        product,
+        variant,
+        index,
+        normalizedVariants.length,
+      );
+
+      if (!entry) {
+        return;
+      }
+
+      rows.push(entry);
+
+      const normalizedSku = entry.normalized_sku;
+      const existing = rowsBySku.get(normalizedSku);
+      if (existing) {
+        duplicateSkus.add(normalizedSku);
+      } else {
+        rowsBySku.set(normalizedSku, entry);
+      }
+    });
   }
 
-  return (data || []).filter((product) => normalizeSku(product?.sku));
+  return {
+    rows,
+    rowsBySku,
+    duplicateSkus,
+  };
 };
 
-const getInventoryRowsForProducts = async (storeId, productIds = []) => {
-  if (!Array.isArray(productIds) || productIds.length === 0) {
-    return [];
+const loadAllStoreProducts = async (storeId) => {
+  const rows = [];
+  const pageSize = 500;
+
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await db
+      .from("products")
+      .select(PRODUCT_LOOKUP_SELECT)
+      .eq("store_id", storeId)
+      .order("updated_at", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) {
+      throw error;
+    }
+
+    const pageRows = data || [];
+    rows.push(...pageRows);
+
+    if (pageRows.length < pageSize) {
+      break;
+    }
   }
 
+  return rows;
+};
+
+const getWarehouseProductCatalog = async (storeId) => {
+  const cached = getFreshProductCatalog(storeId);
+  if (cached) {
+    return cached;
+  }
+
+  const products = await loadAllStoreProducts(storeId);
+  const catalog = buildWarehouseVariantCatalog(products);
+  rememberProductCatalog(storeId, catalog);
+  return catalog;
+};
+
+const getInventoryRowsForStore = async (storeId) => {
   const { data, error } = await db
     .from("warehouse_inventory")
     .select(
-      "id, product_id, quantity, last_scanned_at, last_movement_type, last_movement_quantity, updated_at",
+      "id, store_id, product_id, sku, quantity, last_scanned_at, last_movement_type, last_movement_quantity, created_at, updated_at",
     )
-    .eq("store_id", storeId)
-    .in("product_id", productIds);
+    .eq("store_id", storeId);
 
   if (error) {
     throw error;
@@ -316,69 +521,195 @@ const getInventoryRowsForProducts = async (storeId, productIds = []) => {
   return data || [];
 };
 
-const findProductBySku = async ({ storeId, scanCode }) => {
-  const normalizedSku = normalizeSku(scanCode);
-  const lookupValues = Array.from(
-    new Set(
-      [String(scanCode || "").trim(), normalizedSku].filter(Boolean),
-    ),
+const mapInventoryRowsBySku = (rows = []) =>
+  new Map(
+    (rows || [])
+      .filter((row) => normalizeSku(row?.sku))
+      .map((row) => [normalizeSku(row?.sku), row]),
   );
 
-  let matchedRows = [];
-  for (const lookupValue of lookupValues) {
-    const exactResult = await db
-      .from("products")
-      .select(PRODUCT_LOOKUP_SELECT)
-      .eq("store_id", storeId)
-      .eq("sku", lookupValue)
-      .order("updated_at", { ascending: false })
-      .limit(10);
+const serializeWarehouseVariantRow = (variantRow, inventoryRow) => {
+  const warehouseQuantity = toNumber(inventoryRow?.quantity);
+  const shopifyQuantity = toNumber(variantRow?.shopify_inventory_quantity);
+  const difference = warehouseQuantity - shopifyQuantity;
 
-    if (exactResult.error) {
-      throw exactResult.error;
+  return {
+    id: variantRow?.key || variantRow?.id || inventoryRow?.id || null,
+    product_id: variantRow?.product_id || inventoryRow?.product_id || null,
+    variant_id: variantRow?.variant_id || null,
+    shopify_id: variantRow?.shopify_id || null,
+    store_id: variantRow?.store_id || inventoryRow?.store_id || null,
+    title: variantRow?.title || "Archived product",
+    product_title: variantRow?.product_title || variantRow?.title || "Archived product",
+    variant_title: variantRow?.variant_title || "Archived Variant",
+    display_title:
+      variantRow?.display_title ||
+      variantRow?.title ||
+      `Archived SKU ${inventoryRow?.sku || ""}`.trim(),
+    vendor: variantRow?.vendor || "",
+    product_type: variantRow?.product_type || "",
+    sku: variantRow?.sku || inventoryRow?.sku || "",
+    normalized_sku:
+      variantRow?.normalized_sku || normalizeSku(variantRow?.sku || inventoryRow?.sku),
+    barcode: variantRow?.barcode || "",
+    image_url: variantRow?.image_url || "",
+    option_values: Array.isArray(variantRow?.option_values)
+      ? variantRow.option_values
+      : [],
+    price: variantRow?.price ?? null,
+    shopify_inventory_quantity: shopifyQuantity,
+    warehouse_quantity: warehouseQuantity,
+    stock_difference: difference,
+    stock_state:
+      difference === 0
+        ? "matched"
+        : difference > 0
+          ? "warehouse_higher"
+          : "shopify_higher",
+    has_multiple_variants: Boolean(variantRow?.has_multiple_variants),
+    variants_count: toNumber(variantRow?.variants_count),
+    is_archived: Boolean(variantRow?.is_archived),
+    last_scanned_at: inventoryRow?.last_scanned_at || null,
+    last_movement_type: inventoryRow?.last_movement_type || null,
+    last_movement_quantity: toNumber(inventoryRow?.last_movement_quantity),
+    last_synced_at: variantRow?.last_synced_at || null,
+    created_at: variantRow?.created_at || inventoryRow?.created_at || null,
+    updated_at:
+      inventoryRow?.updated_at || variantRow?.updated_at || variantRow?.created_at || null,
+  };
+};
+
+const buildOrphanWarehouseRow = (inventoryRow) =>
+  serializeWarehouseVariantRow(
+    {
+      key: inventoryRow?.id || normalizeSku(inventoryRow?.sku),
+      id: normalizeSku(inventoryRow?.sku),
+      product_id: inventoryRow?.product_id || null,
+      store_id: inventoryRow?.store_id || null,
+      title: "Archived product",
+      product_title: "Archived product",
+      variant_title: "Unknown Variant",
+      display_title: `Archived SKU ${inventoryRow?.sku || ""}`.trim(),
+      is_archived: true,
+      sku: inventoryRow?.sku || "",
+      normalized_sku: normalizeSku(inventoryRow?.sku),
+      shopify_inventory_quantity: 0,
+      price: null,
+      has_multiple_variants: false,
+      variants_count: 0,
+      option_values: [],
+      last_synced_at: null,
+      created_at: inventoryRow?.created_at || null,
+      updated_at: inventoryRow?.updated_at || null,
+    },
+    inventoryRow,
+  );
+
+const sortWarehouseRows = (rows, { sortBy, ascending }) => {
+  const direction = ascending ? 1 : -1;
+  const sortedRows = [...(rows || [])];
+
+  sortedRows.sort((left, right) => {
+    let leftValue;
+    let rightValue;
+
+    switch (sortBy) {
+      case "sku":
+        leftValue = left?.normalized_sku || "";
+        rightValue = right?.normalized_sku || "";
+        break;
+      case "price":
+        leftValue = toNumber(left?.price);
+        rightValue = toNumber(right?.price);
+        break;
+      case "inventory_quantity":
+      case "shopify_inventory_quantity":
+        leftValue = toNumber(left?.shopify_inventory_quantity);
+        rightValue = toNumber(right?.shopify_inventory_quantity);
+        break;
+      case "warehouse_quantity":
+        leftValue = toNumber(left?.warehouse_quantity);
+        rightValue = toNumber(right?.warehouse_quantity);
+        break;
+      case "stock_difference":
+        leftValue = toNumber(left?.stock_difference);
+        rightValue = toNumber(right?.stock_difference);
+        break;
+      case "last_scanned_at":
+        leftValue = new Date(left?.last_scanned_at || 0).getTime() || 0;
+        rightValue = new Date(right?.last_scanned_at || 0).getTime() || 0;
+        break;
+      case "updated_at":
+        leftValue = new Date(left?.updated_at || 0).getTime() || 0;
+        rightValue = new Date(right?.updated_at || 0).getTime() || 0;
+        break;
+      case "title":
+      default:
+        leftValue = String(left?.display_title || left?.title || "").toLowerCase();
+        rightValue = String(right?.display_title || right?.title || "").toLowerCase();
+        break;
     }
 
-    const exactMatches = (exactResult.data || []).filter(
-      (row) => normalizeSku(row?.sku) === normalizedSku,
+    if (leftValue < rightValue) {
+      return -1 * direction;
+    }
+    if (leftValue > rightValue) {
+      return 1 * direction;
+    }
+
+    return String(left?.normalized_sku || "").localeCompare(
+      String(right?.normalized_sku || ""),
     );
-    if (exactMatches.length > 0) {
-      matchedRows = exactMatches;
-      break;
-    }
+  });
 
-    const ilikeResult = await db
-      .from("products")
-      .select(PRODUCT_LOOKUP_SELECT)
-      .eq("store_id", storeId)
-      .ilike("sku", lookupValue)
-      .order("updated_at", { ascending: false })
-      .limit(10);
+  return sortedRows;
+};
 
-    if (ilikeResult.error) {
-      throw ilikeResult.error;
-    }
-
-    const ilikeMatches = (ilikeResult.data || []).filter(
-      (row) => normalizeSku(row?.sku) === normalizedSku,
-    );
-    if (ilikeMatches.length > 0) {
-      matchedRows = ilikeMatches;
-      break;
-    }
-  }
-
-  if (matchedRows.length === 0) {
+const findCatalogVariantBySku = async ({ storeId, scanCode }) => {
+  const normalizedSku = normalizeSku(scanCode);
+  if (!normalizedSku) {
     return null;
   }
 
-  if (matchedRows.length > 1) {
+  const catalog = await getWarehouseProductCatalog(storeId);
+
+  if (catalog.duplicateSkus.has(normalizedSku)) {
     throw createHttpError(
       409,
-      `More than one product uses SKU ${normalizedSku}. SKU must be unique per store.`,
+      `More than one variant uses SKU ${normalizedSku}. SKU must be unique per store.`,
     );
   }
 
-  return matchedRows[0];
+  return catalog.rowsBySku.get(normalizedSku) || null;
+};
+
+const enrichScanEvent = (scan, catalog) => {
+  const normalizedSku = normalizeSku(scan?.sku);
+  const variantRow = normalizedSku ? catalog.rowsBySku.get(normalizedSku) : null;
+  const fallbackProduct = scan?.product || {};
+
+  return {
+    ...scan,
+    product: {
+      id: variantRow?.product_id || fallbackProduct?.id || scan?.product_id || null,
+      product_id: variantRow?.product_id || fallbackProduct?.id || scan?.product_id || null,
+      variant_id: variantRow?.variant_id || null,
+      title: variantRow?.title || fallbackProduct?.title || "Archived product",
+      product_title:
+        variantRow?.product_title || fallbackProduct?.title || "Archived product",
+      variant_title: variantRow?.variant_title || "Unknown Variant",
+      display_title:
+        variantRow?.display_title || fallbackProduct?.title || scan?.sku || "-",
+      sku: variantRow?.sku || fallbackProduct?.sku || scan?.sku || "-",
+      normalized_sku: variantRow?.normalized_sku || normalizedSku,
+      vendor: variantRow?.vendor || fallbackProduct?.vendor || "",
+      image_url: variantRow?.image_url || "",
+      barcode: variantRow?.barcode || "",
+      option_values: Array.isArray(variantRow?.option_values)
+        ? variantRow.option_values
+        : [],
+    },
+  };
 };
 
 const writeActivityLog = async ({
@@ -395,12 +726,15 @@ const writeActivityLog = async ({
     const { error } = await db.from("activity_log").insert({
       user_id: userId,
       action: movementType === "in" ? "warehouse_scan_in" : "warehouse_scan_out",
-      entity_type: "warehouse_product",
-      entity_id: product?.id || null,
-      entity_name: product?.title || product?.sku || scanCode,
+      entity_type: "warehouse_variant",
+      entity_id: product?.variant_id || product?.product_id || product?.id || null,
+      entity_name:
+        product?.display_title || product?.title || product?.sku || scanCode,
       details: {
         sku: product?.sku || scanCode,
         normalized_sku: normalizeSku(scanCode),
+        product_id: product?.product_id || product?.id || null,
+        variant_id: product?.variant_id || null,
         movement_type: movementType,
         quantity,
         store_id: storeId,
@@ -425,22 +759,28 @@ router.get("/stock", async (req, res) => {
     const pagination = getPagination(req.query);
     const sortOptions = getSortOptions(req.query);
 
-    const products = await getProductsPage({
-      storeId,
-      pagination,
-      sortOptions,
-    });
+    const [catalog, inventoryRows] = await Promise.all([
+      getWarehouseProductCatalog(storeId),
+      getInventoryRowsForStore(storeId),
+    ]);
 
-    const inventoryRows = await getInventoryRowsForProducts(
-      storeId,
-      products.map((product) => product.id).filter(Boolean),
-    );
-    const inventoryByProductId = mapInventoryRowsByProductId(inventoryRows);
-    const rows = products.map((product) =>
-      serializeWarehouseProductRow(
-        product,
-        inventoryByProductId.get(String(product.id)),
+    const inventoryBySku = mapInventoryRowsBySku(inventoryRows);
+    const catalogRows = catalog.rows.map((variantRow) =>
+      serializeWarehouseVariantRow(
+        variantRow,
+        inventoryBySku.get(variantRow.normalized_sku),
       ),
+    );
+    const orphanRows = inventoryRows
+      .filter((inventoryRow) => !catalog.rowsBySku.has(normalizeSku(inventoryRow?.sku)))
+      .map((inventoryRow) => buildOrphanWarehouseRow(inventoryRow));
+    const sortedRows = sortWarehouseRows(
+      [...catalogRows, ...orphanRows],
+      sortOptions,
+    );
+    const rows = sortedRows.slice(
+      pagination.offset,
+      pagination.offset + pagination.limit,
     );
 
     res.json({
@@ -472,6 +812,7 @@ router.get("/scans", async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     const pagination = getPagination(req.query);
+    const catalog = await getWarehouseProductCatalog(storeId);
 
     const { data, error } = await db
       .from("warehouse_scan_events")
@@ -486,8 +827,10 @@ router.get("/scans", async (req, res) => {
       throw error;
     }
 
+    const rows = (data || []).map((scan) => enrichScanEvent(scan, catalog));
+
     res.json({
-      ...buildPaginatedCollection(data || [], pagination),
+      ...buildPaginatedCollection(rows, pagination),
       store_id: storeId,
       generated_at: new Date().toISOString(),
     });
@@ -528,7 +871,7 @@ router.post("/scan", async (req, res) => {
       throw createHttpError(400, "movement_type must be either in or out");
     }
 
-    const product = await findProductBySku({
+    const product = await findCatalogVariantBySku({
       storeId,
       scanCode: normalizedSku,
     });
@@ -567,7 +910,7 @@ router.post("/scan", async (req, res) => {
     const nowIso = new Date().toISOString();
     const inventoryPayload = {
       store_id: storeId,
-      product_id: product.id,
+      product_id: product.product_id,
       sku: normalizedSku,
       quantity: nextQuantity,
       last_scanned_at: nowIso,
@@ -612,7 +955,7 @@ router.post("/scan", async (req, res) => {
       .insert({
         store_id: storeId,
         sku: normalizedSku,
-        product_id: product.id,
+        product_id: product.product_id,
         user_id: req.user?.id || null,
         movement_type: movementType,
         quantity,
@@ -660,13 +1003,21 @@ router.post("/scan", async (req, res) => {
           ? `Warehouse stock increased for SKU ${normalizedSku}`
           : `Warehouse stock decreased for SKU ${normalizedSku}`,
       product: {
-        id: product.id,
+        id: product.product_id,
+        product_id: product.product_id,
+        variant_id: product.variant_id,
         title: product.title,
+        product_title: product.product_title,
+        variant_title: product.variant_title,
+        display_title: product.display_title,
         sku: product.sku,
         vendor: product.vendor,
         price: product.price,
+        barcode: product.barcode,
+        image_url: product.image_url,
+        option_values: product.option_values,
       },
-      inventory: serializeWarehouseProductRow(product, savedInventory),
+      inventory: serializeWarehouseVariantRow(product, savedInventory),
       scan: scanEvent,
     });
   } catch (error) {

@@ -20,8 +20,22 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const formatCount = (value) => toNumber(value).toLocaleString("ar-EG");
+
 const isWarehouseEvent = (event) =>
   String(event?.source || "").toLowerCase().includes("/warehouse");
+
+const getScanDisplayTitle = (product) =>
+  product?.display_title || product?.product_title || product?.title || product?.sku || "-";
+
+const getScanVariantLabel = (product) => {
+  const variantTitle = String(product?.variant_title || "").trim();
+  if (!variantTitle || variantTitle === "Default Variant") {
+    return "الافتراضي";
+  }
+
+  return variantTitle;
+};
 
 export default function WarehouseScanner() {
   const { user } = useAuth();
@@ -113,8 +127,8 @@ export default function WarehouseScanner() {
 
       setSuccess(
         movementType === "in"
-          ? `تمت إضافة ${quantityNumber.toLocaleString("ar-EG")} وحدة إلى ${product?.title || product?.sku || scanCode}`
-          : `تم خصم ${quantityNumber.toLocaleString("ar-EG")} وحدة من ${product?.title || product?.sku || scanCode}`,
+          ? `تمت إضافة ${formatCount(quantityNumber)} وحدة إلى ${getScanDisplayTitle(product)}`
+          : `تم خصم ${formatCount(quantityNumber)} وحدة من ${getScanDisplayTitle(product)}`,
       );
       setLastResult({
         ...payload,
@@ -154,7 +168,7 @@ export default function WarehouseScanner() {
               <div>
                 <h1 className="text-3xl font-bold text-slate-900">السكانر</h1>
                 <p className="text-slate-600 mt-1">
-                  اختر داخل أو خارج، ثم اسكان الـ SKU ليتم تحديث رصيد المخزن مباشرة.
+                  اختر داخل أو خارج، ثم اسكان الـ SKU ليتم تحديث رصيد الفاريانت نفسه مباشرة.
                 </p>
                 {lastUpdatedAt && (
                   <div className="mt-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
@@ -309,8 +323,8 @@ export default function WarehouseScanner() {
                 </div>
                 <p className="text-slate-300 text-sm mt-4 leading-6">
                   {movementType === "in"
-                    ? "كل سكانة في هذا الوضع ستزيد رصيد المخزن للمنتج مباشرة."
-                    : "كل سكانة في هذا الوضع ستخصم من رصيد المخزن ولن تسمح بالنزول تحت الصفر."}
+                    ? "كل سكانة في هذا الوضع ستزيد رصيد نفس الـ SKU داخل المخزن."
+                    : "كل سكانة في هذا الوضع ستخصم من رصيد نفس الـ SKU ولن تسمح بالنزول تحت الصفر."}
                 </p>
               </div>
 
@@ -323,31 +337,33 @@ export default function WarehouseScanner() {
                   <div className="mt-4 space-y-3">
                     <div className="rounded-xl border border-slate-200 p-4 bg-slate-50">
                       <div className="font-semibold text-slate-900">
-                        {lastResult?.product?.title || "-"}
+                        {getScanDisplayTitle(lastResult?.product)}
                       </div>
                       <div className="text-sm text-slate-600 mt-1">
                         SKU: {lastResult?.product?.sku || "-"}
                       </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        الفاريانت: {getScanVariantLabel(lastResult?.product)}
+                      </div>
+                      {lastResult?.product?.vendor ? (
+                        <div className="text-xs text-slate-500 mt-1">
+                          المورد: {lastResult.product.vendor}
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                       <InfoTile
                         label="رصيد المخزن الآن"
-                        value={toNumber(
-                          lastResult.inventory.warehouse_quantity,
-                        ).toLocaleString("ar-EG")}
+                        value={formatCount(lastResult.inventory.warehouse_quantity)}
                       />
                       <InfoTile
                         label="رصيد Shopify"
-                        value={toNumber(
-                          lastResult.inventory.shopify_inventory_quantity,
-                        ).toLocaleString("ar-EG")}
+                        value={formatCount(lastResult.inventory.shopify_inventory_quantity)}
                       />
                       <InfoTile
                         label="الفرق"
-                        value={toNumber(
-                          lastResult.inventory.stock_difference,
-                        ).toLocaleString("ar-EG")}
+                        value={formatCount(lastResult.inventory.stock_difference)}
                       />
                       <InfoTile
                         label="وقت الحركة"
@@ -422,17 +438,20 @@ export default function WarehouseScanner() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="font-medium text-slate-900">
-                            {scan?.product?.title || "-"}
+                            {getScanDisplayTitle(scan?.product)}
                           </div>
                           <div className="text-xs text-slate-500 mt-1">
                             {scan?.product?.vendor || "-"}
+                            {scan?.product?.variant_title
+                              ? ` • ${getScanVariantLabel(scan?.product)}`
+                              : ""}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-slate-700">
                           {scan?.product?.sku || scan?.sku || "-"}
                         </td>
                         <td className="px-4 py-3 text-slate-700">
-                          {toNumber(scan.quantity).toLocaleString("ar-EG")}
+                          {formatCount(scan.quantity)}
                         </td>
                         <td className="px-4 py-3 text-slate-700">
                           {scan?.user?.name || scan?.user?.email || "-"}

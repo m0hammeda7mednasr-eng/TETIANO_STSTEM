@@ -13,6 +13,7 @@ import {
   Search,
   ShieldAlert,
   Store,
+  Tags,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { warehouseAPI } from "../utils/api";
@@ -28,15 +29,23 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const formatCount = (value) => toNumber(value).toLocaleString("ar-EG");
+
 const matchesSearch = (row, keyword) => {
   const normalized = String(keyword || "").trim().toLowerCase();
   if (!normalized) {
     return true;
   }
 
-  return [row?.title, row?.sku, row?.vendor, row?.product_type].some((value) =>
-    String(value || "").toLowerCase().includes(normalized),
-  );
+  return [
+    row?.display_title,
+    row?.product_title,
+    row?.variant_title,
+    row?.sku,
+    row?.vendor,
+    row?.product_type,
+    ...(Array.isArray(row?.option_values) ? row.option_values : []),
+  ].some((value) => String(value || "").toLowerCase().includes(normalized));
 };
 
 const isWarehouseRelatedSharedUpdate = (event) => {
@@ -49,6 +58,10 @@ const isWarehouseRelatedSharedUpdate = (event) => {
 };
 
 const getRowClassName = (row) => {
+  if (row?.is_archived) {
+    return "bg-slate-50";
+  }
+
   if (toNumber(row?.warehouse_quantity) <= 0) {
     return "bg-rose-50";
   }
@@ -81,6 +94,18 @@ const formatDifference = (value) => {
   return numericValue.toLocaleString("ar-EG");
 };
 
+const getDisplayTitle = (row) =>
+  row?.display_title || row?.product_title || row?.title || row?.sku || "SKU";
+
+const getVariantLabel = (row) => {
+  const variantTitle = String(row?.variant_title || "").trim();
+  if (!variantTitle || variantTitle === "Default Variant") {
+    return "الافتراضي";
+  }
+
+  return variantTitle;
+};
+
 export default function WarehouseStock() {
   const [rows, setRows] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -101,7 +126,7 @@ export default function WarehouseStock() {
     try {
       let schemaReady = true;
       let setupMessage = "";
-      const products = await fetchAllPagesProgressively(
+      const variants = await fetchAllPagesProgressively(
         ({ limit, offset }) =>
           warehouseAPI.getStock({
             limit,
@@ -127,7 +152,7 @@ export default function WarehouseStock() {
         },
       );
 
-      setRows(products);
+      setRows(variants);
       setSetupNotice(schemaReady ? "" : setupMessage);
       setLastUpdatedAt(new Date());
     } catch (requestError) {
@@ -165,6 +190,7 @@ export default function WarehouseStock() {
     let warehouseUnits = 0;
     let mismatched = 0;
     let zeroStock = 0;
+    let archived = 0;
 
     filteredRows.forEach((row) => {
       warehouseUnits += toNumber(row?.warehouse_quantity);
@@ -176,13 +202,18 @@ export default function WarehouseStock() {
       if (toNumber(row?.warehouse_quantity) <= 0) {
         zeroStock += 1;
       }
+
+      if (row?.is_archived) {
+        archived += 1;
+      }
     });
 
     return {
-      totalProducts: filteredRows.length,
+      totalVariants: filteredRows.length,
       warehouseUnits,
       mismatched,
       zeroStock,
+      archived,
     };
   }, [filteredRows]);
 
@@ -191,90 +222,119 @@ export default function WarehouseStock() {
       <Sidebar />
 
       <main className="flex-1 overflow-auto">
-        <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6">
-            <div className="flex flex-wrap justify-between items-center gap-3">
-              <div>
-                <h1 className="text-3xl font-bold text-slate-900">المخزن</h1>
-                <p className="text-slate-600 mt-1">
-                  الرصيد هنا يعتمد فقط على حركات السكانر حسب SKU، وليس على ستوك Shopify.
-                </p>
-                {lastUpdatedAt && (
-                  <div className="mt-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                    <Clock3 size={12} />
-                    آخر تحديث {formatDateTime(lastUpdatedAt)}
-                  </div>
-                )}
-              </div>
+        <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="bg-gradient-to-r from-slate-50 via-white to-sky-50/80 p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h1 className="text-3xl font-bold text-slate-900">
+                    المخزن
+                  </h1>
+                  <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-600">
+                    رصيد المخزن هنا معروض على مستوى كل Variant وكل SKU. كل حركة
+                    تعتمد على الـ Scanner والـ SKU فقط، وليس على المنتج المجمع.
+                  </p>
+                  {lastUpdatedAt && (
+                    <div className="mt-3 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                      <Clock3 size={12} />
+                      آخر تحديث {formatDateTime(lastUpdatedAt)}
+                    </div>
+                  )}
+                </div>
 
-              <button
-                onClick={() => fetchStock()}
-                className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
-              >
-                <RefreshCw size={18} />
-                تحديث
-              </button>
+                <button
+                  type="button"
+                  onClick={() => fetchStock()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-800"
+                >
+                  <RefreshCw size={18} />
+                  تحديث
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 border-t border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600 sm:grid-cols-3">
+              <InsightBanner
+                label="طريقة العرض"
+                value="كل صف يمثل SKU واحدًا وليس المنتج بالكامل"
+              />
+              <InsightBanner
+                label="اعتماد الرصيد"
+                value="الرصيد الفعلي للمخزن = حركات السكانر فقط"
+              />
+              <InsightBanner
+                label="فرق الرصيد"
+                value="المقارنة دائمًا بين رصيد المخزن ورصيد Shopify لنفس الـ SKU"
+              />
             </div>
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-2 text-red-700">
+            <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
               <AlertCircle size={18} />
               {error}
             </div>
           )}
 
           {setupNotice && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-2 text-amber-800">
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
               <ShieldAlert size={18} className="mt-0.5 shrink-0" />
               <div>
                 <p className="font-semibold">Warehouse setup required</p>
-                <p className="text-sm mt-1">
-                  {setupNotice}. Stock pages will stay empty until the warehouse tables are created.
+                <p className="mt-1 text-sm">
+                  {setupNotice}. صفحات المخزن ستظل للقراءة فقط حتى يتم إنشاء
+                  جداول المخزن.
                 </p>
               </div>
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
             <SummaryCard
-              title="عدد المنتجات"
-              value={summary.totalProducts.toLocaleString("ar-EG")}
+              title="عدد الـ SKU"
+              value={formatCount(summary.totalVariants)}
               tone="blue"
-              icon={Package}
+              icon={Tags}
             />
             <SummaryCard
-              title="إجمالي وحدات المخزن"
-              value={summary.warehouseUnits.toLocaleString("ar-EG")}
+              title="وحدات المخزن"
+              value={formatCount(summary.warehouseUnits)}
               tone="emerald"
               icon={Store}
             />
             <SummaryCard
               title="فروق تحتاج مراجعة"
-              value={summary.mismatched.toLocaleString("ar-EG")}
+              value={formatCount(summary.mismatched)}
               tone="amber"
               icon={ShieldAlert}
             />
             <SummaryCard
               title="رصيد صفر أو أقل"
-              value={summary.zeroStock.toLocaleString("ar-EG")}
+              value={formatCount(summary.zeroStock)}
               tone="red"
               icon={AlertCircle}
             />
+            <SummaryCard
+              title="SKU غير مرتبط"
+              value={formatCount(summary.archived)}
+              tone="slate"
+              icon={Package}
+            />
           </div>
 
-          <div className="bg-white rounded-xl shadow p-4 space-y-4">
-            <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-col gap-4 border-b border-slate-200 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
-                  رصيد المنتجات
+                  رصيد الفاريانتات
                 </h2>
-                <p className="text-sm text-slate-500">
-                  أي فرق ظاهر هنا يعني أن رصيد السكانر لا يطابق الرصيد الموجود في Shopify.
+                <p className="mt-1 text-sm text-slate-500">
+                  أي فرق ظاهر هنا يعني أن رصيد السكانر لا يطابق رصيد Shopify لنفس
+                  الـ SKU.
                 </p>
               </div>
 
-              <div className="relative w-full md:w-96">
+              <div className="relative w-full lg:w-96">
                 <Search
                   className="absolute left-3 top-2.5 text-slate-400"
                   size={16}
@@ -283,95 +343,138 @@ export default function WarehouseStock() {
                   type="text"
                   value={searchTerm}
                   onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="ابحث باسم المنتج أو SKU أو المورد"
-                  className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  placeholder="ابحث باسم المنتج أو الفاريانت أو SKU أو المورد"
+                  className="w-full rounded-xl border border-slate-200 py-2 pl-8 pr-3 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
             </div>
 
-            {loading ? (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
-                جاري تحميل رصيد المخزن...
-              </div>
-            ) : filteredRows.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
-                لا توجد منتجات مطابقة للبحث الحالي.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm text-right">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-600">
-                      <th className="px-4 py-3 font-semibold">المنتج</th>
-                      <th className="px-4 py-3 font-semibold">SKU</th>
-                      <th className="px-4 py-3 font-semibold">سعر البيع</th>
-                      <th className="px-4 py-3 font-semibold">رصيد المخزن</th>
-                      <th className="px-4 py-3 font-semibold">رصيد Shopify</th>
-                      <th className="px-4 py-3 font-semibold">الفرق</th>
-                      <th className="px-4 py-3 font-semibold">آخر سكان</th>
-                      <th className="px-4 py-3 font-semibold">آخر مزامنة</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRows.map((row) => {
-                      const difference = toNumber(row?.stock_difference);
+            <div className="border-b border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-600">
+              عرض {formatCount(filteredRows.length)} SKU من أصل{" "}
+              {formatCount(rows.length)}.
+            </div>
 
-                      return (
-                        <tr
-                          key={row.id}
-                          className={`border-b border-slate-100 align-top ${getRowClassName(row)}`}
-                        >
-                          <td className="px-4 py-3">
-                            <div className="font-semibold text-slate-900">
-                              {row.title}
-                            </div>
-                            <div className="text-xs text-slate-500 mt-1">
-                              {row.vendor || "-"}
-                              {row.product_type ? ` • ${row.product_type}` : ""}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 font-medium text-slate-700">
-                            {row.sku || "-"}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatCurrency(row.price)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {toNumber(row.warehouse_quantity).toLocaleString("ar-EG")}
-                          </td>
-                          <td className="px-4 py-3">
-                            {toNumber(row.shopify_inventory_quantity).toLocaleString("ar-EG")}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-semibold ${getDifferenceBadgeClassName(difference)}`}
-                            >
-                              {formatDifference(difference)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            <div>{formatDateTime(row.last_scanned_at)}</div>
-                            {row.last_movement_type && (
-                              <div className="text-xs text-slate-500 mt-1">
-                                آخر حركة{" "}
-                                {row.last_movement_type === "in" ? "داخل" : "خارج"}
-                                {row.last_movement_quantity
-                                  ? ` • ${toNumber(row.last_movement_quantity).toLocaleString("ar-EG")}`
-                                  : ""}
+            <div className="p-4 sm:p-5">
+              {loading ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
+                  جاري تحميل رصيد المخزن...
+                </div>
+              ) : filteredRows.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
+                  لا توجد نتائج مطابقة للبحث الحالي.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-right text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-600">
+                        <th className="px-4 py-3 font-semibold">الفاريانت</th>
+                        <th className="px-4 py-3 font-semibold">SKU</th>
+                        <th className="px-4 py-3 font-semibold">السعر</th>
+                        <th className="px-4 py-3 font-semibold">المخزن</th>
+                        <th className="px-4 py-3 font-semibold">Shopify</th>
+                        <th className="px-4 py-3 font-semibold">الفرق</th>
+                        <th className="px-4 py-3 font-semibold">آخر حركة</th>
+                        <th className="px-4 py-3 font-semibold">الحالة</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRows.map((row) => {
+                        const difference = toNumber(row?.stock_difference);
+
+                        return (
+                          <tr
+                            key={row.id}
+                            className={`border-b border-slate-100 align-top ${getRowClassName(row)}`}
+                          >
+                            <td className="px-4 py-3">
+                              <div className="flex items-start gap-3">
+                                <WarehouseRowThumbnail
+                                  src={row?.image_url}
+                                  label={getDisplayTitle(row)}
+                                />
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-slate-900">
+                                    {getDisplayTitle(row)}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    {row?.product_title || "-"}
+                                    {row?.variant_title
+                                      ? ` • ${getVariantLabel(row)}`
+                                      : ""}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    {row?.vendor || "-"}
+                                    {row?.product_type ? ` • ${row.product_type}` : ""}
+                                  </div>
+                                  {Array.isArray(row?.option_values) &&
+                                  row.option_values.length > 0 ? (
+                                    <div className="mt-1 text-xs text-slate-500">
+                                      {row.option_values.join(" • ")}
+                                    </div>
+                                  ) : null}
+                                </div>
                               </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatDateTime(row.last_synced_at || row.updated_at)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                            </td>
+                            <td className="px-4 py-3 font-medium text-slate-700">
+                              <div>{row.sku || "-"}</div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {row?.barcode ? `Barcode: ${row.barcode}` : "-"}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatCurrency(row.price)}
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-slate-900">
+                              {formatCount(row.warehouse_quantity)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatCount(row.shopify_inventory_quantity)}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getDifferenceBadgeClassName(difference)}`}
+                              >
+                                {formatDifference(difference)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              <div>{formatDateTime(row.last_scanned_at)}</div>
+                              {row.last_movement_type && (
+                                <div className="mt-1 text-xs text-slate-500">
+                                  آخر حركة{" "}
+                                  {row.last_movement_type === "in"
+                                    ? "داخل"
+                                    : "خارج"}
+                                  {row.last_movement_quantity
+                                    ? ` • ${formatCount(row.last_movement_quantity)}`
+                                    : ""}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="space-y-2">
+                                {row?.is_archived ? (
+                                  <Badge tone="slate" label="SKU غير مرتبط" />
+                                ) : null}
+                                {difference === 0 ? (
+                                  <Badge tone="emerald" label="متطابق" />
+                                ) : difference > 0 ? (
+                                  <Badge tone="sky" label="المخزن أعلى" />
+                                ) : (
+                                  <Badge tone="amber" label="Shopify أعلى" />
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </section>
         </div>
       </main>
     </div>
@@ -384,6 +487,7 @@ function SummaryCard({ title, value, tone, icon: Icon }) {
     emerald: "bg-emerald-50 text-emerald-700 border-emerald-100",
     amber: "bg-amber-50 text-amber-700 border-amber-100",
     red: "bg-red-50 text-red-700 border-red-100",
+    slate: "bg-slate-50 text-slate-700 border-slate-200",
   };
 
   return (
@@ -391,12 +495,62 @@ function SummaryCard({ title, value, tone, icon: Icon }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium opacity-80">{title}</p>
-          <p className="text-2xl font-bold mt-2">{value}</p>
+          <p className="mt-2 text-2xl font-bold">{value}</p>
         </div>
         <div className="rounded-2xl bg-white/70 p-3">
           <Icon size={22} />
         </div>
       </div>
     </div>
+  );
+}
+
+function InsightBanner({ label, value }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+      <div className="text-xs font-medium text-slate-500">{label}</div>
+      <div className="mt-1 text-sm text-slate-700">{value}</div>
+    </div>
+  );
+}
+
+function Badge({ tone = "slate", label }) {
+  const tones = {
+    slate: "border-slate-200 bg-slate-100 text-slate-700",
+    sky: "border-sky-200 bg-sky-50 text-sky-700",
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    amber: "border-amber-200 bg-amber-50 text-amber-700",
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${tones[tone] || tones.slate}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function WarehouseRowThumbnail({ src, label }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const fallback = String(label || "S").trim().slice(0, 1).toUpperCase();
+
+  if (!src || imageFailed) {
+    return (
+      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 text-lg font-bold text-slate-500">
+        {fallback}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={label || "SKU"}
+      className="h-14 w-14 shrink-0 rounded-2xl border border-slate-200 bg-white object-cover"
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setImageFailed(true)}
+    />
   );
 }

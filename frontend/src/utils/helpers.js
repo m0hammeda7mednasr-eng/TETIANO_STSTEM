@@ -21,13 +21,37 @@ export const formatCurrency = (amount) => {
   }).format(safeAmount)} ${CURRENCY_LABEL}`;
 };
 
-export const formatDate = (date) => {
-  return new Date(date).toLocaleDateString("ar-EG");
+const formatDateValue = (date, options) => {
+  if (!date) {
+    return "-";
+  }
+
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) {
+    return "-";
+  }
+
+  return parsed.toLocaleString("ar-EG", options);
 };
 
-export const formatDateTime = (date) => {
-  return new Date(date).toLocaleString("ar-EG");
-};
+export const formatDate = (date) =>
+  formatDateValue(date, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+export const formatDateTime = (date) =>
+  formatDateValue(date, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 
 // Validation utilities
 export const validateEmail = (email) => {

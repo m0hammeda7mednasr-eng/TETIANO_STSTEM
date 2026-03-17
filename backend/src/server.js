@@ -18,6 +18,8 @@ import orderCommentsRoutes from "./routes/orderComments.js";
 import notificationsRoutes from "./routes/notifications.js";
 import shopifyWebhooksRoutes from "./routes/shopifyWebhooks.js";
 import eventsRoutes from "./routes/events.js";
+import warehouseRoutes from "./routes/warehouse.js";
+import productAnalysisRoutes from "./routes/productAnalysis.js";
 import { supabase } from "./supabaseClient.js";
 import { setRlsContext } from "./middleware/rls.js";
 import { emitRealtimeEvent } from "./services/realtimeEventService.js";
@@ -118,6 +120,8 @@ app.use("/api/operational-costs", operationalCostsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/order-comments", orderCommentsRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/warehouse", warehouseRoutes);
+app.use("/api/product-analysis", productAnalysisRoutes);
 
 // Health Check
 app.get("/api/health", (req, res) => {

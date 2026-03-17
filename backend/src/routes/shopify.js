@@ -17,6 +17,7 @@ import {
   removeManagedWebhooks,
 } from "../services/shopifyWebhookService.js";
 import { queueShopifyBackgroundSync } from "../services/shopifyBackgroundSyncService.js";
+import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 import {
   requireAdminRole,
   requirePermission,
@@ -32,6 +33,21 @@ const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 200;
+const ORDER_LIST_PAGE_LIMIT = 100;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MISSING_ORDER_GRACE_MS = 3 * DAY_MS;
+const MISSING_ORDER_ESCALATION_MS = 6 * DAY_MS;
+const MISSING_ORDER_NOTIFICATION_WINDOW_MS = DAY_MS;
+const MISSING_ORDER_ACTION_TYPES = new Set([
+  "order_note_add",
+  "order_status_update",
+  "update_fulfillment_status",
+  "order_payment_method_update",
+]);
+const MISSING_ORDER_NOTIFICATION_TYPES = new Set([
+  "order_missing",
+  "order_missing_escalated",
+]);
 const PAID_LIKE_STATUSES = new Set([
   "paid",
   "partially_paid",
@@ -48,6 +64,7 @@ const PRODUCT_LIST_SELECT = [
   "price",
   "cost_price",
   "sku",
+  "image_url",
   "inventory_quantity",
   "last_synced_at",
   "local_updated_at",
@@ -68,6 +85,7 @@ const PRODUCT_LIST_SELECTS = [
     "product_type",
     "price",
     "sku",
+    "image_url",
     "inventory_quantity",
     "last_synced_at",
     "created_at",
@@ -168,6 +186,7 @@ const ORDER_LIST_SELECTS = [
     "updated_at",
     "data",
   ].join(","),
+  "*",
 ];
 const CUSTOMER_LIST_SELECT = [
   "id",
@@ -406,6 +425,30 @@ const buildPaginatedCollection = (rows, { limit, offset }) => {
   };
 };
 
+const buildSlicedPaginatedCollection = (
+  rows,
+  { limit, offset },
+  extra = {},
+) => {
+  const items = Array.isArray(rows) ? rows : [];
+  const total = items.length;
+  const pageItems = items.slice(offset, offset + limit);
+  const count = pageItems.length;
+
+  return {
+    data: pageItems,
+    pagination: {
+      limit,
+      offset,
+      count,
+      total,
+      has_more: offset + count < total,
+      next_offset: offset + count,
+    },
+    ...extra,
+  };
+};
+
 const QUERY_RETRYABLE_ERROR_CODES = new Set(["57014"]);
 
 const isQueryRetryableError = (error) => {
@@ -536,6 +579,7 @@ const getScopedEntityPage = async ({
       }
 
       lastError = result.error;
+      console.error("Error executing query:", result.error);
       if (isSchemaCompatibilityError(result.error)) {
         break;
       }
@@ -899,6 +943,19 @@ const getProductVariantRows = (product) => {
   return Array.isArray(parsedData?.variants) ? parsedData.variants : [];
 };
 
+const getProductImageRows = (product) => {
+  const parsedData = parseJsonField(product?.data);
+  const images = Array.isArray(parsedData?.images) ? parsedData.images : [];
+
+  return images.map((image) => ({
+    id: image?.id || null,
+    src: image?.src || "",
+    alt: image?.alt || "",
+    position: image?.position || null,
+    variant_ids: Array.isArray(image?.variant_ids) ? image.variant_ids : [],
+  }));
+};
+
 const getProductTotalInventory = (product) => {
   const variants = getProductVariantRows(product);
   if (variants.length === 0) {
@@ -925,15 +982,123 @@ const getProductPrimarySku = (product) => {
   return String(firstVariantWithSku?.sku || "").trim();
 };
 
-const buildProductSummary = (product) => {
+const getProductPrimaryImageUrl = (product) => {
+  const currentImageUrl = String(product?.image_url || "").trim();
+  if (currentImageUrl) {
+    return currentImageUrl;
+  }
+
+  const imageRows = getProductImageRows(product);
+  const firstImageUrl = String(imageRows[0]?.src || "").trim();
+  if (firstImageUrl) {
+    return firstImageUrl;
+  }
+
+  const parsedData = parseJsonField(product?.data);
+  return String(parsedData?.image?.src || "").trim();
+};
+
+const resolveVariantImageUrl = (variant, imageRows = [], fallbackImageUrl = "") => {
+  const variantId = String(variant?.id || "").trim();
+  const variantImageId = String(variant?.image_id || "").trim();
+
+  if (variantImageId) {
+    const directImage = imageRows.find(
+      (image) => String(image?.id || "").trim() === variantImageId,
+    );
+    if (directImage?.src) {
+      return directImage.src;
+    }
+  }
+
+  if (variantId) {
+    const linkedImage = imageRows.find((image) =>
+      Array.isArray(image?.variant_ids) &&
+      image.variant_ids.some((value) => String(value || "").trim() === variantId),
+    );
+    if (linkedImage?.src) {
+      return linkedImage.src;
+    }
+  }
+
+  return fallbackImageUrl;
+};
+
+const buildProductVariantSummaries = (product) => {
   const variants = getProductVariantRows(product);
+  const imageRows = getProductImageRows(product);
+  const primaryImageUrl = getProductPrimaryImageUrl(product);
+
+  if (variants.length === 0) {
+    return [
+      {
+        id: product?.shopify_id || product?.id || null,
+        product_id: product?.shopify_id || product?.id || null,
+        title: product?.title || "Default",
+        price: product?.price ?? 0,
+        cost: product?.cost_price ?? 0,
+        cost_price: product?.cost_price ?? 0,
+        sku: getProductPrimarySku(product),
+        position: 1,
+        compare_at_price: null,
+        option1: null,
+        option2: null,
+        option3: null,
+        barcode: null,
+        image_id: null,
+        image_url: primaryImageUrl,
+        weight: null,
+        weight_unit: null,
+        inventory_quantity: toNumber(product?.inventory_quantity),
+        requires_shipping: true,
+        taxable: true,
+        created_at: product?.created_at || null,
+        updated_at: product?.updated_at || null,
+      },
+    ];
+  }
+
+  return variants.map((variant, index) => ({
+    id: variant?.id || null,
+    product_id: variant?.product_id || product?.shopify_id || product?.id || null,
+    title: variant?.title || `Variant ${index + 1}`,
+    price: variant?.price ?? product?.price ?? 0,
+    cost: variant?.cost ?? variant?.cost_price ?? product?.cost_price ?? 0,
+    cost_price:
+      variant?.cost_price ?? variant?.cost ?? product?.cost_price ?? 0,
+    sku: String(variant?.sku || "").trim(),
+    position: variant?.position ?? index + 1,
+    compare_at_price: variant?.compare_at_price ?? null,
+    option1: variant?.option1 ?? null,
+    option2: variant?.option2 ?? null,
+    option3: variant?.option3 ?? null,
+    barcode: variant?.barcode ?? null,
+    image_id: variant?.image_id ?? null,
+    image_url: resolveVariantImageUrl(variant, imageRows, primaryImageUrl),
+    weight: variant?.weight ?? null,
+    weight_unit: variant?.weight_unit ?? null,
+    inventory_quantity: toNumber(variant?.inventory_quantity),
+    requires_shipping: Boolean(variant?.requires_shipping),
+    taxable: Boolean(variant?.taxable),
+    created_at: variant?.created_at || null,
+    updated_at: variant?.updated_at || null,
+  }));
+};
+
+const buildProductSummary = (product) => {
+  const variants = buildProductVariantSummaries(product);
+  const images = getProductImageRows(product);
   const totalInventory = getProductTotalInventory(product);
+  const primaryImageUrl = getProductPrimaryImageUrl(product);
 
   return {
     ...product,
     inventory_quantity: totalInventory,
     total_inventory: totalInventory,
     sku: getProductPrimarySku(product),
+    image_url: primaryImageUrl,
+    images,
+    variants,
     variants_count: variants.length,
     has_multiple_variants: variants.length > 1,
   };
@@ -1160,16 +1325,25 @@ const getOrderCustomerShopifyId = (order) => {
 };
 
 const buildOrderListItem = (order) => {
+  const parsedData = parseJsonField(order?.data);
   const financialStatus = getOrderFinancialStatus(order);
   const totalPrice = getOrderGrossAmount(order);
   const refundedAmount = getOrderRefundedAmount(order);
   const fulfillmentStatus = String(
     order?.fulfillment_status ||
-      parseJsonField(order?.data)?.fulfillment_status ||
+      parsedData?.fulfillment_status ||
       "",
   )
     .toLowerCase()
     .trim();
+  const itemsCount =
+    order?.items_count !== undefined &&
+    order?.items_count !== null &&
+    String(order.items_count).trim() !== ""
+      ? toNumber(order.items_count)
+      : Array.isArray(parsedData?.line_items)
+        ? parsedData.line_items.length
+        : 0;
   const hasAnyRefund =
     refundedAmount > 0 ||
     financialStatus === "refunded" ||
@@ -1180,10 +1354,25 @@ const buildOrderListItem = (order) => {
   const isFullRefund =
     financialStatus === "refunded" ||
     (hasAnyRefund && totalPrice > 0 && refundedAmount >= totalPrice);
-  const { data, manual_payment_method, ...safeOrder } = order || {};
 
   return {
-    ...safeOrder,
+    id: order?.id || null,
+    shopify_id: order?.shopify_id || null,
+    store_id: order?.store_id || null,
+    order_number: order?.order_number || null,
+    customer_name: order?.customer_name || "",
+    customer_email: order?.customer_email || "",
+    customer_phone: order?.customer_phone || "",
+    status: order?.status || "",
+    total_price: order?.total_price ?? 0,
+    total_refunded: order?.total_refunded ?? 0,
+    cancelled_at: order?.cancelled_at || null,
+    created_at: order?.created_at || null,
+    updated_at: order?.updated_at || null,
+    last_synced_at: order?.last_synced_at || null,
+    pending_sync: Boolean(order?.pending_sync),
+    sync_error: order?.sync_error || "",
+    items_count: itemsCount,
     customer_shopify_id: getOrderCustomerShopifyId(order),
     financial_status: financialStatus,
     fulfillment_status: fulfillmentStatus,
@@ -1452,6 +1641,343 @@ const parseTimestampValue = (value) => {
   if (!value) return 0;
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const chunkValues = (values, size = 100) => {
+  const items = Array.isArray(values) ? values.filter(Boolean) : [];
+  if (items.length === 0) {
+    return [];
+  }
+
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+};
+
+const getLatestLegacyNoteTimestamp = (order) => {
+  const notes = parseJsonField(order?.notes);
+  if (!Array.isArray(notes)) {
+    return 0;
+  }
+
+  return notes.reduce((maxValue, note) => {
+    const candidate = parseTimestampValue(note?.created_at);
+    return candidate > maxValue ? candidate : maxValue;
+  }, 0);
+};
+
+const getLatestOrderActionMap = async (orderIds = []) => {
+  const latestActionMap = new Map();
+  const uniqueOrderIds = Array.from(
+    new Set(
+      (orderIds || [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  for (const chunk of chunkValues(uniqueOrderIds, 100)) {
+    const { data, error } = await db
+      .from("sync_operations")
+      .select("entity_id, created_at, operation_type")
+      .eq("entity_type", "order")
+      .in("entity_id", chunk)
+      .in("operation_type", Array.from(MISSING_ORDER_ACTION_TYPES))
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      if (isSchemaCompatibilityError(error)) {
+        return latestActionMap;
+      }
+      throw error;
+    }
+
+    for (const operation of data || []) {
+      const entityId = String(operation?.entity_id || "").trim();
+      if (!entityId || latestActionMap.has(entityId)) {
+        continue;
+      }
+      latestActionMap.set(entityId, operation.created_at || null);
+    }
+  }
+
+  return latestActionMap;
+};
+
+const isOrderOperationallyHandled = (order) => {
+  const financialStatus = getOrderFinancialStatus(order);
+  const fulfillmentStatus = String(
+    order?.fulfillment_status || parseJsonField(order?.data)?.fulfillment_status || "",
+  )
+    .toLowerCase()
+    .trim();
+
+  return (
+    isCancelledOrder(order) ||
+    fulfillmentStatus === "fulfilled" ||
+    financialStatus === "refunded" ||
+    financialStatus === "voided" ||
+    financialStatus === "cancelled"
+  );
+};
+
+const buildMissingOrderRecord = (order, latestActionMap, nowTimestamp = Date.now()) => {
+  if (!order || isOrderOperationallyHandled(order)) {
+    return null;
+  }
+
+  const orderId = String(order.id || "").trim();
+  if (!orderId) {
+    return null;
+  }
+
+  const lastActionTimestamp = Math.max(
+    parseTimestampValue(order.created_at),
+    parseTimestampValue(order.local_updated_at),
+    getLatestLegacyNoteTimestamp(order),
+    parseTimestampValue(latestActionMap.get(orderId)),
+  );
+
+  if (!lastActionTimestamp) {
+    return null;
+  }
+
+  const elapsedMs = nowTimestamp - lastActionTimestamp;
+  if (elapsedMs < MISSING_ORDER_GRACE_MS) {
+    return null;
+  }
+
+  const isEscalated = elapsedMs >= MISSING_ORDER_ESCALATION_MS;
+  const missingSince = new Date(lastActionTimestamp + MISSING_ORDER_GRACE_MS).toISOString();
+  const escalatedSince = isEscalated
+    ? new Date(lastActionTimestamp + MISSING_ORDER_ESCALATION_MS).toISOString()
+    : null;
+
+  return {
+    ...buildOrderListItem(order),
+    last_action_at: new Date(lastActionTimestamp).toISOString(),
+    missing_since: missingSince,
+    escalated_since: escalatedSince,
+    missing_state: isEscalated ? "escalated" : "missing",
+    days_without_action: Math.max(
+      3,
+      Math.floor(elapsedMs / DAY_MS),
+    ),
+    requires_attention: true,
+  };
+};
+
+const sortMissingOrders = (orders = []) =>
+  [...(orders || [])].sort((left, right) => {
+    const leftRank = left?.missing_state === "escalated" ? 0 : 1;
+    const rightRank = right?.missing_state === "escalated" ? 0 : 1;
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+
+    const dayGap =
+      toNumber(right?.days_without_action) - toNumber(left?.days_without_action);
+    if (dayGap !== 0) {
+      return dayGap;
+    }
+
+    return (
+      parseTimestampValue(left?.created_at) - parseTimestampValue(right?.created_at)
+    );
+  });
+
+const getMissingOrdersForRows = async (rows = []) => {
+  const rawRows = Array.isArray(rows) ? rows : [];
+  const latestActionMap = await getLatestOrderActionMap(
+    rawRows.map((order) => order?.id),
+  );
+  return sortMissingOrders(
+    rawRows
+      .map((order) => buildMissingOrderRecord(order, latestActionMap))
+      .filter(Boolean),
+  );
+};
+
+const getMissingOrdersForRequest = async (req) => {
+  const scopedRowsResult = await getScopedEntityRows(req, Order);
+  if (scopedRowsResult?.error) {
+    throw scopedRowsResult.error;
+  }
+
+  return await getMissingOrdersForRows(scopedRowsResult?.data || []);
+};
+
+const getMissingOrderRecipients = async () => {
+  const { data: users, error } = await db
+    .from("users")
+    .select("id, role, is_active");
+
+  if (error) {
+    if (isSchemaCompatibilityError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const activeUsers = (users || []).filter(
+    (user) => user?.id && user?.is_active !== false,
+  );
+  const nonAdminIds = activeUsers
+    .filter((user) => !Boolean(user?.role === "admin"))
+    .map((user) => user.id);
+
+  let permissionByUserId = new Map();
+  if (nonAdminIds.length > 0) {
+    const { data: permissionRows, error: permissionError } = await db
+      .from("permissions")
+      .select("user_id, can_view_orders")
+      .in("user_id", nonAdminIds);
+
+    if (permissionError && !isSchemaCompatibilityError(permissionError)) {
+      throw permissionError;
+    }
+
+    permissionByUserId = new Map(
+      (permissionRows || []).map((row) => [
+        String(row?.user_id || "").trim(),
+        Boolean(row?.can_view_orders),
+      ]),
+    );
+  }
+
+  return activeUsers
+    .filter((user) => {
+      if (String(user?.role || "").trim().toLowerCase() === "admin") {
+        return true;
+      }
+
+      const explicitPermission = permissionByUserId.get(
+        String(user?.id || "").trim(),
+      );
+      return explicitPermission !== false;
+    })
+    .map((user) => String(user.id || "").trim())
+    .filter(Boolean);
+};
+
+const shouldNotifyForMissingStage = (order, nowTimestamp = Date.now()) => {
+  const transitionTimestamp = parseTimestampValue(
+    order?.missing_state === "escalated"
+      ? order?.escalated_since
+      : order?.missing_since,
+  );
+
+  return (
+    transitionTimestamp > 0 &&
+    nowTimestamp - transitionTimestamp <= MISSING_ORDER_NOTIFICATION_WINDOW_MS
+  );
+};
+
+const buildMissingOrderNotificationDraft = (order, userId) => {
+  const isEscalated = order?.missing_state === "escalated";
+  const notificationType = isEscalated
+    ? "order_missing_escalated"
+    : "order_missing";
+  const orderLabel = order?.order_number || order?.shopify_id || order?.id || "Unknown";
+  const title = isEscalated
+    ? `طلب #${orderLabel} متأخر بشكل خطير`
+    : `طلب #${orderLabel} دخل الطلبات المفقودة`;
+  const message = isEscalated
+    ? `لا يوجد أي أكشن على الطلب منذ ${order?.days_without_action || 6} أيام.`
+    : `لم يتم اتخاذ أي أكشن على الطلب منذ ${order?.days_without_action || 3} أيام وتم نقله إلى صفحة الطلبات المفقودة.`;
+
+  return {
+    user_id: userId,
+    type: notificationType,
+    title,
+    message,
+    entity_type: "order",
+    entity_id: order?.id || null,
+    metadata: {
+      route: "/orders/missing",
+      order_id: order?.id || null,
+      order_number: order?.order_number || null,
+      missing_state: order?.missing_state || "missing",
+      days_without_action: order?.days_without_action || 0,
+    },
+  };
+};
+
+const ensureMissingOrderNotifications = async (missingOrders = []) => {
+  const recentOrders = (missingOrders || []).filter((order) =>
+    shouldNotifyForMissingStage(order),
+  );
+  if (recentOrders.length === 0) {
+    return 0;
+  }
+
+  const recipientIds = await getMissingOrderRecipients();
+  if (recipientIds.length === 0) {
+    return 0;
+  }
+
+  const notificationTypes = Array.from(MISSING_ORDER_NOTIFICATION_TYPES);
+  const entityIds = recentOrders
+    .map((order) => String(order?.id || "").trim())
+    .filter(Boolean);
+
+  const { data: existingNotifications, error: existingError } = await db
+    .from("notifications")
+    .select("user_id, entity_id, type")
+    .in("user_id", recipientIds)
+    .in("entity_id", entityIds)
+    .in("type", notificationTypes);
+
+  if (existingError) {
+    if (isSchemaCompatibilityError(existingError)) {
+      return 0;
+    }
+    throw existingError;
+  }
+
+  const existingKeys = new Set(
+    (existingNotifications || []).map(
+      (row) =>
+        `${String(row?.user_id || "").trim()}::${String(row?.entity_id || "").trim()}::${String(row?.type || "").trim()}`,
+    ),
+  );
+
+  const drafts = [];
+  for (const order of recentOrders) {
+    for (const userId of recipientIds) {
+      const draft = buildMissingOrderNotificationDraft(order, userId);
+      const key = `${draft.user_id}::${draft.entity_id}::${draft.type}`;
+      if (existingKeys.has(key)) {
+        continue;
+      }
+      drafts.push(draft);
+      existingKeys.add(key);
+    }
+  }
+
+  if (drafts.length === 0) {
+    return 0;
+  }
+
+  const { error: insertError } = await db.from("notifications").insert(drafts);
+  if (insertError) {
+    if (isSchemaCompatibilityError(insertError)) {
+      return 0;
+    }
+    throw insertError;
+  }
+
+  emitRealtimeEvent({
+    userIds: recipientIds,
+    payload: {
+      resource: "notifications",
+      context: "missing_orders",
+    },
+  });
+
+  return drafts.length;
 };
 
 const getLatestOrderTimestamp = (orders = []) => {
@@ -2273,6 +2799,7 @@ router.get(
   async (req, res) => {
     try {
       const pagination = getListPagination(req.query);
+      pagination.limit = Math.min(pagination.limit, ORDER_LIST_PAGE_LIMIT);
       const sortOptions = getListSortOptions(
         req.query,
         ORDER_SORT_FIELDS,
@@ -2361,6 +2888,43 @@ router.get(
     } catch (e) {
       console.error("Exception fetching orders:", e);
       res.status(500).json({ error: e.message });
+    }
+  },
+);
+router.get(
+  "/orders/missing",
+  verifyToken,
+  requirePermission("can_view_orders"),
+  async (req, res) => {
+    try {
+      const pagination = getListPagination(req.query);
+      pagination.limit = Math.min(pagination.limit, ORDER_LIST_PAGE_LIMIT);
+
+      const missingOrders = await getMissingOrdersForRequest(req);
+
+      try {
+        await ensureMissingOrderNotifications(missingOrders);
+      } catch (notificationError) {
+        console.error(
+          "Missing orders notification error (non-blocking):",
+          notificationError,
+        );
+      }
+
+      const summary = {
+        total_missing: missingOrders.length,
+        escalated_count: missingOrders.filter(
+          (order) => order?.missing_state === "escalated",
+        ).length,
+        warning_count: missingOrders.filter(
+          (order) => order?.missing_state !== "escalated",
+        ).length,
+      };
+
+      res.json(buildSlicedPaginatedCollection(missingOrders, pagination, { summary }));
+    } catch (error) {
+      console.error("Error fetching missing orders:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch missing orders" });
     }
   },
 );

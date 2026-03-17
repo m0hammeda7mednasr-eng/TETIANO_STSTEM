@@ -1,0 +1,940 @@
+import express from "express";
+import { supabase as db } from "../supabaseClient.js";
+import { authenticateToken } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/permissions.js";
+import { getAccessibleStoreIds } from "../models/index.js";
+import { applyUserFilter } from "../helpers/dataFilter.js";
+
+const router = express.Router();
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CACHE_TTL_MS = 3 * 60 * 1000;
+const PAID_LIKE_STATUSES = new Set([
+  "paid",
+  "partially_paid",
+  "partially_refunded",
+  "refunded",
+]);
+const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
+const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
+const PRODUCTS_SELECT = [
+  "id",
+  "shopify_id",
+  "store_id",
+  "title",
+  "vendor",
+  "product_type",
+  "sku",
+  "price",
+  "inventory_quantity",
+  "created_at",
+  "updated_at",
+  "last_synced_at",
+  "data",
+].join(",");
+const ORDERS_SELECT = [
+  "id",
+  "store_id",
+  "order_number",
+  "customer_name",
+  "customer_email",
+  "financial_status",
+  "status",
+  "fulfillment_status",
+  "total_price",
+  "total_refunded",
+  "cancelled_at",
+  "created_at",
+  "updated_at",
+  "data",
+].join(",");
+const TASKS_SELECT = "id,title,description,status,due_date,created_at,updated_at";
+
+const analyticsCache = new Map();
+
+const createHttpError = (status, message) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+};
+
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const parseJsonField = (value) => {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  return value;
+};
+
+const normalizeKey = (value) => String(value || "").trim();
+
+const normalizeSku = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+
+const isSchemaCompatibilityError = (error) => {
+  if (!error) {
+    return false;
+  }
+
+  if (SCHEMA_ERROR_CODES.has(String(error.code || ""))) {
+    return true;
+  }
+
+  const text =
+    `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+  return (
+    text.includes("does not exist") ||
+    text.includes("could not find the") ||
+    text.includes("relation") ||
+    text.includes("column")
+  );
+};
+
+const getRequestedStoreId = (req) => {
+  const candidates = [req.headers["x-store-id"], req.query?.store_id];
+
+  for (const value of candidates) {
+    const normalized = normalizeKey(value);
+    if (UUID_REGEX.test(normalized)) {
+      return normalized;
+    }
+  }
+
+  return null;
+};
+
+const resolveIsAdmin = (req) =>
+  Boolean(req.user?.isAdmin || String(req.user?.role || "").toLowerCase() === "admin");
+
+const getAdminStoreIds = async () => {
+  const strategies = [
+    async () => {
+      const { data, error } = await db.from("stores").select("id");
+      if (error) {
+        throw error;
+      }
+      return (data || []).map((row) => normalizeKey(row?.id)).filter(Boolean);
+    },
+    async () => {
+      const { data, error } = await db
+        .from("products")
+        .select("store_id")
+        .not("store_id", "is", null)
+        .limit(200);
+      if (error) {
+        throw error;
+      }
+      return Array.from(
+        new Set(
+          (data || [])
+            .map((row) => normalizeKey(row?.store_id))
+            .filter(Boolean),
+        ),
+      );
+    },
+  ];
+
+  for (const strategy of strategies) {
+    try {
+      const storeIds = await strategy();
+      if (storeIds.length > 0) {
+        return storeIds;
+      }
+    } catch (error) {
+      if (!isSchemaCompatibilityError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  return [];
+};
+
+const resolveStoreContext = async (req) => {
+  const requestedStoreId = getRequestedStoreId(req);
+  const isAdmin = resolveIsAdmin(req);
+
+  if (isAdmin) {
+    if (requestedStoreId) {
+      return {
+        isAdmin,
+        storeId: requestedStoreId,
+      };
+    }
+
+    const adminStoreIds = await getAdminStoreIds();
+    if (adminStoreIds.length === 1) {
+      return {
+        isAdmin,
+        storeId: adminStoreIds[0],
+      };
+    }
+
+    if (adminStoreIds.length === 0) {
+      throw createHttpError(400, "No connected store is available yet");
+    }
+
+    throw createHttpError(400, "Select a store first before opening product analysis");
+  }
+
+  const accessibleStoreIds = await getAccessibleStoreIds(req.user?.id);
+
+  if (requestedStoreId) {
+    if (
+      accessibleStoreIds.length === 0 ||
+      !accessibleStoreIds.includes(requestedStoreId)
+    ) {
+      throw createHttpError(403, "Access denied for the selected store");
+    }
+
+    return {
+      isAdmin,
+      storeId: requestedStoreId,
+    };
+  }
+
+  if (accessibleStoreIds.length === 1) {
+    return {
+      isAdmin,
+      storeId: accessibleStoreIds[0],
+    };
+  }
+
+  if (accessibleStoreIds.length === 0) {
+    throw createHttpError(400, "No store is connected to this account yet");
+  }
+
+  throw createHttpError(400, "Select a store first before opening product analysis");
+};
+
+const getProductVariants = (product) => {
+  const parsedData = parseJsonField(product?.data);
+  return Array.isArray(parsedData?.variants) ? parsedData.variants : [];
+};
+
+const getProductImageUrl = (product) => {
+  const parsedData = parseJsonField(product?.data);
+  return (
+    parsedData?.image?.src ||
+    parsedData?.image?.url ||
+    parsedData?.featured_image?.src ||
+    product?.image_url ||
+    null
+  );
+};
+
+const buildSyntheticVariant = (product) => ({
+  id: product?.shopify_id || product?.id || null,
+  title: product?.title || "Default",
+  sku: product?.sku || "",
+  barcode: "",
+  price: product?.price ?? null,
+  inventory_quantity: product?.inventory_quantity ?? 0,
+});
+
+const getLineItems = (order) => {
+  if (Array.isArray(order?.line_items)) {
+    return order.line_items;
+  }
+
+  const data = parseJsonField(order?.data);
+  return Array.isArray(data?.line_items) ? data.line_items : [];
+};
+
+const getOrderFinancialStatus = (order) => {
+  const data = parseJsonField(order?.data);
+  return String(
+    order?.financial_status || data?.financial_status || order?.status || data?.status || "",
+  )
+    .toLowerCase()
+    .trim();
+};
+
+const getOrderFulfillmentStatus = (order) => {
+  const data = parseJsonField(order?.data);
+  return String(order?.fulfillment_status || data?.fulfillment_status || "")
+    .toLowerCase()
+    .trim();
+};
+
+const isCancelledOrder = (order) => {
+  const data = parseJsonField(order?.data);
+  const status = getOrderFinancialStatus(order);
+  return (
+    Boolean(order?.cancelled_at) ||
+    Boolean(data?.cancelled_at) ||
+    CANCELLED_STATUSES.has(status)
+  );
+};
+
+const getOrderGrossAmount = (order) => {
+  const data = parseJsonField(order?.data);
+  return toNumber(order?.total_price ?? data?.total_price);
+};
+
+const getOrderRefundedAmount = (order) => {
+  const data = parseJsonField(order?.data);
+  const refunds = Array.isArray(data?.refunds) ? data.refunds : [];
+  const refundedFromTransactions = refunds.reduce((sum, refund) => {
+    const transactions = Array.isArray(refund?.transactions)
+      ? refund.transactions
+      : [];
+    return (
+      sum +
+      transactions.reduce(
+        (transactionSum, transaction) =>
+          transactionSum + toNumber(transaction?.amount),
+        0,
+      )
+    );
+  }, 0);
+
+  const refundedAmount = Math.max(
+    toNumber(order?.total_refunded),
+    refundedFromTransactions,
+  );
+
+  return Math.min(getOrderGrossAmount(order), Math.max(0, refundedAmount));
+};
+
+const getOrderNetAmountRatio = (order) => {
+  if (isCancelledOrder(order)) {
+    return 0;
+  }
+
+  const grossAmount = getOrderGrossAmount(order);
+  if (grossAmount <= 0) {
+    return 0;
+  }
+
+  const financialStatus = getOrderFinancialStatus(order);
+  if (!PAID_LIKE_STATUSES.has(financialStatus)) {
+    return 0;
+  }
+
+  const netAmount = Math.max(0, grossAmount - getOrderRefundedAmount(order));
+  return Math.min(1, Math.max(0, netAmount / grossAmount));
+};
+
+const buildRefundDetails = (order) => {
+  const data = parseJsonField(order?.data);
+  const refunds = Array.isArray(data?.refunds) ? data.refunds : [];
+  const quantityByLineItemId = new Map();
+  const latestAtByLineItemId = new Map();
+
+  for (const refund of refunds) {
+    const refundAt = refund?.created_at || order?.updated_at || order?.created_at || null;
+    const refundLineItems = Array.isArray(refund?.refund_line_items)
+      ? refund.refund_line_items
+      : [];
+
+    for (const entry of refundLineItems) {
+      const lineItemId = normalizeKey(
+        entry?.line_item_id || entry?.line_item?.id || entry?.line_item?.line_item_id,
+      );
+      if (!lineItemId) {
+        continue;
+      }
+
+      quantityByLineItemId.set(
+        lineItemId,
+        toNumber(quantityByLineItemId.get(lineItemId)) + toNumber(entry?.quantity),
+      );
+
+      if (refundAt) {
+        const previous = latestAtByLineItemId.get(lineItemId);
+        if (!previous || new Date(refundAt).getTime() > new Date(previous).getTime()) {
+          latestAtByLineItemId.set(lineItemId, refundAt);
+        }
+      }
+    }
+  }
+
+  return {
+    quantityByLineItemId,
+    latestAtByLineItemId,
+    isFullyRefunded:
+      getOrderGrossAmount(order) > 0 &&
+      getOrderRefundedAmount(order) >= getOrderGrossAmount(order),
+  };
+};
+
+const buildFulfillmentDetails = (order) => {
+  const data = parseJsonField(order?.data);
+  const fulfillments = Array.isArray(data?.fulfillments) ? data.fulfillments : [];
+  const quantityByLineItemId = new Map();
+  const latestAtByLineItemId = new Map();
+
+  for (const fulfillment of fulfillments) {
+    const fulfillmentAt =
+      fulfillment?.created_at || fulfillment?.updated_at || order?.updated_at || order?.created_at || null;
+    const lineItems = Array.isArray(fulfillment?.line_items)
+      ? fulfillment.line_items
+      : [];
+
+    for (const item of lineItems) {
+      const lineItemId = normalizeKey(
+        item?.id || item?.line_item_id || item?.line_item?.id,
+      );
+      if (!lineItemId) {
+        continue;
+      }
+
+      quantityByLineItemId.set(
+        lineItemId,
+        toNumber(quantityByLineItemId.get(lineItemId)) + toNumber(item?.quantity),
+      );
+
+      if (fulfillmentAt) {
+        const previous = latestAtByLineItemId.get(lineItemId);
+        if (!previous || new Date(fulfillmentAt).getTime() > new Date(previous).getTime()) {
+          latestAtByLineItemId.set(lineItemId, fulfillmentAt);
+        }
+      }
+    }
+  }
+
+  return {
+    quantityByLineItemId,
+    latestAtByLineItemId,
+  };
+};
+
+const getItemRefundedQuantity = (item, refundDetails) => {
+  const lineItemId = normalizeKey(item?.id || item?.line_item_id);
+  const explicitRefundQuantity = toNumber(
+    refundDetails.quantityByLineItemId.get(lineItemId),
+  );
+  if (explicitRefundQuantity > 0) {
+    return explicitRefundQuantity;
+  }
+
+  const orderedQuantity = toNumber(item?.quantity);
+  const currentQuantity = toNumber(item?.current_quantity);
+  if (
+    orderedQuantity > 0 &&
+    currentQuantity > 0 &&
+    currentQuantity < orderedQuantity
+  ) {
+    return orderedQuantity - currentQuantity;
+  }
+
+  if (refundDetails.isFullyRefunded) {
+    return orderedQuantity;
+  }
+
+  return 0;
+};
+
+const getItemDeliveredQuantity = (order, item, fulfillmentDetails) => {
+  const orderedQuantity = toNumber(item?.quantity);
+  const lineItemId = normalizeKey(item?.id || item?.line_item_id);
+  const explicitQuantity = toNumber(
+    fulfillmentDetails.quantityByLineItemId.get(lineItemId),
+  );
+  if (explicitQuantity > 0) {
+    return Math.min(orderedQuantity, explicitQuantity);
+  }
+
+  const fulfillableQuantity = toNumber(item?.fulfillable_quantity);
+  if (orderedQuantity > 0 && fulfillableQuantity >= 0 && fulfillableQuantity < orderedQuantity) {
+    return Math.min(orderedQuantity, orderedQuantity - fulfillableQuantity);
+  }
+
+  if (getOrderFulfillmentStatus(order) === "fulfilled") {
+    return orderedQuantity;
+  }
+
+  return 0;
+};
+
+const createSetTracker = () => ({
+  orderIds: new Set(),
+  paidOrderIds: new Set(),
+  deliveredOrderIds: new Set(),
+  returnedOrderIds: new Set(),
+  pendingOrderIds: new Set(),
+  cancelledOrderIds: new Set(),
+  taskIds: new Set(),
+  pendingTaskIds: new Set(),
+  inProgressTaskIds: new Set(),
+  completedTaskIds: new Set(),
+});
+
+const createVariantAnalyticsRecord = (product, variant) => ({
+  id: normalizeKey(variant?.id || product?.shopify_id || product?.id),
+  title: variant?.title || product?.title || "Default",
+  sku: variant?.sku || "",
+  barcode: variant?.barcode || "",
+  price: variant?.price ?? product?.price ?? null,
+  inventory_quantity: toNumber(variant?.inventory_quantity),
+  ordered_quantity: 0,
+  delivered_quantity: 0,
+  returned_quantity: 0,
+  net_delivered_quantity: 0,
+  pending_quantity: 0,
+  cancelled_quantity: 0,
+  gross_sales: 0,
+  net_sales: 0,
+  last_order_at: null,
+  last_fulfillment_at: null,
+  last_return_at: null,
+  last_task_at: null,
+  ...createSetTracker(),
+});
+
+const createProductAnalyticsRecord = (product) => {
+  const variants = getProductVariants(product);
+  const normalizedVariants = variants.length > 0 ? variants : [buildSyntheticVariant(product)];
+  const variantRows = normalizedVariants.map((variant) =>
+    createVariantAnalyticsRecord(product, variant),
+  );
+  const primarySku =
+    normalizeKey(product?.sku) ||
+    normalizeKey(variantRows.find((row) => normalizeKey(row.sku))?.sku);
+
+  return {
+    id: product?.id || null,
+    shopify_id: normalizeKey(product?.shopify_id),
+    store_id: product?.store_id || null,
+    title: product?.title || "Untitled product",
+    vendor: product?.vendor || "",
+    product_type: product?.product_type || "",
+    sku: primarySku,
+    price: product?.price ?? null,
+    inventory_quantity:
+      variantRows.reduce((sum, variant) => sum + toNumber(variant.inventory_quantity), 0) ||
+      toNumber(product?.inventory_quantity),
+    variants_count: variantRows.length,
+    image_url: getProductImageUrl(product),
+    last_synced_at: product?.last_synced_at || null,
+    created_at: product?.created_at || null,
+    updated_at: product?.updated_at || null,
+    ordered_quantity: 0,
+    delivered_quantity: 0,
+    returned_quantity: 0,
+    net_delivered_quantity: 0,
+    pending_quantity: 0,
+    cancelled_quantity: 0,
+    gross_sales: 0,
+    net_sales: 0,
+    last_order_at: null,
+    last_fulfillment_at: null,
+    last_return_at: null,
+    last_task_at: null,
+    variants: variantRows,
+    ...createSetTracker(),
+  };
+};
+
+const updateLatestTimestamp = (entry, fieldName, candidate) => {
+  if (!candidate) {
+    return;
+  }
+
+  const previous = entry[fieldName];
+  if (!previous || new Date(candidate).getTime() > new Date(previous).getTime()) {
+    entry[fieldName] = candidate;
+  }
+};
+
+const getTaskStatusKey = (status) => {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "completed") {
+    return "completedTaskIds";
+  }
+  if (normalized === "in_progress") {
+    return "inProgressTaskIds";
+  }
+  return "pendingTaskIds";
+};
+
+const serializeTrackerEntry = (entry) => {
+  const variants = Array.isArray(entry?.variants)
+    ? entry.variants.map((variant) => serializeTrackerEntry(variant))
+    : undefined;
+
+  const payload = {
+    ...entry,
+    orders_count: entry.orderIds.size,
+    paid_orders_count: entry.paidOrderIds.size,
+    delivered_orders_count: entry.deliveredOrderIds.size,
+    returned_orders_count: entry.returnedOrderIds.size,
+    pending_orders_count: entry.pendingOrderIds.size,
+    cancelled_orders_count: entry.cancelledOrderIds.size,
+    related_tasks_count: entry.taskIds.size,
+    pending_tasks_count: entry.pendingTaskIds.size,
+    in_progress_tasks_count: entry.inProgressTaskIds.size,
+    completed_tasks_count: entry.completedTaskIds.size,
+    gross_sales: parseFloat(entry.gross_sales.toFixed(2)),
+    net_sales: parseFloat(entry.net_sales.toFixed(2)),
+    variants,
+  };
+
+  delete payload.orderIds;
+  delete payload.paidOrderIds;
+  delete payload.deliveredOrderIds;
+  delete payload.returnedOrderIds;
+  delete payload.pendingOrderIds;
+  delete payload.cancelledOrderIds;
+  delete payload.taskIds;
+  delete payload.pendingTaskIds;
+  delete payload.inProgressTaskIds;
+  delete payload.completedTaskIds;
+
+  return payload;
+};
+
+const getFreshCacheEntry = (key) => {
+  const entry = analyticsCache.get(key);
+  if (!entry) {
+    return null;
+  }
+
+  if (Date.now() - entry.updatedAt > CACHE_TTL_MS) {
+    analyticsCache.delete(key);
+    return null;
+  }
+
+  return entry.payload;
+};
+
+const rememberCacheEntry = (key, payload) => {
+  analyticsCache.set(key, {
+    updatedAt: Date.now(),
+    payload,
+  });
+};
+
+const loadScopedProducts = async (storeId) => {
+  const { data, error } = await db
+    .from("products")
+    .select(PRODUCTS_SELECT)
+    .eq("store_id", storeId)
+    .order("title", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+};
+
+const loadScopedOrders = async (storeId) => {
+  const { data, error } = await db
+    .from("orders")
+    .select(ORDERS_SELECT)
+    .eq("store_id", storeId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+};
+
+const loadScopedTasks = async (req) => {
+  let query = db.from("tasks").select(TASKS_SELECT).order("updated_at", {
+    ascending: false,
+  });
+
+  if (!resolveIsAdmin(req)) {
+    query = applyUserFilter(query, req.user?.id, req.user?.role || "user", "tasks");
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+};
+
+const buildAnalyticsPayload = async (req, storeId) => {
+  const [products, orders] = await Promise.all([
+    loadScopedProducts(storeId),
+    loadScopedOrders(storeId),
+  ]);
+
+  let tasks = [];
+  let taskMetricsAvailable = true;
+  try {
+    tasks = await loadScopedTasks(req);
+  } catch (error) {
+    if (!isSchemaCompatibilityError(error)) {
+      console.warn("Product analysis tasks fallback:", error.message);
+    }
+    taskMetricsAvailable = false;
+    tasks = [];
+  }
+
+  const productEntries = products.map((product) =>
+    createProductAnalyticsRecord(product),
+  );
+  const productByShopifyId = new Map();
+  const productBySku = new Map();
+  const variantById = new Map();
+  const variantBySku = new Map();
+  const variantToProduct = new Map();
+
+  for (const productEntry of productEntries) {
+    if (productEntry.shopify_id) {
+      productByShopifyId.set(productEntry.shopify_id, productEntry);
+    }
+
+    if (productEntry.sku) {
+      productBySku.set(normalizeSku(productEntry.sku), productEntry);
+    }
+
+    for (const variantEntry of productEntry.variants) {
+      if (variantEntry.id) {
+        variantById.set(normalizeKey(variantEntry.id), variantEntry);
+        variantToProduct.set(normalizeKey(variantEntry.id), productEntry);
+      }
+
+      if (variantEntry.sku) {
+        const normalizedVariantSku = normalizeSku(variantEntry.sku);
+        variantBySku.set(normalizedVariantSku, variantEntry);
+        variantToProduct.set(normalizedVariantSku, productEntry);
+      }
+    }
+  }
+
+  for (const order of orders) {
+    const orderId = normalizeKey(order?.id);
+    const lineItems = getLineItems(order);
+    const refundDetails = buildRefundDetails(order);
+    const fulfillmentDetails = buildFulfillmentDetails(order);
+    const orderNetRatio = getOrderNetAmountRatio(order);
+    const isPaidLike = PAID_LIKE_STATUSES.has(getOrderFinancialStatus(order));
+    const orderCancelled = isCancelledOrder(order);
+
+    for (const item of lineItems) {
+      const itemProductId = normalizeKey(item?.product_id);
+      const itemVariantId = normalizeKey(item?.variant_id);
+      const itemSku = normalizeSku(item?.sku);
+
+      const productEntry =
+        productByShopifyId.get(itemProductId) || productBySku.get(itemSku) || null;
+      if (!productEntry) {
+        continue;
+      }
+
+      const variantEntry =
+        variantById.get(itemVariantId) ||
+        variantBySku.get(itemSku) ||
+        productEntry.variants[0];
+      if (!variantEntry) {
+        continue;
+      }
+
+      const orderedQuantity = toNumber(item?.quantity);
+      const refundedQuantity = Math.min(
+        orderedQuantity,
+        getItemRefundedQuantity(item, refundDetails),
+      );
+      const deliveredQuantity = Math.min(
+        orderedQuantity,
+        getItemDeliveredQuantity(order, item, fulfillmentDetails),
+      );
+      const cancelledQuantity = orderCancelled
+        ? Math.max(0, orderedQuantity - deliveredQuantity)
+        : 0;
+      const pendingQuantity = Math.max(
+        0,
+        orderedQuantity - deliveredQuantity - cancelledQuantity,
+      );
+      const netDeliveredQuantity = Math.max(
+        0,
+        deliveredQuantity - refundedQuantity,
+      );
+      const linePrice = toNumber(item?.price);
+      const grossSales = orderCancelled ? 0 : linePrice * orderedQuantity;
+      const netSales = grossSales * orderNetRatio;
+      const orderCreatedAt = order?.created_at || null;
+      const lineItemId = normalizeKey(item?.id || item?.line_item_id);
+      const lineFulfillmentAt =
+        fulfillmentDetails.latestAtByLineItemId.get(lineItemId) ||
+        (deliveredQuantity > 0 ? order?.updated_at || order?.created_at : null);
+      const lineReturnAt =
+        refundDetails.latestAtByLineItemId.get(lineItemId) ||
+        (refundedQuantity > 0 ? order?.updated_at || order?.created_at : null);
+
+      const targets = [productEntry, variantEntry];
+
+      for (const target of targets) {
+        target.ordered_quantity += orderedQuantity;
+        target.delivered_quantity += deliveredQuantity;
+        target.returned_quantity += refundedQuantity;
+        target.net_delivered_quantity += netDeliveredQuantity;
+        target.pending_quantity += pendingQuantity;
+        target.cancelled_quantity += cancelledQuantity;
+        target.gross_sales += grossSales;
+        target.net_sales += netSales;
+        target.orderIds.add(orderId);
+
+        if (isPaidLike) {
+          target.paidOrderIds.add(orderId);
+        }
+        if (deliveredQuantity > 0) {
+          target.deliveredOrderIds.add(orderId);
+        }
+        if (refundedQuantity > 0) {
+          target.returnedOrderIds.add(orderId);
+        }
+        if (pendingQuantity > 0) {
+          target.pendingOrderIds.add(orderId);
+        }
+        if (cancelledQuantity > 0) {
+          target.cancelledOrderIds.add(orderId);
+        }
+
+        updateLatestTimestamp(target, "last_order_at", orderCreatedAt);
+        updateLatestTimestamp(target, "last_fulfillment_at", lineFulfillmentAt);
+        updateLatestTimestamp(target, "last_return_at", lineReturnAt);
+      }
+    }
+  }
+
+  if (taskMetricsAvailable && tasks.length > 0) {
+    for (const task of tasks) {
+      const searchableText = `${String(task?.title || "")} ${String(task?.description || "")}`
+        .toLowerCase()
+        .trim();
+      if (!searchableText) {
+        continue;
+      }
+
+      const matchedVariants = [];
+      for (const productEntry of productEntries) {
+        for (const variantEntry of productEntry.variants) {
+          const normalizedVariantSku = normalizeSku(variantEntry?.sku);
+          if (!normalizedVariantSku || normalizedVariantSku.length < 3) {
+            continue;
+          }
+
+          if (searchableText.includes(normalizedVariantSku.toLowerCase())) {
+            matchedVariants.push([productEntry, variantEntry]);
+          }
+        }
+      }
+
+      if (matchedVariants.length === 0) {
+        continue;
+      }
+
+      const taskId = normalizeKey(task?.id);
+      const taskStatusKey = getTaskStatusKey(task?.status);
+      const taskUpdatedAt = task?.updated_at || task?.created_at || null;
+
+      for (const [productEntry, variantEntry] of matchedVariants) {
+        for (const target of [productEntry, variantEntry]) {
+          target.taskIds.add(taskId);
+          target[taskStatusKey].add(taskId);
+          updateLatestTimestamp(target, "last_task_at", taskUpdatedAt);
+        }
+      }
+    }
+  }
+
+  const serializedProducts = productEntries
+    .map((entry) => serializeTrackerEntry(entry))
+    .sort((left, right) => {
+      const rightActivity =
+        new Date(right.last_order_at || right.updated_at || 0).getTime() || 0;
+      const leftActivity =
+        new Date(left.last_order_at || left.updated_at || 0).getTime() || 0;
+      return rightActivity - leftActivity;
+    });
+
+  const summary = serializedProducts.reduce(
+    (acc, product) => {
+      acc.total_products += 1;
+      acc.total_variants += Array.isArray(product?.variants)
+        ? product.variants.length
+        : 0;
+      acc.ordered_quantity += toNumber(product?.ordered_quantity);
+      acc.delivered_quantity += toNumber(product?.delivered_quantity);
+      acc.returned_quantity += toNumber(product?.returned_quantity);
+      acc.pending_quantity += toNumber(product?.pending_quantity);
+      acc.cancelled_quantity += toNumber(product?.cancelled_quantity);
+      acc.gross_sales += toNumber(product?.gross_sales);
+      acc.net_sales += toNumber(product?.net_sales);
+      acc.related_tasks_count += toNumber(product?.related_tasks_count);
+      return acc;
+    },
+    {
+      total_products: 0,
+      total_variants: 0,
+      ordered_quantity: 0,
+      delivered_quantity: 0,
+      returned_quantity: 0,
+      pending_quantity: 0,
+      cancelled_quantity: 0,
+      gross_sales: 0,
+      net_sales: 0,
+      related_tasks_count: 0,
+    },
+  );
+
+  summary.gross_sales = parseFloat(summary.gross_sales.toFixed(2));
+  summary.net_sales = parseFloat(summary.net_sales.toFixed(2));
+
+  return {
+    data: serializedProducts,
+    summary,
+    meta: {
+      generated_at: new Date().toISOString(),
+      store_id: storeId,
+      task_metrics_available: taskMetricsAvailable,
+      task_match_basis: taskMetricsAvailable ? "sku" : "unavailable",
+    },
+  };
+};
+
+router.use(authenticateToken, requirePermission("can_view_products"));
+
+router.get("/", async (req, res) => {
+  try {
+    const { storeId } = await resolveStoreContext(req);
+    const forceRefresh =
+      String(req.query.refresh || "").trim().toLowerCase() === "true";
+    const cacheKey = `${String(req.user?.id || "").trim()}::${storeId}`;
+
+    let payload = !forceRefresh ? getFreshCacheEntry(cacheKey) : null;
+    if (!payload) {
+      payload = await buildAnalyticsPayload(req, storeId);
+      rememberCacheEntry(cacheKey, payload);
+    }
+
+    res.json(payload);
+  } catch (error) {
+    console.error("Error fetching product analysis:", error);
+
+    if (isSchemaCompatibilityError(error)) {
+      return res.status(503).json({
+        error: "Product analysis is temporarily unavailable because the schema is outdated",
+      });
+    }
+
+    res.status(error.status || 500).json({
+      error: error.status ? error.message : "Failed to fetch product analysis",
+    });
+  }
+});
+
+export default router;

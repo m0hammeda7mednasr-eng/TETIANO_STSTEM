@@ -17,6 +17,8 @@ const TYPE_LABELS = {
   access_request: "Access",
   comment: "Comment",
   order: "Order",
+  order_missing: "Order Alert",
+  order_missing_escalated: "Critical Order",
 };
 
 const formatTimestamp = (value) => {
@@ -55,9 +57,20 @@ const isTemporaryConnectionIssue = (error) => {
 };
 
 const getNotificationRoute = (item, isAdmin) => {
+  const metadataRoute = String(item?.metadata?.route || "").trim();
+  if (metadataRoute) {
+    return metadataRoute;
+  }
+
   const type = String(item?.entity_type || "").toLowerCase();
   const entityId = item?.entity_id;
 
+  if (
+    item?.type === "order_missing" ||
+    item?.type === "order_missing_escalated"
+  ) {
+    return "/orders/missing";
+  }
   if (type === "order" && entityId) return `/orders/${entityId}`;
   if (type === "task") return isAdmin ? "/tasks" : "/my-tasks";
   if (type === "daily_report" || type === "report") {

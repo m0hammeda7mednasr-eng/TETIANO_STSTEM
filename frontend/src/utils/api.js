@@ -159,4 +159,14 @@ export const shopifyAPI = {
     api.post("/shopify/sync", {}, { timeout: SHOPIFY_SYNC_TIMEOUT_MS }),
 };
 
+export const warehouseAPI = {
+  getStock: (params = {}) => api.get("/warehouse/stock", { params }),
+  getScans: (params = {}) => api.get("/warehouse/scans", { params }),
+  scan: (data) => api.post("/warehouse/scan", data),
+};
+
+export const productAnalysisAPI = {
+  get: (params = {}) => api.get("/product-analysis", { params }),
+};
+
 export default api;

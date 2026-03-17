@@ -27,7 +27,7 @@ import {
 } from "../utils/viewCache";
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
-const ORDERS_PAGE_SIZE = 200;
+const ORDERS_PAGE_SIZE = 100;
 const ORDERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const CURRENCY_LABEL = "LE";
 
@@ -159,6 +159,7 @@ export default function Orders() {
     };
   }, [cacheKey]);
   const [orders, setOrders] = useState(() => initialCachedSnapshot.rows);
+  const [missingOrderIds, setMissingOrderIds] = useState([]);
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -172,6 +173,7 @@ export default function Orders() {
   });
   const refreshTimeoutRef = useRef(null);
   const fetchPromiseRef = useRef(null);
+  const missingFetchPromiseRef = useRef(null);
   const ordersRef = useRef([]);
 
   useEffect(() => {
@@ -201,6 +203,45 @@ export default function Orders() {
       active = false;
     };
   }, [cacheKey]);
+
+  const fetchMissingOrderIds = useCallback(async () => {
+    if (missingFetchPromiseRef.current) {
+      return missingFetchPromiseRef.current;
+    }
+
+    const request = (async () => {
+      try {
+        const rows = await fetchAllPagesProgressively(
+          ({ limit, offset }) =>
+            api.get("/shopify/orders/missing", {
+              params: {
+                limit,
+                offset,
+              },
+            }),
+          {
+            limit: ORDERS_PAGE_SIZE,
+          },
+        );
+
+        setMissingOrderIds(
+          rows
+            .map((order) => String(order?.id || "").trim())
+            .filter(Boolean),
+        );
+      } catch (missingError) {
+        console.error("Error fetching missing orders:", missingError);
+      }
+    })();
+
+    missingFetchPromiseRef.current = request;
+
+    try {
+      await request;
+    } finally {
+      missingFetchPromiseRef.current = null;
+    }
+  }, []);
 
   const fetchOrders = useCallback(async ({ silent = false, forceSync = false } = {}) => {
     if (fetchPromiseRef.current) {
@@ -252,6 +293,7 @@ export default function Orders() {
         );
 
         setOrders(rows);
+        await fetchMissingOrderIds();
         setLastUpdatedAt(new Date());
         setLoadStatus({
           active: false,
@@ -321,6 +363,8 @@ export default function Orders() {
         return;
       }
 
+      await fetchMissingOrderIds();
+
       const hasCachedRows = Array.isArray(cached?.value?.rows) && cached.value.rows.length > 0;
       if (!hasCachedRows && !isCacheFresh(cached, ORDERS_CACHE_FRESH_MS)) {
         await fetchOrders({ silent: true });
@@ -370,7 +414,12 @@ export default function Orders() {
         window.removeEventListener("focus", onFocus);
       }
     };
-  }, [cacheKey, fetchOrders, scheduleSilentRefresh]);
+  }, [cacheKey, fetchMissingOrderIds, fetchOrders, scheduleSilentRefresh]);
+
+  const missingOrderIdSet = useMemo(
+    () => new Set(missingOrderIds),
+    [missingOrderIds],
+  );
 
   const ordersWithMeta = useMemo(
     () =>
@@ -382,7 +431,9 @@ export default function Orders() {
   );
 
   const filteredOrders = useMemo(() => {
-    let result = [...ordersWithMeta];
+    let result = ordersWithMeta.filter(
+      (order) => !missingOrderIdSet.has(String(order?.id || "").trim()),
+    );
 
     if (filters.searchTerm.trim()) {
       const keyword = filters.searchTerm.trim().toLowerCase();
@@ -508,7 +559,7 @@ export default function Orders() {
     });
 
     return result;
-  }, [filters, ordersWithMeta]);
+  }, [filters, missingOrderIdSet, ordersWithMeta]);
 
   const summary = useMemo(() => {
     const totalOrderValue = filteredOrders.reduce(
@@ -547,10 +598,12 @@ export default function Orders() {
 
   const formatDate = (dateString) => {
     if (!dateString) return "-";
-    return new Date(dateString).toLocaleDateString("ar-EG", {
+    return new Date(dateString).toLocaleString("ar-EG", {
       year: "numeric",
       month: "short",
       day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
@@ -631,6 +684,29 @@ export default function Orders() {
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-2 text-red-700">
               <AlertCircle size={18} />
               {error}
+            </div>
+          )}
+
+          {missingOrderIds.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 text-amber-900">
+              <div className="flex items-start gap-2">
+                <AlertCircle size={18} className="mt-0.5 text-amber-600" />
+                <div>
+                  <p className="font-semibold">
+                    {missingOrderIds.length.toLocaleString()} طلب خارج قائمة الطلبات الآن
+                  </p>
+                  <p className="text-sm text-amber-800">
+                    هذه الطلبات انتقلت إلى صفحة الطلبات المفقودة لأنها لم تحصل على أي أكشن
+                    خلال آخر 3 أيام.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => navigate("/orders/missing")}
+                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium"
+              >
+                فتح الطلبات المفقودة
+              </button>
             </div>
           )}
 

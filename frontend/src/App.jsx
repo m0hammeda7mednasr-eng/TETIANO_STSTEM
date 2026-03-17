@@ -12,9 +12,13 @@ import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Customers from "./pages/Customers";
 import Products from "./pages/Products";
+import ProductAnalysis from "./pages/ProductAnalysis";
 import ProductDetails from "./pages/ProductDetails";
 import Orders from "./pages/Orders";
+import MissingOrders from "./pages/MissingOrders";
 import OrderDetails from "./pages/OrderDetails";
+import WarehouseStock from "./pages/WarehouseStock";
+import WarehouseScanner from "./pages/WarehouseScanner";
 import Settings from "./pages/Settings";
 import Users from "./pages/Users";
 import Reports from "./pages/Reports";
@@ -68,6 +72,14 @@ function App() {
               }
             />
             <Route
+              path="/products/analysis"
+              element={
+                <ProtectedRoute permission="can_view_products">
+                  <ProductAnalysis />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/products/:id"
               element={
                 <ProtectedRoute permission="can_view_products">
@@ -76,10 +88,34 @@ function App() {
               }
             />
             <Route
+              path="/warehouse"
+              element={
+                <ProtectedRoute permission="can_view_products">
+                  <WarehouseStock />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/warehouse/scanner"
+              element={
+                <ProtectedRoute permission="can_view_products">
+                  <WarehouseScanner />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/orders"
               element={
                 <ProtectedRoute permission="can_view_orders">
                   <Orders />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders/missing"
+              element={
+                <ProtectedRoute permission="can_view_orders">
+                  <MissingOrders />
                 </ProtectedRoute>
               }
             />

@@ -332,7 +332,7 @@ export default function Orders() {
     } finally {
       fetchPromiseRef.current = null;
     }
-  }, [cacheKey]);
+  }, [cacheKey, fetchMissingOrderIds]);
 
   const scheduleSilentRefresh = useCallback(() => {
     if (refreshTimeoutRef.current) {

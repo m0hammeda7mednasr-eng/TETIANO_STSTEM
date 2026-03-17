@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -248,11 +248,11 @@ export default function Sidebar() {
     });
   }, [location.pathname]);
 
-  const canSeeItem = (item) => {
+  const canSeeItem = useCallback((item) => {
     if (item.adminOnly && !isAdmin) return false;
     if (item.permission && !hasPermission(item.permission)) return false;
     return true;
-  };
+  }, [hasPermission, isAdmin]);
 
   const visibleSharedEntries = useMemo(
     () =>

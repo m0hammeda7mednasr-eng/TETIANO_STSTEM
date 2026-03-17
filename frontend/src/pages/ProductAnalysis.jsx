@@ -125,7 +125,6 @@ const buildCompletionRate = (product) => {
 export default function ProductAnalysis() {
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
-  const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [meta, setMeta] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState("all");
@@ -146,7 +145,6 @@ export default function ProductAnalysis() {
       });
       const payload = extractObject(response?.data);
       setProducts(extractArray(payload));
-      setSummary(payload?.summary || EMPTY_SUMMARY);
       setMeta(payload?.meta || {});
     } catch (requestError) {
       console.error("Error fetching product analysis:", requestError);

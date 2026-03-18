@@ -27,7 +27,7 @@ import NotificationBell from "./NotificationBell";
 import LanguageToggle from "./LanguageToggle";
 import tetianoLogo from "../assets/tetiano-logo.jpeg";
 
-const buildSharedNav = (t) => [
+const buildSharedNav = (t, select) => [
   {
     type: "item",
     icon: Home,
@@ -76,6 +76,15 @@ const buildSharedNav = (t) => [
         icon: Truck,
         label: t("sidebar.suppliers", "Suppliers"),
         path: "/suppliers",
+        permission: "can_view_products",
+      },
+      {
+        icon: Package,
+        label: t(
+          "sidebar.fabricModels",
+          select("موديلات القماش", "Fabric Models"),
+        ),
+        path: "/suppliers/fabric-models",
         permission: "can_view_products",
       },
       {
@@ -206,6 +215,10 @@ const isPathActive = (pathname, itemPath) => {
         (/^\/products\/[^/]+$/.test(pathname) &&
           pathname !== "/products/analysis")
       );
+    case "/suppliers":
+      return pathname === "/suppliers";
+    case "/suppliers/fabric-models":
+      return pathname === "/suppliers/fabric-models";
     default:
       return pathname === itemPath;
   }
@@ -217,12 +230,12 @@ export default function Sidebar() {
     getAutoExpandedGroups(window.location.pathname),
   );
   const { user, logout, hasPermission, isAdmin } = useAuth();
-  const { isRTL, t } = useLocale();
+  const { isRTL, select, t } = useLocale();
   const canManageSettings = hasPermission("can_manage_settings");
   const navigate = useNavigate();
   const location = useLocation();
 
-  const sharedNav = useMemo(() => buildSharedNav(t), [t]);
+  const sharedNav = useMemo(() => buildSharedNav(t, select), [select, t]);
   const employeeNav = useMemo(() => buildEmployeeNav(t), [t]);
   const adminNav = useMemo(() => buildAdminNav(t), [t]);
 

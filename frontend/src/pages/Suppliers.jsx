@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   AlertCircle,
@@ -1756,11 +1756,59 @@ function PaymentForm({ form, setForm, onSave, saving }) {
 
 function SupplierCatalogExplorer({ supplier }) {
   const { locale } = useLocale();
+  const location = useLocation();
   const productCatalog = toArray(supplier?.product_catalog);
   const fabricCatalog = toArray(supplier?.fabric_catalog);
+  const productCatalogRef = useRef(null);
+  const fabricCatalogRef = useRef(null);
+  const activeExplorerView =
+    location.pathname === "/suppliers/fabric-models"
+      ? "fabric-models"
+      : "model-catalog";
+
+  useEffect(() => {
+    const targetRef =
+      activeExplorerView === "fabric-models"
+        ? fabricCatalogRef
+        : productCatalogRef;
+
+    if (!targetRef.current || typeof window === "undefined") {
+      return;
+    }
+
+    const rafId = window.requestAnimationFrame(() => {
+      targetRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [activeExplorerView]);
 
   return (
-    <div className="grid gap-6 xl:grid-cols-2">
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        <Link
+          to="/suppliers"
+          className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-medium transition ${
+            activeExplorerView === "model-catalog"
+              ? "bg-sky-700 text-white shadow-sm"
+              : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          {translateSupplierUiText("كتالوج الموديلات", locale)}
+        </Link>
+        <Link
+          to="/suppliers/fabric-models"
+          className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-medium transition ${
+            activeExplorerView === "fabric-models"
+              ? "bg-sky-700 text-white shadow-sm"
+              : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          {translateSupplierUiText("موديلات القماش", locale)}
+        </Link>
+      </div>
+      <div className="grid gap-6 xl:grid-cols-2">
+      <div ref={productCatalogRef}>
       <SectionCard
         title="كتالوج الموديلات"
         subtitle="عرض كل موديل وما تحته من أقمشة وخامات وواردات بشكل منظم"
@@ -1896,7 +1944,9 @@ function SupplierCatalogExplorer({ supplier }) {
           <EmptyState text="لا توجد موديلات مرتبطة بحركات المورد الحالي حتى الآن." />
         )}
       </SectionCard>
+      </div>
 
+      <div ref={fabricCatalogRef}>
       <SectionCard
         title="موديلات القماش"
         subtitle="ابدأ بالقماش لترى الموديلات المرتبطة به وكمياتها ووارداتها"
@@ -2001,6 +2051,8 @@ function SupplierCatalogExplorer({ supplier }) {
           <EmptyState text="لا توجد أقمشة مرتبطة بحركات المورد الحالي حتى الآن." />
         )}
       </SectionCard>
+      </div>
+      </div>
     </div>
   );
 }

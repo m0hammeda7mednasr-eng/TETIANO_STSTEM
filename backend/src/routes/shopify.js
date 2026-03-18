@@ -2615,6 +2615,63 @@ const syncRecentOrdersWithCooldown = async ({
 
 const applyProductsQueryFilters = (rows, query = {}) => {
   let filtered = [...(rows || [])];
+  const parseLocalDateInput = (value) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      const parsed = new Date(normalized);
+      return Number.isFinite(parsed.getTime()) ? parsed : null;
+    }
+
+    const [, year, month, day] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  };
+  const startOfLocalDay = (value) => {
+    const date = parseLocalDateInput(value);
+    if (!date) {
+      return null;
+    }
+
+    date.setHours(0, 0, 0, 0);
+    return date;
+  };
+  const endOfLocalDay = (value) => {
+    const date = parseLocalDateInput(value);
+    if (!date) {
+      return null;
+    }
+
+    date.setHours(23, 59, 59, 999);
+    return date;
+  };
+  const getNormalizedUpdatedDateRange = (dateFrom, dateTo) => {
+    const from = dateFrom ? startOfLocalDay(dateFrom) : null;
+    const to = dateTo ? endOfLocalDay(dateTo) : null;
+
+    if (from && to && from.getTime() > to.getTime()) {
+      return {
+        from: startOfLocalDay(dateTo),
+        to: endOfLocalDay(dateFrom),
+      };
+    }
+
+    return {
+      from,
+      to,
+    };
+  };
+  const parseUpdatedAtValue = (value) => {
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  };
+  const normalizedUpdatedDateRange = getNormalizedUpdatedDateRange(
+    query.updated_from,
+    query.updated_to,
+  );
 
   if (query.search) {
     const keyword = String(query.search).toLowerCase().trim();
@@ -2703,18 +2760,18 @@ const applyProductsQueryFilters = (rows, query = {}) => {
     );
   }
 
-  if (query.updated_from) {
-    const from = new Date(String(query.updated_from));
-    from.setHours(0, 0, 0, 0);
-    filtered = filtered.filter(
-      (product) => new Date(product.updated_at) >= from,
-    );
+  if (normalizedUpdatedDateRange.from) {
+    filtered = filtered.filter((product) => {
+      const updatedAt = parseUpdatedAtValue(product.updated_at);
+      return updatedAt && updatedAt >= normalizedUpdatedDateRange.from;
+    });
   }
 
-  if (query.updated_to) {
-    const to = new Date(String(query.updated_to));
-    to.setHours(23, 59, 59, 999);
-    filtered = filtered.filter((product) => new Date(product.updated_at) <= to);
+  if (normalizedUpdatedDateRange.to) {
+    filtered = filtered.filter((product) => {
+      const updatedAt = parseUpdatedAtValue(product.updated_at);
+      return updatedAt && updatedAt <= normalizedUpdatedDateRange.to;
+    });
   }
 
   const sortBy = String(query.sort_by || "updated_at").toLowerCase();

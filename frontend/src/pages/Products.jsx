@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -33,11 +40,16 @@ import {
   shouldAutoRefreshView,
 } from "../utils/refreshPolicy";
 import { formatDateTime } from "../utils/helpers";
+import {
+  buildCatalogCounts,
+  buildVariantRows,
+  getNormalizedDateRange,
+  toNumber,
+} from "../utils/productsView";
 
 const PRODUCTS_PAGE_SIZE = 200;
 const PRODUCTS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const CURRENCY_LABEL = "LE";
-const DEFAULT_VARIANT_TITLES = new Set(["default title", "default"]);
 
 const INITIAL_FILTERS = {
   searchTerm: "",
@@ -55,56 +67,25 @@ const INITIAL_FILTERS = {
   sortBy: "updated_desc",
 };
 
-const toNumber = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
 const formatAmount = (value) => `${toNumber(value).toFixed(2)} ${CURRENCY_LABEL}`;
-
-const normalizeDate = (value) => {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-};
-
-const startOfDay = (dateString) => {
-  const date = new Date(dateString);
-  date.setHours(0, 0, 0, 0);
-  return date;
-};
-
-const endOfDay = (dateString) => {
-  const date = new Date(dateString);
-  date.setHours(23, 59, 59, 999);
-  return date;
-};
-
-const getStockState = (inventoryQuantity) => {
-  const quantity = toNumber(inventoryQuantity);
-  if (quantity <= 0) return "out_of_stock";
-  if (quantity < 10) return "low_stock";
-  return "in_stock";
-};
-
-const getSyncState = (product) => {
-  if (product.pending_sync) return "pending";
-  if (product.sync_error) return "failed";
-  if (product.last_synced_at) return "synced";
-  return "never";
-};
-
-const getProfitabilityState = (item) => {
-  const hasCost =
-    item.cost_price !== null &&
-    item.cost_price !== undefined &&
-    item.cost_price !== "";
-  if (!hasCost) return "no_cost";
-
-  const profit = toNumber(item.price) - toNumber(item.cost_price);
-  if (profit > 0) return "profitable";
-  if (profit < 0) return "loss";
-  return "break_even";
+const PRODUCT_FILTER_LABELS = {
+  stockStatus: {
+    in_stock: "In stock",
+    low_stock: "Low stock",
+    out_of_stock: "Out of stock",
+  },
+  syncStatus: {
+    synced: "Synced",
+    pending: "Pending",
+    failed: "Failed",
+    never: "Never",
+  },
+  profitability: {
+    profitable: "Profitable",
+    loss: "Loss",
+    break_even: "Break-even",
+    no_cost: "No cost",
+  },
 };
 const isProductsRelatedSharedUpdate = (event) => {
   const source = String(event?.source || "").toLowerCase();
@@ -114,107 +95,6 @@ const isProductsRelatedSharedUpdate = (event) => {
 
   return source.includes("/shopify/products") || source.includes("/products/");
 };
-
-const getVariantTitle = (product, variant, index) => {
-  const rawTitle = String(variant?.title || "").trim();
-  if (!rawTitle) {
-    return `Variant ${index + 1}`;
-  }
-
-  const normalizedTitle = rawTitle.toLowerCase();
-  if (DEFAULT_VARIANT_TITLES.has(normalizedTitle)) {
-    return "Default Variant";
-  }
-
-  const productTitle = String(product?.title || "").trim().toLowerCase();
-  if (productTitle && normalizedTitle === productTitle) {
-    return "Default Variant";
-  }
-
-  return rawTitle;
-};
-
-const buildVariantRows = (products, isAdmin) =>
-  products.flatMap((product) => {
-    const variants = Array.isArray(product.variants) && product.variants.length > 0
-      ? product.variants
-      : [
-          {
-            id: null,
-            title: product.title || "Default Variant",
-            price: product.price ?? 0,
-            cost_price: product.cost_price ?? null,
-            sku: product.sku || "",
-            inventory_quantity: product.inventory_quantity ?? 0,
-            image_url: product.image_url || "",
-            updated_at: product.updated_at || product.local_updated_at || null,
-            created_at: product.created_at || null,
-          },
-        ];
-
-    const hasMultipleVariants =
-      Boolean(product.has_multiple_variants) || variants.length > 1;
-
-    return variants.map((variant, index) => {
-      const variantTitle = getVariantTitle(product, variant, index);
-      const inventoryQuantity = toNumber(
-        variant.inventory_quantity ?? product.inventory_quantity ?? 0,
-      );
-      const price = variant.price ?? product.price ?? 0;
-      const costPrice = isAdmin
-        ? variant.cost_price ?? variant.cost ?? product.cost_price ?? null
-        : undefined;
-      const updatedAt =
-        variant.updated_at ||
-        product.local_updated_at ||
-        product.last_synced_at ||
-        product.updated_at ||
-        product.created_at ||
-        null;
-      const optionValues = [variant.option1, variant.option2, variant.option3]
-        .map((value) => String(value || "").trim())
-        .filter(Boolean);
-
-      const row = {
-        key: `${product.id}:${variant.id || `default-${index}`}`,
-        id: product.id,
-        variant_id: variant.id || null,
-        product_title: product.title || "Untitled product",
-        variant_title: variantTitle,
-        vendor: product.vendor || "",
-        product_type: product.product_type || "",
-        image_url: variant.image_url || product.image_url || "",
-        sku: String(variant.sku || product.sku || "").trim(),
-        barcode: String(variant.barcode || "").trim(),
-        price,
-        compare_at_price: variant.compare_at_price ?? null,
-        cost_price: costPrice,
-        inventory_quantity: inventoryQuantity,
-        total_inventory: toNumber(
-          product.total_inventory ?? product.inventory_quantity ?? 0,
-        ),
-        pending_sync: Boolean(product.pending_sync),
-        sync_error: product.sync_error || "",
-        last_synced_at: product.last_synced_at || null,
-        local_updated_at: product.local_updated_at || null,
-        updated_at: updatedAt,
-        created_at: variant.created_at || product.created_at || null,
-        has_multiple_variants: hasMultipleVariants,
-        variants_count: toNumber(product.variants_count || variants.length),
-        option_values: optionValues,
-      };
-
-      return {
-        ...row,
-        _meta: {
-          stockState: getStockState(inventoryQuantity),
-          syncState: getSyncState(row),
-          profitabilityState: getProfitabilityState(row),
-          updatedAt: normalizeDate(updatedAt),
-        },
-      };
-    });
-  });
 
 const isEditableSingleVariant = (variantRow) => !variantRow.has_multiple_variants;
 
@@ -263,6 +143,7 @@ export default function Products() {
   });
   const fetchPromiseRef = useRef(null);
   const productsRef = useRef([]);
+  const deferredSearchTerm = useDeferredValue(filters.searchTerm);
 
   useEffect(() => {
     productsRef.current = products;
@@ -475,11 +356,16 @@ export default function Products() {
     [variantRows],
   );
 
+  const normalizedUpdatedRange = useMemo(
+    () => getNormalizedDateRange(filters.updatedFrom, filters.updatedTo),
+    [filters.updatedFrom, filters.updatedTo],
+  );
+
   const filteredVariants = useMemo(() => {
     let result = [...variantRows];
 
-    if (filters.searchTerm.trim()) {
-      const keyword = filters.searchTerm.trim().toLowerCase();
+    if (deferredSearchTerm.trim()) {
+      const keyword = deferredSearchTerm.trim().toLowerCase();
       result = result.filter((variant) => {
         const searchableFields = [
           variant.product_title,
@@ -499,13 +385,17 @@ export default function Products() {
 
     if (filters.vendor !== "all") {
       result = result.filter(
-        (variant) => String(variant.vendor || "") === filters.vendor,
+        (variant) =>
+          String(variant.vendor || "").toLowerCase() ===
+          String(filters.vendor || "").toLowerCase(),
       );
     }
 
     if (filters.productType !== "all") {
       result = result.filter(
-        (variant) => String(variant.product_type || "") === filters.productType,
+        (variant) =>
+          String(variant.product_type || "").toLowerCase() ===
+          String(filters.productType || "").toLowerCase(),
       );
     }
 
@@ -545,17 +435,19 @@ export default function Products() {
       );
     }
 
-    if (filters.updatedFrom) {
-      const from = startOfDay(filters.updatedFrom);
+    if (normalizedUpdatedRange.from) {
       result = result.filter(
-        (variant) => variant._meta.updatedAt && variant._meta.updatedAt >= from,
+        (variant) =>
+          variant._meta.updatedAt &&
+          variant._meta.updatedAt >= normalizedUpdatedRange.from,
       );
     }
 
-    if (filters.updatedTo) {
-      const to = endOfDay(filters.updatedTo);
+    if (normalizedUpdatedRange.to) {
       result = result.filter(
-        (variant) => variant._meta.updatedAt && variant._meta.updatedAt <= to,
+        (variant) =>
+          variant._meta.updatedAt &&
+          variant._meta.updatedAt <= normalizedUpdatedRange.to,
       );
     }
 
@@ -598,7 +490,7 @@ export default function Products() {
     });
 
     return result;
-  }, [filters, isAdmin, variantRows]);
+  }, [deferredSearchTerm, filters, isAdmin, normalizedUpdatedRange, variantRows]);
 
   const summary = useMemo(() => {
     const outOfStock = filteredVariants.filter(
@@ -627,6 +519,65 @@ export default function Products() {
       syncedCount,
     };
   }, [filteredVariants]);
+
+  const catalogCounts = useMemo(() => {
+    return buildCatalogCounts(variantRows, filteredVariants);
+  }, [filteredVariants, variantRows]);
+
+  const activeFilterChips = useMemo(() => {
+    const chips = [];
+
+    if (filters.searchTerm.trim()) {
+      chips.push(`Search: ${filters.searchTerm.trim()}`);
+    }
+    if (filters.vendor !== "all") {
+      chips.push(`Vendor: ${filters.vendor}`);
+    }
+    if (filters.productType !== "all") {
+      chips.push(`Type: ${filters.productType}`);
+    }
+    if (filters.stockStatus !== "all") {
+      chips.push(
+        `Stock: ${
+          PRODUCT_FILTER_LABELS.stockStatus[filters.stockStatus] || filters.stockStatus
+        }`,
+      );
+    }
+    if (filters.syncStatus !== "all") {
+      chips.push(
+        `Sync: ${
+          PRODUCT_FILTER_LABELS.syncStatus[filters.syncStatus] || filters.syncStatus
+        }`,
+      );
+    }
+    if (filters.minPrice) {
+      chips.push(`Price >= ${filters.minPrice}`);
+    }
+    if (filters.maxPrice) {
+      chips.push(`Price <= ${filters.maxPrice}`);
+    }
+    if (filters.minInventory) {
+      chips.push(`Inventory >= ${filters.minInventory}`);
+    }
+    if (filters.maxInventory) {
+      chips.push(`Inventory <= ${filters.maxInventory}`);
+    }
+    if (filters.updatedFrom || filters.updatedTo) {
+      chips.push(
+        `Updated: ${filters.updatedFrom || "Start"} -> ${filters.updatedTo || "Now"}`,
+      );
+    }
+    if (isAdmin && filters.profitability !== "all") {
+      chips.push(
+        `Profitability: ${
+          PRODUCT_FILTER_LABELS.profitability[filters.profitability] ||
+          filters.profitability
+        }`,
+      );
+    }
+
+    return chips;
+  }, [filters, isAdmin]);
 
   const handleEditProduct = async (productId, updates) => {
     try {
@@ -755,7 +706,7 @@ export default function Products() {
             <div>
               <h1 className="text-3xl font-bold text-slate-900">Products</h1>
               <p className="text-slate-600">
-                Every variant is shown separately with its own image, stock, and price.
+                Products and variants are separated clearly so filters and totals stay easy to read.
               </p>
               {lastUpdatedAt && (
                 <p className="mt-2 text-xs text-slate-500">
@@ -788,16 +739,16 @@ export default function Products() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <SummaryCard
-              label="Variants"
-              value={summary.totalVariants.toLocaleString()}
-              icon={Package}
-              color="from-indigo-500 to-indigo-700"
-            />
-            <SummaryCard
               label="Products"
               value={summary.uniqueProducts.toLocaleString()}
               icon={Package}
               color="from-sky-500 to-sky-700"
+            />
+            <SummaryCard
+              label="Variants"
+              value={summary.totalVariants.toLocaleString()}
+              icon={Package}
+              color="from-indigo-500 to-indigo-700"
             />
             <SummaryCard
               label="Total Stock"
@@ -828,9 +779,9 @@ export default function Products() {
           <div className="bg-white rounded-xl shadow p-4 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">Variant Filters</h2>
+                <h2 className="text-lg font-semibold text-slate-900">Product & Variant Filters</h2>
                 <p className="text-sm text-slate-500">
-                  Search by product name, variant, SKU, barcode, vendor, or type.
+                  Filters apply to the variant cards and product totals update with them.
                 </p>
               </div>
               <button
@@ -840,6 +791,37 @@ export default function Products() {
                 <RotateCcw size={14} />
                 Reset
               </button>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                <span>
+                  Showing <strong>{catalogCounts.filteredProducts.toLocaleString()}</strong> products
+                </span>
+                <span>
+                  and <strong>{catalogCounts.filteredVariants.toLocaleString()}</strong> variants
+                </span>
+                <span className="text-slate-500">
+                  from {catalogCounts.totalProducts.toLocaleString()} total products / {catalogCounts.totalVariants.toLocaleString()} total variants
+                </span>
+              </div>
+              {normalizedUpdatedRange.wasSwapped && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Date range was auto-corrected because From Date was later than To Date.
+                </p>
+              )}
+              {activeFilterChips.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {activeFilterChips.map((chip) => (
+                    <span
+                      key={chip}
+                      className="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700 border border-slate-200"
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -1036,7 +1018,7 @@ export default function Products() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
             {loadStatus.active && products.length === 0 ? (
               <div className="col-span-full bg-white rounded-xl shadow p-8 text-center text-slate-500">
-                Variant cards will appear as soon as the first product batch is ready.
+                Product cards will appear as soon as the first batch is ready.
               </div>
             ) : filteredVariants.length > 0 ? (
               filteredVariants.map((variant) => (
@@ -1176,8 +1158,8 @@ export default function Products() {
             ) : (
               <div className="col-span-full bg-white rounded-xl shadow p-10 text-center text-slate-500">
                 <Package size={52} className="mx-auto mb-3 text-slate-300" />
-                <p className="font-semibold mb-1">No matching variants found</p>
-                <p className="text-sm">Try adjusting or resetting filters.</p>
+                <p className="font-semibold mb-1">No matching products found</p>
+                <p className="text-sm">Try adjusting the filters or reset them.</p>
               </div>
             )}
           </div>

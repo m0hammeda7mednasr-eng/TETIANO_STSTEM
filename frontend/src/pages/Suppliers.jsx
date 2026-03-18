@@ -65,8 +65,16 @@ const SUPPLIER_UI_TRANSLATIONS = {
     "الموردون والحسابات": "Suppliers & Accounts",
     "ملف المورد يركز على البيانات الأساسية، بينما تفاصيل الواردات والدفعات تُسجل داخل الحركات بكل تفاصيلها.":
       "Supplier profiles hold the master data, while deliveries and payments are recorded through detailed movements.",
+    "موردو المصانع": "Factory Suppliers",
+    "موردي القماش": "Fabric Suppliers",
+    "كود المصنع": "Factory Code",
+    "كود مورد القماش": "Fabric Supplier Code",
+    "تفاصيل موردي القماش وروابطهم مع المصانع والأقمشة المرتبطة بكل مورد.":
+      "Fabric supplier details, linked factories, and connected fabrics for each supplier.",
     "تحديث": "Refresh",
     "مورد جديد": "New Supplier",
+    "مورد مصنع جديد": "New Factory Supplier",
+    "مورد قماش جديد": "New Fabric Supplier",
     "إجمالي الموردين": "Total Suppliers",
     "مورد نشط": "Active suppliers",
     "إجمالي الوارد": "Total Deliveries",
@@ -247,8 +255,15 @@ const translateSupplierUiText = (value, locale = "ar") => {
 
   return SUPPLIER_UI_TRANSLATIONS.en[value] || value;
 };
+const getSupplierViewType = (pathname = "") =>
+  pathname === "/suppliers/fabric-suppliers" ? "fabric" : "factory";
+const getSupplierViewTitle = (supplierType) =>
+  supplierType === "fabric" ? "موردي القماش" : "موردو المصانع";
+const getSupplierCodeLabel = (supplierType) =>
+  supplierType === "fabric" ? "كود مورد القماش" : "كود المصنع";
 
 const createEmptySupplierForm = () => ({
+  supplier_type: "factory",
   code: "",
   name: "",
   contact_name: "",
@@ -260,6 +275,7 @@ const createEmptySupplierForm = () => ({
 });
 
 const createEmptyFabricForm = () => ({
+  fabric_supplier_id: "",
   code: "",
   name: "",
   notes: "",
@@ -273,6 +289,7 @@ const createEmptyDeliveryItem = () => ({
   variant_title: "",
   fabric_id: "",
   fabric_code: "",
+  fabric_supplier_id: "",
   product_name: "",
   sku: "",
   catalog_query: "",
@@ -374,6 +391,7 @@ const getDeliveryItemSuggestedUnitCost = (item) => {
 };
 
 const buildSupplierFormFromRecord = (supplier) => ({
+  supplier_type: supplier?.supplier_type || "factory",
   code: supplier?.code || "",
   name: supplier?.name || "",
   contact_name: supplier?.contact_name || "",
@@ -388,6 +406,7 @@ const buildSupplierFormFromRecord = (supplier) => ({
 });
 
 const buildFabricFormFromRecord = (fabric) => ({
+  fabric_supplier_id: fabric?.fabric_supplier_id || "",
   code: fabric?.code || "",
   name: fabric?.name || fabric?.fabric_name || "",
   notes: fabric?.notes || "",
@@ -533,6 +552,9 @@ const buildSupplierFabricOptions = (supplier) => {
       fabric_id: normalizeText(fabric?.id),
       fabric_code: normalizeText(fabric?.code),
       fabric_name: normalizeText(fabric?.name || fabric?.fabric_name),
+      fabric_supplier_id: normalizeText(fabric?.fabric_supplier_id),
+      fabric_supplier_name: normalizeText(fabric?.fabric_supplier_name),
+      fabric_supplier_code: normalizeText(fabric?.fabric_supplier_code),
       label: formatSupplierFabricDisplay(fabric),
     }))
     .filter((fabric) => {
@@ -650,6 +672,8 @@ export default function Suppliers() {
   const { locale, isRTL } = useLocale();
   const location = useLocation();
   const canManageSuppliers = hasPermission("can_edit_products");
+  const supplierViewType = getSupplierViewType(location.pathname);
+  const isFactorySuppliersView = supplierViewType === "factory";
 
   const [suppliers, setSuppliers] = useState([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
@@ -670,6 +694,7 @@ export default function Suppliers() {
   const [deliveryForm, setDeliveryForm] = useState(createEmptyDeliveryForm);
   const [paymentForm, setPaymentForm] = useState(createEmptyPaymentForm);
   const [productCatalogRows, setProductCatalogRows] = useState([]);
+  const [relatedSuppliers, setRelatedSuppliers] = useState([]);
   const [savingSupplier, setSavingSupplier] = useState(false);
   const [savingFabric, setSavingFabric] = useState(false);
   const [savingDelivery, setSavingDelivery] = useState(false);
@@ -688,7 +713,7 @@ export default function Suppliers() {
     try {
       setLoading(true);
       setError("");
-      const response = await suppliersAPI.list();
+      const response = await suppliersAPI.list({ type: supplierViewType });
       const list = extractArray(response?.data);
       setSuppliers(list);
       setSelectedSupplierId((current) => {
@@ -709,7 +734,7 @@ export default function Suppliers() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [supplierViewType]);
 
   const loadSupplierDetail = useCallback(async (supplierId, { silent = false } = {}) => {
     if (!supplierId) {
@@ -722,7 +747,9 @@ export default function Suppliers() {
         setDetailLoading(true);
       }
 
-      const response = await suppliersAPI.getById(supplierId);
+      const response = await suppliersAPI.getById(supplierId, {
+        type: supplierViewType,
+      });
       setSelectedSupplier(response?.data?.supplier || null);
     } catch (requestError) {
       console.error("Error loading supplier detail:", requestError);
@@ -736,10 +763,25 @@ export default function Suppliers() {
         setDetailLoading(false);
       }
     }
-  }, []);
+  }, [supplierViewType]);
+
+  const loadRelatedSuppliers = useCallback(async () => {
+    if (!canManageSuppliers || !isFactorySuppliersView) {
+      setRelatedSuppliers([]);
+      return;
+    }
+
+    try {
+      const response = await suppliersAPI.list({ type: "fabric" });
+      setRelatedSuppliers(extractArray(response?.data));
+    } catch (requestError) {
+      console.error("Error loading related suppliers:", requestError);
+      setRelatedSuppliers([]);
+    }
+  }, [canManageSuppliers, isFactorySuppliersView]);
 
   const loadProductCatalog = useCallback(async ({ silent = false } = {}) => {
-    if (!canManageSuppliers) {
+    if (!canManageSuppliers || !isFactorySuppliersView) {
       setProductCatalogRows([]);
       setCatalogError("");
       return;
@@ -774,7 +816,7 @@ export default function Suppliers() {
         setCatalogLoading(false);
       }
     }
-  }, [canManageSuppliers]);
+  }, [canManageSuppliers, isFactorySuppliersView]);
 
   useEffect(() => {
     loadSuppliers();
@@ -787,6 +829,10 @@ export default function Suppliers() {
   useEffect(() => {
     loadProductCatalog();
   }, [loadProductCatalog]);
+
+  useEffect(() => {
+    loadRelatedSuppliers();
+  }, [loadRelatedSuppliers]);
 
   useEffect(() => {
     const requestedSupplierId = normalizeText(
@@ -812,6 +858,7 @@ export default function Suppliers() {
         if (selectedSupplierId) {
           loadSupplierDetail(selectedSupplierId, { silent: true });
         }
+        loadRelatedSuppliers();
       }
 
       if (isProductsRelatedUpdate(event)) {
@@ -820,7 +867,13 @@ export default function Suppliers() {
     });
 
     return () => unsubscribe();
-  }, [loadProductCatalog, loadSupplierDetail, loadSuppliers, selectedSupplierId]);
+  }, [
+    loadProductCatalog,
+    loadRelatedSuppliers,
+    loadSupplierDetail,
+    loadSuppliers,
+    selectedSupplierId,
+  ]);
 
   const filteredSuppliers = useMemo(() => {
     const keyword = String(searchTerm || "").trim().toLowerCase();
@@ -865,7 +918,10 @@ export default function Suppliers() {
 
   const startCreatingSupplier = () => {
     setEditingSupplierId("");
-    setSupplierForm(createEmptySupplierForm());
+    setSupplierForm(() => ({
+      ...createEmptySupplierForm(),
+      supplier_type: supplierViewType,
+    }));
     setShowSupplierForm(true);
   };
 
@@ -881,7 +937,10 @@ export default function Suppliers() {
 
   const closeSupplierForm = () => {
     setEditingSupplierId("");
-    setSupplierForm(createEmptySupplierForm());
+    setSupplierForm({
+      ...createEmptySupplierForm(),
+      supplier_type: supplierViewType,
+    });
     setShowSupplierForm(false);
   };
 
@@ -919,6 +978,7 @@ export default function Suppliers() {
 
       const payload = {
         ...supplierForm,
+        supplier_type: supplierViewType,
         opening_balance: supplierForm.opening_balance || 0,
       };
 
@@ -970,6 +1030,7 @@ export default function Suppliers() {
 
       const payload = {
         ...fabricForm,
+        fabric_supplier_id: normalizeText(fabricForm.fabric_supplier_id),
       };
 
       if (editingFabricId) {
@@ -1005,7 +1066,7 @@ export default function Suppliers() {
               ...item,
               [field]: value,
               ...(field === "fabric_code" || field === "fabric_name"
-                ? { fabric_id: "" }
+                ? { fabric_id: "", fabric_supplier_id: "" }
                 : {}),
             }
           : item,
@@ -1064,6 +1125,7 @@ export default function Suppliers() {
             ...item,
             fabric_id: "",
             fabric_code: "",
+            fabric_supplier_id: "",
           };
         }
 
@@ -1072,6 +1134,7 @@ export default function Suppliers() {
           fabric_id: selectedFabric.fabric_id,
           fabric_code: selectedFabric.fabric_code,
           fabric_name: selectedFabric.fabric_name,
+          fabric_supplier_id: selectedFabric.fabric_supplier_id,
         };
       }),
     }));
@@ -1195,13 +1258,21 @@ export default function Suppliers() {
               <div>
                 <h1 className="flex items-center gap-3 text-3xl font-bold text-slate-900">
                   <Truck className="text-sky-700" size={28} />
-                  {translateSupplierUiText("الموردون والحسابات", locale)}
-                </h1>
-                <p className="mt-2 text-slate-600">
                   {translateSupplierUiText(
-                    "ملف المورد يركز على البيانات الأساسية، بينما تفاصيل الواردات والدفعات تُسجل داخل الحركات بكل تفاصيلها.",
+                    getSupplierViewTitle(supplierViewType),
                     locale,
                   )}
+                </h1>
+                <p className="mt-2 text-slate-600">
+                  {isFactorySuppliersView
+                    ? translateSupplierUiText(
+                        "ملف المورد يركز على البيانات الأساسية، بينما تفاصيل الواردات والدفعات تُسجل داخل الحركات بكل تفاصيلها.",
+                        locale,
+                      )
+                    : translateSupplierUiText(
+                        "تفاصيل موردي القماش وروابطهم مع المصانع والأقمشة المرتبطة بكل مورد.",
+                        locale,
+                      )}
                 </p>
               </div>
 
@@ -1219,7 +1290,12 @@ export default function Suppliers() {
                     className="inline-flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-white hover:bg-sky-800"
                   >
                     <Plus size={18} />
-                    {translateSupplierUiText("مورد جديد", locale)}
+                    {translateSupplierUiText(
+                      supplierViewType === "fabric"
+                        ? "مورد قماش جديد"
+                        : "مورد مصنع جديد",
+                      locale,
+                    )}
                   </button>
                 ) : null}
               </div>
@@ -1252,30 +1328,56 @@ export default function Suppliers() {
 
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <SummaryCard
-              title="إجمالي الموردين"
+              title={isFactorySuppliersView ? "إجمالي المصانع" : "إجمالي موردي القماش"}
               value={formatCount(summary.total_suppliers)}
               subtitle={`${formatCount(summary.active_suppliers)} ${translateSupplierUiText("مورد نشط", locale)}`}
               icon={Building2}
               tone="sky"
             />
             <SummaryCard
-              title="إجمالي الوارد"
+              title={isFactorySuppliersView ? "إجمالي الوارد" : "القيمة المرتبطة"}
               value={formatCurrency(summary.total_deliveries)}
-              subtitle="قيمة كل الشحنات المسجلة"
+              subtitle={isFactorySuppliersView ? "قيمة كل الشحنات المسجلة" : "إجمالي القيمة المرتبطة بالأقمشة والموديلات"}
               icon={Package}
               tone="blue"
             />
             <SummaryCard
-              title="إجمالي المدفوع"
-              value={formatCurrency(summary.total_payments)}
-              subtitle="كل الدفعات المسجلة للموردين"
+              title={isFactorySuppliersView ? "إجمالي المدفوع" : "إجمالي الأقمشة المرتبطة"}
+              value={
+                isFactorySuppliersView
+                  ? formatCurrency(summary.total_payments)
+                  : formatCount(
+                      suppliers.reduce(
+                        (acc, supplier) => acc + toNumber(supplier?.registered_fabrics_count),
+                        0,
+                      ),
+                    )
+              }
+              subtitle={
+                isFactorySuppliersView
+                  ? "كل الدفعات المسجلة للموردين"
+                  : "عدد أكواد الأقمشة المرتبطة بموردي القماش"
+              }
               icon={Wallet}
               tone="emerald"
             />
             <SummaryCard
-              title="الرصيد المستحق"
-              value={formatCurrency(summary.outstanding_balance)}
-              subtitle="المتبقي على حساب الموردين"
+              title={isFactorySuppliersView ? "الرصيد المستحق" : "المصانع المرتبطة"}
+              value={
+                isFactorySuppliersView
+                  ? formatCurrency(summary.outstanding_balance)
+                  : formatCount(
+                      suppliers.reduce(
+                        (acc, supplier) => acc + toNumber(supplier?.linked_factories_count),
+                        0,
+                      ),
+                    )
+              }
+              subtitle={
+                isFactorySuppliersView
+                  ? "المتبقي على حساب الموردين"
+                  : "إجمالي المصانع المرتبطة بموردي القماش"
+              }
               icon={CreditCard}
               tone="amber"
             />
@@ -1329,7 +1431,11 @@ export default function Suppliers() {
                                 {supplier.name}
                               </div>
                               <div className="mt-1 text-xs text-slate-500">
-                                كود المصنع: {supplier.code || "-"}
+                                {translateSupplierUiText(
+                                  getSupplierCodeLabel(supplierViewType),
+                                  locale,
+                                )}
+                                : {supplier.code || "-"}
                               </div>
                             </div>
                             <span
@@ -1344,12 +1450,25 @@ export default function Suppliers() {
                           </div>
 
                           <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600 sm:grid-cols-3">
-                            <KeyValueCompact label="الوارد" value={formatCurrency(supplier.total_deliveries)} />
-                            <KeyValueCompact label="المدفوع" value={formatCurrency(supplier.total_payments)} />
-                            <KeyValueCompact label="الرصيد" value={formatCurrency(supplier.outstanding_balance)} />
-                            <KeyValueCompact label="الكمية" value={formatCount(supplier.received_quantity)} />
-                            <KeyValueCompact label="الموديلات" value={formatCount(supplier.products_count)} />
-                            <KeyValueCompact label="الأقمشة" value={formatCount(supplier.fabrics_count)} />
+                            {isFactorySuppliersView ? (
+                              <>
+                                <KeyValueCompact label="الوارد" value={formatCurrency(supplier.total_deliveries)} />
+                                <KeyValueCompact label="المدفوع" value={formatCurrency(supplier.total_payments)} />
+                                <KeyValueCompact label="الرصيد" value={formatCurrency(supplier.outstanding_balance)} />
+                                <KeyValueCompact label="الكمية" value={formatCount(supplier.received_quantity)} />
+                                <KeyValueCompact label="الموديلات" value={formatCount(supplier.products_count)} />
+                                <KeyValueCompact label="الأقمشة" value={formatCount(supplier.fabrics_count)} />
+                              </>
+                            ) : (
+                              <>
+                                <KeyValueCompact label="الأقمشة" value={formatCount(supplier.registered_fabrics_count)} />
+                                <KeyValueCompact label="المصانع" value={formatCount(supplier.linked_factories_count)} />
+                                <KeyValueCompact label="المنتجات" value={formatCount(supplier.products_count)} />
+                                <KeyValueCompact label="الواردات" value={formatCount(supplier.deliveries_count)} />
+                                <KeyValueCompact label="الكمية" value={formatCount(supplier.received_quantity)} />
+                                <KeyValueCompact label="القيمة" value={formatCurrency(supplier.total_deliveries)} />
+                              </>
+                            )}
                           </div>
                         </button>
                       );
@@ -1400,6 +1519,7 @@ export default function Suppliers() {
                     <SupplierForm
                       form={supplierForm}
                       setForm={setSupplierForm}
+                      supplierType={supplierViewType}
                       saving={savingSupplier}
                       onSave={saveSupplier}
                     />
@@ -1412,6 +1532,7 @@ export default function Suppliers() {
               {renderDetails({
                 selectedSupplierId,
                 selectedSupplier,
+                supplierViewType,
                 detailLoading,
                 canEditProducts: canManageSuppliers,
                 startEditingSupplier,
@@ -1424,6 +1545,7 @@ export default function Suppliers() {
                 startEditingFabric,
                 saveFabric,
                 closeFabricForm,
+                relatedSuppliers,
                 deliveryForm,
                 setDeliveryForm,
                 updateDeliveryItem,
@@ -1455,6 +1577,7 @@ export default function Suppliers() {
 function renderDetails({
   selectedSupplierId,
   selectedSupplier,
+  supplierViewType,
   detailLoading,
   canEditProducts,
   startEditingSupplier,
@@ -1467,6 +1590,7 @@ function renderDetails({
   startEditingFabric,
   saveFabric,
   closeFabricForm,
+  relatedSuppliers,
   deliveryForm,
   setDeliveryForm,
   updateDeliveryItem,
@@ -1506,6 +1630,18 @@ function renderDetails({
       <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
         تعذر تحميل المورد الحالي.
       </div>
+    );
+  }
+
+  const isFactorySuppliersView = supplierViewType === "factory";
+
+  if (!isFactorySuppliersView) {
+    return (
+      <FabricSupplierDetails
+        supplier={selectedSupplier}
+        canEditProducts={canEditProducts}
+        startEditingSupplier={startEditingSupplier}
+      />
     );
   }
 
@@ -1571,6 +1707,10 @@ function renderDetails({
               label="أكواد الأقمشة المسجلة"
               value={formatCount(selectedSupplier.registered_fabrics_count)}
             />
+            <DetailLine
+              label="موردي القماش المرتبطين"
+              value={formatCount(selectedSupplier.linked_fabric_suppliers_count)}
+            />
           </div>
           {selectedSupplier.notes ? (
             <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
@@ -1614,6 +1754,7 @@ function renderDetails({
 
       <SupplierFabricsSection
         supplier={selectedSupplier}
+        fabricSuppliers={relatedSuppliers}
         showForm={showFabricForm}
         editingFabricId={editingFabricId}
         form={fabricForm}
@@ -1667,14 +1808,153 @@ function renderDetails({
 }
 
 
-function SupplierForm({ form, setForm, saving, onSave }) {
+function FabricSupplierDetails({
+  supplier,
+  canEditProducts,
+  startEditingSupplier,
+}) {
+  const linkedFabricRecords = toArray(
+    supplier?.linked_fabric_records || supplier?.fabric_records,
+  );
+  const linkedFactories = toArray(supplier?.linked_factory_suppliers);
+
+  return (
+    <>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <SummaryCard
+          title="أكواد الأقمشة المرتبطة"
+          value={formatCount(supplier.registered_fabrics_count)}
+          subtitle={`${formatCount(linkedFactories.length)} مصنع مرتبط`}
+          icon={Package}
+          tone="blue"
+        />
+        <SummaryCard
+          title="المنتجات المرتبطة"
+          value={formatCount(supplier.products_count)}
+          subtitle={`${formatCount(supplier.deliveries_count)} حركة مرتبطة`}
+          icon={Truck}
+          tone="sky"
+        />
+        <SummaryCard
+          title="القيمة المرتبطة"
+          value={formatCurrency(supplier.total_deliveries)}
+          subtitle={`إجمالي الكمية ${formatCount(supplier.received_quantity)}`}
+          icon={Wallet}
+          tone="emerald"
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <SectionCard
+          title={supplier.name}
+          subtitle={`كود مورد القماش: ${supplier.code || "-"}`}
+          action={
+            canEditProducts ? (
+              <button
+                onClick={startEditingSupplier}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                تعديل المورد
+              </button>
+            ) : null
+          }
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <DetailLine label="المسؤول" value={supplier.contact_name} />
+            <DetailLine label="الهاتف" value={supplier.phone} />
+            <DetailLine label="العنوان" value={supplier.address} />
+            <DetailLine
+              label="الحالة"
+              value={supplier.is_active !== false ? "نشط" : "مؤرشف"}
+            />
+            <DetailLine
+              label="آخر حركة مرتبطة"
+              value={formatDateTime(supplier.last_delivery_at)}
+            />
+            <DetailLine
+              label="أكواد الأقمشة"
+              value={formatCount(supplier.registered_fabrics_count)}
+            />
+          </div>
+          {supplier.notes ? (
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+              {supplier.notes}
+            </div>
+          ) : null}
+        </SectionCard>
+
+        <SectionCard
+          title="المصانع المرتبطة"
+          subtitle="المصانع التي تستخدم أكواد أقمشة مرتبطة بهذا المورد"
+        >
+          {linkedFactories.length > 0 ? (
+            <div className="space-y-3">
+              {linkedFactories.map((linkedSupplier) => (
+                <div
+                  key={linkedSupplier.id || linkedSupplier.name}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  <div className="text-sm font-semibold text-slate-900">
+                    {linkedSupplier.name || "-"}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {linkedSupplier.code ? `كود المصنع: ${linkedSupplier.code}` : "بدون كود"}
+                    {linkedSupplier.phone ? ` | ${linkedSupplier.phone}` : ""}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="لا توجد مصانع مرتبطة بهذا المورد حتى الآن." />
+          )}
+        </SectionCard>
+      </div>
+
+      <SectionCard
+        title="أكواد الأقمشة المرتبطة"
+        subtitle="كل كود قماش مربوط بهذا المورد مع المصنع صاحب الكود"
+      >
+        {linkedFabricRecords.length > 0 ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {linkedFabricRecords.map((fabric) => (
+              <div
+                key={fabric.id || `${fabric.code}-${fabric.name}`}
+                className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+              >
+                <div className="text-sm font-semibold text-slate-900">
+                  {formatSupplierFabricDisplay(fabric)}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {fabric.supplier_name
+                    ? fabric.supplier_code
+                      ? `المصنع: ${fabric.supplier_code} | ${fabric.supplier_name}`
+                      : `المصنع: ${fabric.supplier_name}`
+                    : "بدون مصنع مرتبط"}
+                </div>
+                {fabric.notes ? (
+                  <div className="mt-3 rounded-xl bg-white px-3 py-2 text-xs text-slate-600">
+                    {fabric.notes}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState text="لا توجد أكواد أقمشة مرتبطة بهذا المورد حتى الآن." />
+        )}
+      </SectionCard>
+    </>
+  );
+}
+
+function SupplierForm({ form, setForm, supplierType, saving, onSave }) {
   const { locale } = useLocale();
   if (typeof window !== "undefined") {
     return (
     <div className="space-y-3">
       <div className="grid gap-3 md:grid-cols-2">
         <TextInput label="اسم المورد" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} />
-        <TextInput label="كود المصنع" value={form.code} onChange={(value) => setForm((current) => ({ ...current, code: value }))} />
+        <TextInput label={getSupplierCodeLabel(supplierType)} value={form.code} onChange={(value) => setForm((current) => ({ ...current, code: value }))} />
         <TextInput label="اسم المسؤول" value={form.contact_name} onChange={(value) => setForm((current) => ({ ...current, contact_name: value }))} />
         <TextInput label="الهاتف" value={form.phone} onChange={(value) => setForm((current) => ({ ...current, phone: value }))} />
         <TextInput label="العنوان" value={form.address} onChange={(value) => setForm((current) => ({ ...current, address: value }))} />
@@ -1703,6 +1983,7 @@ function SupplierForm({ form, setForm, saving, onSave }) {
 
 function SupplierFabricsSection({
   supplier,
+  fabricSuppliers,
   showForm,
   editingFabricId,
   form,
@@ -1716,6 +1997,15 @@ function SupplierFabricsSection({
 }) {
   const { locale } = useLocale();
   const fabricRecords = toArray(supplier?.fabric_records);
+  const fabricSupplierOptions = [
+    { value: "", label: "بدون ربط بمورد قماش" },
+    ...toArray(fabricSuppliers).map((relatedSupplier) => ({
+      value: relatedSupplier.id,
+      label: relatedSupplier.code
+        ? `${relatedSupplier.code} | ${relatedSupplier.name}`
+        : relatedSupplier.name,
+    })),
+  ];
   const activeFabricsCount = fabricRecords.filter(
     (fabric) => fabric?.is_active !== false,
   ).length;
@@ -1792,6 +2082,16 @@ function SupplierFabricsSection({
                       value={formatDateTime(fabric.updated_at || fabric.created_at)}
                     />
                     <DetailLineCompact
+                      label="مورد القماش"
+                      value={
+                        fabric.fabric_supplier_name
+                          ? fabric.fabric_supplier_code
+                            ? `${fabric.fabric_supplier_code} | ${fabric.fabric_supplier_name}`
+                            : fabric.fabric_supplier_name
+                          : "-"
+                      }
+                    />
+                    <DetailLineCompact
                       label="الربط الحالي"
                       value={formatCount(
                         toArray(supplier?.fabric_catalog).find((group) =>
@@ -1844,6 +2144,17 @@ function SupplierFabricsSection({
                 value={form.name}
                 onChange={(value) =>
                   setForm((current) => ({ ...current, name: value }))
+                }
+              />
+              <SelectInput
+                label="مورد القماش"
+                value={form.fabric_supplier_id}
+                options={fabricSupplierOptions}
+                onChange={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    fabric_supplier_id: value,
+                  }))
                 }
               />
               <TextArea
@@ -2072,6 +2383,13 @@ function DeliveryForm({
                     {translateSupplierUiText(getLinkedScopeLabel(item), locale)}
                     {item.sku ? ` | SKU: ${item.sku}` : ""}
                     {item.fabric_code ? ` | كود القماش: ${item.fabric_code}` : ""}
+                    {selectedFabricOption?.fabric_supplier_name
+                      ? ` | مورد القماش: ${
+                          selectedFabricOption.fabric_supplier_code
+                            ? `${selectedFabricOption.fabric_supplier_code} | ${selectedFabricOption.fabric_supplier_name}`
+                            : selectedFabricOption.fabric_supplier_name
+                        }`
+                      : ""}
                     {selectedOption
                       ? ` | ${translateSupplierUiText("المخزون الحالي", locale)}: ${formatCount(selectedOption.inventory_quantity)}`
                       : ""}
@@ -2330,6 +2648,16 @@ function SupplierCatalogExplorer({ supplier }) {
                             value={formatSupplierFabricDisplay(item) || item.material || "-"}
                           />
                           <DetailLineCompact
+                            label="مورد القماش"
+                            value={
+                              item.fabric_supplier_name
+                                ? item.fabric_supplier_code
+                                  ? `${item.fabric_supplier_code} | ${item.fabric_supplier_name}`
+                                  : item.fabric_supplier_name
+                                : "-"
+                            }
+                          />
+                          <DetailLineCompact
                             label="الوصف"
                             value={item.material || "-"}
                           />
@@ -2375,6 +2703,13 @@ function SupplierCatalogExplorer({ supplier }) {
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
                         {group.fabric_code ? `كود القماش: ${group.fabric_code} | ` : ""}
+                        {group.fabric_supplier_name
+                          ? `مورد القماش: ${
+                              group.fabric_supplier_code
+                                ? `${group.fabric_supplier_code} | ${group.fabric_supplier_name}`
+                                : group.fabric_supplier_name
+                            } | `
+                          : ""}
                         {formatTextList(
                           toArray(group.measurement_units).map(
                             formatDeliveryMeasurementUnitLabel,
@@ -2513,6 +2848,14 @@ function ReceivedItemsTable({ items }) {
                     {item.fabric_name ? (
                       <div className="mt-1 text-xs text-slate-500">
                         {translateSupplierUiText("القماش", locale)}: {formatSupplierFabricDisplay(item)}
+                      </div>
+                    ) : null}
+                    {item.fabric_supplier_name ? (
+                      <div className="mt-1 text-xs text-slate-500">
+                        مورد القماش:{" "}
+                        {item.fabric_supplier_code
+                          ? `${item.fabric_supplier_code} | ${item.fabric_supplier_name}`
+                          : item.fabric_supplier_name}
                       </div>
                     ) : null}
                   </td>

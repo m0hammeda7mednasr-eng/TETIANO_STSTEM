@@ -110,7 +110,7 @@ const getPaymentStatusClassName = (status) => {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, hasPermission, loading: authLoading } = useAuth();
-  const { locale, select } = useLocale();
+  const { locale, select, isRTL } = useLocale();
 
   const isAdmin = user?.role === "admin";
   const canManageSettings = hasPermission("can_manage_settings");
@@ -637,7 +637,9 @@ export default function Dashboard() {
               <button
                 key={item.id}
                 onClick={() => navigate(item.path)}
-                className={`bg-gradient-to-r ${item.className} rounded-xl text-white p-6 text-left hover:shadow-xl transition`}
+                className={`bg-gradient-to-r ${item.className} rounded-xl p-6 text-white transition hover:shadow-xl ${
+                  isRTL ? "text-right" : "text-left"
+                }`}
               >
                 <item.icon size={28} className="mb-3" />
                 <p className="font-bold text-lg">{item.label}</p>
@@ -679,7 +681,11 @@ export default function Dashboard() {
                 <div className="overflow-x-auto">
                   <table className="data-table w-full min-w-[720px]">
                     <thead className="bg-slate-50 border-b border-slate-200">
-                      <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                      <tr
+                        className={`text-xs tracking-wide text-slate-500 ${
+                          isRTL ? "text-right" : "text-left uppercase"
+                        }`}
+                      >
                         <th className="px-5 py-3">Order</th>
                         <th className="px-5 py-3">Customer</th>
                         <th className="px-5 py-3">Total</th>

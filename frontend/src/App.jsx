@@ -100,6 +100,14 @@ function App() {
                 }
               />
               <Route
+                path="/suppliers/fabric-suppliers"
+                element={
+                  <ProtectedRoute permission="can_view_products">
+                    <Suppliers />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/products/analysis"
                 element={
                   <ProtectedRoute permission="can_view_products">

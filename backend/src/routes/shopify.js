@@ -261,6 +261,7 @@ const CUSTOMER_LIST_SELECTS = [
 ];
 const PRODUCT_SOURCING_SUPPLIER_SELECT = [
   "id",
+  "supplier_type",
   "name",
   "code",
   "phone",
@@ -276,6 +277,17 @@ const PRODUCT_SOURCING_ENTRY_SELECT = [
   "amount",
   "items",
   "created_at",
+].join(",");
+const PRODUCT_SOURCING_FABRIC_SELECT = [
+  "id",
+  "supplier_id",
+  "fabric_supplier_id",
+  "code",
+  "name",
+  "notes",
+  "is_active",
+  "created_at",
+  "updated_at",
 ].join(",");
 const PRODUCT_SORT_FIELDS = new Set([
   "created_at",
@@ -786,6 +798,7 @@ const attachProductSourcingDetail = async (product) => {
     const [
       { data: suppliers, error: suppliersError },
       { data: entries, error: entriesError },
+      { data: fabricRecords, error: fabricRecordsError },
     ] = await Promise.all([
       db
         .from("suppliers")
@@ -796,6 +809,10 @@ const attachProductSourcingDetail = async (product) => {
         .select(PRODUCT_SOURCING_ENTRY_SELECT)
         .eq("store_id", storeId)
         .eq("entry_type", "delivery"),
+      db
+        .from("supplier_fabrics")
+        .select(PRODUCT_SOURCING_FABRIC_SELECT)
+        .eq("store_id", storeId),
     ]);
 
     if (suppliersError) {
@@ -804,6 +821,9 @@ const attachProductSourcingDetail = async (product) => {
     if (entriesError) {
       throw entriesError;
     }
+    if (fabricRecordsError) {
+      throw fabricRecordsError;
+    }
 
     return {
       ...product,
@@ -811,6 +831,7 @@ const attachProductSourcingDetail = async (product) => {
         product,
         suppliers || [],
         entries || [],
+        fabricRecords || [],
       ),
     };
   } catch (error) {

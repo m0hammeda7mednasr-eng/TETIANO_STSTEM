@@ -1,10 +1,12 @@
 export const SUPPLIER_ENTRY_TYPES = new Set(["delivery", "payment", "adjustment"]);
+export const SUPPLIER_TYPES = new Set(["factory", "fabric"]);
 
 const PAYMENT_METHOD_FALLBACK = "bank_transfer";
 const DELIVERY_ITEM_TYPE_FALLBACK = "model";
 const DELIVERY_ITEM_TYPES = new Set(["model", "fabric"]);
 const DELIVERY_MEASUREMENT_UNIT_FALLBACK = "piece";
 const DELIVERY_MEASUREMENT_UNITS = new Set(["piece", "meter", "kilo"]);
+const SUPPLIER_TYPE_FALLBACK = "factory";
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -12,6 +14,11 @@ const toNumber = (value) => {
 };
 
 const normalizeText = (value) => String(value || "").trim();
+
+export const normalizeSupplierType = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  return SUPPLIER_TYPES.has(normalized) ? normalized : SUPPLIER_TYPE_FALLBACK;
+};
 
 const roundCurrency = (value) =>
   Math.round((toNumber(value) + Number.EPSILON) * 100) / 100;
@@ -276,6 +283,7 @@ const normalizeDeliveryItem = (item = {}) => {
     variant_title: normalizeText(item?.variant_title),
     fabric_id: normalizeText(item?.fabric_id),
     fabric_code: normalizeText(item?.fabric_code),
+    fabric_supplier_id: normalizeText(item?.fabric_supplier_id),
     product_name: productName,
     sku: normalizeText(item?.sku),
     material: normalizeText(item?.material),
@@ -315,6 +323,7 @@ const parseItemsField = (value) => {
 };
 
 export const sanitizeSupplierPayload = (payload = {}) => ({
+  supplier_type: normalizeSupplierType(payload.supplier_type),
   code: normalizeText(payload.code),
   name: normalizeText(payload.name),
   contact_name: normalizeText(payload.contact_name),
@@ -326,6 +335,7 @@ export const sanitizeSupplierPayload = (payload = {}) => ({
 });
 
 export const sanitizeFabricPayload = (payload = {}) => ({
+  fabric_supplier_id: normalizeText(payload.fabric_supplier_id),
   code: normalizeText(payload.code),
   name: normalizeText(payload.name || payload.fabric_name),
   notes: normalizeText(payload.notes),
@@ -389,10 +399,29 @@ const normalizeEntry = (entry = {}) => ({
     ),
 });
 
+const normalizeSupplierRecord = (supplier = {}) => ({
+  ...supplier,
+  id: normalizeText(supplier?.id),
+  store_id: normalizeText(supplier?.store_id),
+  supplier_type: normalizeSupplierType(supplier?.supplier_type),
+  code: normalizeText(supplier?.code),
+  name: normalizeText(supplier?.name),
+  contact_name: normalizeText(supplier?.contact_name),
+  phone: normalizeText(supplier?.phone),
+  address: normalizeText(supplier?.address),
+  notes: normalizeText(supplier?.notes),
+  opening_balance: roundCurrency(supplier?.opening_balance),
+  is_active: supplier?.is_active !== false,
+  created_by: normalizeText(supplier?.created_by),
+  created_at: normalizeText(supplier?.created_at),
+  updated_at: normalizeText(supplier?.updated_at),
+});
+
 const normalizeFabricRecord = (record = {}) => ({
   id: normalizeText(record?.id),
   supplier_id: normalizeText(record?.supplier_id),
   store_id: normalizeText(record?.store_id),
+  fabric_supplier_id: normalizeText(record?.fabric_supplier_id),
   code: normalizeText(record?.code),
   name: normalizeText(record?.name || record?.fabric_name),
   notes: normalizeText(record?.notes),
@@ -402,12 +431,46 @@ const normalizeFabricRecord = (record = {}) => ({
   updated_at: normalizeText(record?.updated_at),
 });
 
+const buildSupplierLookup = (suppliers = []) =>
+  new Map(
+    (suppliers || [])
+      .map(normalizeSupplierRecord)
+      .filter((supplier) => supplier.id)
+      .map((supplier) => [supplier.id, supplier]),
+  );
+
+const decorateFabricRecord = (record = {}, supplierLookup = new Map()) => {
+  const normalizedRecord = normalizeFabricRecord(record);
+  const fabricSupplier = normalizedRecord.fabric_supplier_id
+    ? supplierLookup.get(normalizedRecord.fabric_supplier_id) || null
+    : null;
+  const factorySupplier = normalizedRecord.supplier_id
+    ? supplierLookup.get(normalizedRecord.supplier_id) || null
+    : null;
+
+  return {
+    ...normalizedRecord,
+    supplier_name: normalizeText(factorySupplier?.name),
+    supplier_code: normalizeText(factorySupplier?.code),
+    fabric_supplier_name: normalizeText(fabricSupplier?.name),
+    fabric_supplier_code: normalizeText(fabricSupplier?.code),
+  };
+};
+
 const buildFabricReferenceMaps = (fabricRecords = []) => {
   const byId = new Map();
   const byCode = new Map();
   const byName = new Map();
 
-  for (const record of (fabricRecords || []).map(normalizeFabricRecord)) {
+  for (const fabricRecord of fabricRecords || []) {
+    const record = {
+      ...fabricRecord,
+      ...normalizeFabricRecord(fabricRecord),
+      supplier_name: normalizeText(fabricRecord?.supplier_name),
+      supplier_code: normalizeText(fabricRecord?.supplier_code),
+      fabric_supplier_name: normalizeText(fabricRecord?.fabric_supplier_name),
+      fabric_supplier_code: normalizeText(fabricRecord?.fabric_supplier_code),
+    };
     if (record.id) {
       byId.set(record.id, record);
     }
@@ -456,6 +519,9 @@ const mergeFabricCatalogWithRecords = (fabricCatalog = [], fabricRecords = []) =
       fabric_id: normalizeText(group?.fabric_id),
       fabric_code: normalizeText(group?.fabric_code),
       fabric_name: normalizeText(group?.fabric_name),
+      fabric_supplier_id: normalizeText(group?.fabric_supplier_id),
+      fabric_supplier_name: normalizeText(group?.fabric_supplier_name),
+      fabric_supplier_code: normalizeText(group?.fabric_supplier_code),
       notes: normalizeText(group?.notes),
       is_active: group?.is_active !== false,
     };
@@ -475,11 +541,17 @@ const mergeFabricCatalogWithRecords = (fabricCatalog = [], fabricRecords = []) =
       .find(Boolean);
 
     const nextGroup = existingGroup
-      ? {
+        ? {
           ...existingGroup,
           fabric_id: existingGroup.fabric_id || record.id,
           fabric_code: existingGroup.fabric_code || record.code,
           fabric_name: existingGroup.fabric_name || record.name,
+          fabric_supplier_id:
+            existingGroup.fabric_supplier_id || record.fabric_supplier_id,
+          fabric_supplier_name:
+            existingGroup.fabric_supplier_name || record.fabric_supplier_name,
+          fabric_supplier_code:
+            existingGroup.fabric_supplier_code || record.fabric_supplier_code,
           notes: existingGroup.notes || record.notes,
           is_active: record.is_active,
         }
@@ -488,6 +560,9 @@ const mergeFabricCatalogWithRecords = (fabricCatalog = [], fabricRecords = []) =
           fabric_id: record.id,
           fabric_code: record.code,
           fabric_name: record.name,
+          fabric_supplier_id: record.fabric_supplier_id,
+          fabric_supplier_name: record.fabric_supplier_name,
+          fabric_supplier_code: record.fabric_supplier_code,
           total_quantity: 0,
           total_cost: 0,
           last_delivery_at: null,
@@ -606,6 +681,9 @@ const buildItemRelations = (items = []) => {
           fabric_id: normalizedItem.fabric_id || null,
           fabric_code: normalizedItem.fabric_code || "",
           fabric_name: fabricLabel,
+          fabric_supplier_id: normalizeText(normalizedItem.fabric_supplier_id),
+          fabric_supplier_name: normalizeText(normalizedItem.fabric_supplier_name),
+          fabric_supplier_code: normalizeText(normalizedItem.fabric_supplier_code),
           total_quantity: 0,
           total_cost: 0,
           last_delivery_at: null,
@@ -622,6 +700,15 @@ const buildItemRelations = (items = []) => {
       fabricGroup.fabric_id = fabricGroup.fabric_id || normalizedItem.fabric_id || null;
       fabricGroup.fabric_code =
         fabricGroup.fabric_code || normalizedItem.fabric_code || "";
+      fabricGroup.fabric_supplier_id =
+        fabricGroup.fabric_supplier_id ||
+        normalizeText(normalizedItem.fabric_supplier_id);
+      fabricGroup.fabric_supplier_name =
+        fabricGroup.fabric_supplier_name ||
+        normalizeText(normalizedItem.fabric_supplier_name);
+      fabricGroup.fabric_supplier_code =
+        fabricGroup.fabric_supplier_code ||
+        normalizeText(normalizedItem.fabric_supplier_code);
       fabricGroup.total_quantity += quantity;
       fabricGroup.total_cost = roundCurrency(fabricGroup.total_cost + totalCost);
       fabricGroup.measurement_units.add(normalizedItem.measurement_unit);
@@ -693,6 +780,9 @@ const buildItemRelations = (items = []) => {
       fabric_id: group.fabric_id,
       fabric_code: group.fabric_code,
       fabric_name: group.fabric_name,
+      fabric_supplier_id: group.fabric_supplier_id,
+      fabric_supplier_name: group.fabric_supplier_name,
+      fabric_supplier_code: group.fabric_supplier_code,
       total_quantity: roundCurrency(group.total_quantity),
       total_cost: roundCurrency(group.total_cost),
       last_delivery_at: group.last_delivery_at,
@@ -734,9 +824,35 @@ const buildItemRelations = (items = []) => {
   };
 };
 
-const buildSupplierSummary = (supplier, entries = [], fabricRecords = []) => {
-  const normalizedEntries = (entries || []).map(normalizeEntry);
-  const normalizedFabricRecords = (fabricRecords || []).map(normalizeFabricRecord);
+const sortSuppliersByName = (suppliers = []) =>
+  [...suppliers].sort((left, right) => {
+    const leftActive = left?.is_active !== false ? 1 : 0;
+    const rightActive = right?.is_active !== false ? 1 : 0;
+    if (leftActive !== rightActive) {
+      return rightActive - leftActive;
+    }
+
+    return String(left?.name || "").localeCompare(String(right?.name || ""), "ar");
+  });
+
+const buildFactorySupplierSummary = (
+  supplier,
+  entries = [],
+  fabricRecords = [],
+  supplierLookup = new Map(),
+) => {
+  const normalizedEntries = (entries || [])
+    .map(normalizeEntry)
+    .filter(
+      (entry) =>
+        normalizeText(entry?.supplier_id) === normalizeText(supplier?.id),
+    );
+  const normalizedFabricRecords = (fabricRecords || [])
+    .filter(
+      (record) =>
+        normalizeText(record?.supplier_id) === normalizeText(supplier?.id),
+    )
+    .map((record) => decorateFabricRecord(record, supplierLookup));
   const fabricReferenceMaps = buildFabricReferenceMaps(normalizedFabricRecords);
   const deliveryEntries = normalizedEntries.filter(
     (entry) => entry.entry_type === "delivery",
@@ -769,10 +885,17 @@ const buildSupplierSummary = (supplier, entries = [], fabricRecords = []) => {
         fabric_id: normalizeText(item?.fabric_id || linkedFabricRecord?.id),
         fabric_code: normalizeText(item?.fabric_code || linkedFabricRecord?.code),
         fabric_name: normalizeText(item?.fabric_name || linkedFabricRecord?.name),
+        fabric_supplier_id: normalizeText(
+          item?.fabric_supplier_id || linkedFabricRecord?.fabric_supplier_id,
+        ),
+        fabric_supplier_name: normalizeText(linkedFabricRecord?.fabric_supplier_name),
+        fabric_supplier_code: normalizeText(linkedFabricRecord?.fabric_supplier_code),
         delivery_id: entry.id,
         entry_date: entry.entry_date,
         reference_code: entry.reference_code || "",
         supplier_id: supplier?.id || null,
+        supplier_name: normalizeText(supplier?.name),
+        supplier_code: normalizeText(supplier?.code),
       };
     }),
   );
@@ -789,6 +912,17 @@ const buildSupplierSummary = (supplier, entries = [], fabricRecords = []) => {
   const outstandingBalance = roundCurrency(
     openingBalance + totalDeliveries + totalAdjustments - totalPayments,
   );
+  const linkedFabricSuppliers = sortSuppliersByName(
+    Array.from(
+      new Set(
+        normalizedFabricRecords
+          .map((record) => normalizeText(record?.fabric_supplier_id))
+          .filter(Boolean),
+      ),
+    )
+      .map((supplierId) => supplierLookup.get(supplierId))
+      .filter(Boolean),
+  );
 
   return {
     ...itemRelations,
@@ -796,6 +930,8 @@ const buildSupplierSummary = (supplier, entries = [], fabricRecords = []) => {
     fabrics_count: mergedFabricCatalog.length,
     fabric_records: normalizedFabricRecords,
     registered_fabrics_count: normalizedFabricRecords.length,
+    linked_fabric_suppliers: linkedFabricSuppliers,
+    linked_fabric_suppliers_count: linkedFabricSuppliers.length,
     opening_balance: openingBalance,
     total_deliveries: totalDeliveries,
     total_payments: totalPayments,
@@ -813,24 +949,169 @@ const buildSupplierSummary = (supplier, entries = [], fabricRecords = []) => {
   };
 };
 
-export const buildSupplierList = (suppliers = [], entries = [], fabricRecords = []) =>
+const buildFabricSupplierSummary = (
+  supplier,
+  entries = [],
+  fabricRecords = [],
+  supplierLookup = new Map(),
+) => {
+  const normalizedEntries = (entries || []).map(normalizeEntry);
+  const normalizedFabricRecords = (fabricRecords || []).map((record) =>
+    decorateFabricRecord(record, supplierLookup),
+  );
+  const linkedFabricRecords = normalizedFabricRecords.filter(
+    (record) => normalizeText(record?.fabric_supplier_id) === normalizeText(supplier?.id),
+  );
+  const fabricReferenceMaps = buildFabricReferenceMaps(linkedFabricRecords);
+  const deliveryEntries = normalizedEntries.filter(
+    (entry) => entry.entry_type === "delivery",
+  );
+  const receivedItems = deliveryEntries.flatMap((entry) => {
+    const factorySupplier = supplierLookup.get(normalizeText(entry?.supplier_id)) || null;
+
+    return (entry.items || [])
+      .map((item) => {
+        const linkedFabricRecord = resolveFabricRecordForItem(
+          item,
+          fabricReferenceMaps,
+        );
+        if (!linkedFabricRecord) {
+          return null;
+        }
+
+        return {
+          ...item,
+          fabric_id: normalizeText(item?.fabric_id || linkedFabricRecord?.id),
+          fabric_code: normalizeText(item?.fabric_code || linkedFabricRecord?.code),
+          fabric_name: normalizeText(item?.fabric_name || linkedFabricRecord?.name),
+          fabric_supplier_id: normalizeText(
+            linkedFabricRecord?.fabric_supplier_id || supplier?.id,
+          ),
+          fabric_supplier_name: normalizeText(
+            linkedFabricRecord?.fabric_supplier_name || supplier?.name,
+          ),
+          fabric_supplier_code: normalizeText(
+            linkedFabricRecord?.fabric_supplier_code || supplier?.code,
+          ),
+          supplier_id: normalizeText(
+            factorySupplier?.id || linkedFabricRecord?.supplier_id || entry?.supplier_id,
+          ),
+          supplier_name: normalizeText(
+            factorySupplier?.name || linkedFabricRecord?.supplier_name,
+          ),
+          supplier_code: normalizeText(
+            factorySupplier?.code || linkedFabricRecord?.supplier_code,
+          ),
+          delivery_id: entry.id,
+          entry_date: entry.entry_date,
+          reference_code: entry.reference_code || "",
+        };
+      })
+      .filter(Boolean);
+  });
+  const matchedDeliveryIds = new Set(
+    receivedItems.map((item) => normalizeText(item?.delivery_id)).filter(Boolean),
+  );
+  const relatedEntries = normalizedEntries.filter((entry) =>
+    matchedDeliveryIds.has(normalizeText(entry?.id)),
+  );
+  const totalReceivedQuantity = receivedItems.reduce(
+    (sum, item) => sum + toNumber(item.quantity),
+    0,
+  );
+  const totalDeliveries = roundCurrency(
+    receivedItems.reduce((sum, item) => sum + toNumber(item.total_cost), 0),
+  );
+  const itemRelations = buildItemRelations(receivedItems);
+  const mergedFabricCatalog = mergeFabricCatalogWithRecords(
+    itemRelations.fabric_catalog,
+    linkedFabricRecords,
+  );
+  const linkedFactorySuppliers = sortSuppliersByName(
+    Array.from(
+      new Set(
+        [
+          ...linkedFabricRecords.map((record) => normalizeText(record?.supplier_id)),
+          ...receivedItems.map((item) => normalizeText(item?.supplier_id)),
+        ].filter(Boolean),
+      ),
+    )
+      .map((supplierId) => supplierLookup.get(supplierId))
+      .filter(Boolean),
+  );
+  const openingBalance = roundCurrency(supplier?.opening_balance);
+
+  return {
+    ...itemRelations,
+    fabric_catalog: mergedFabricCatalog,
+    fabrics_count: mergedFabricCatalog.length,
+    fabric_records: linkedFabricRecords,
+    linked_fabric_records: linkedFabricRecords,
+    registered_fabrics_count: linkedFabricRecords.length,
+    linked_factory_suppliers: linkedFactorySuppliers,
+    linked_factories_count: linkedFactorySuppliers.length,
+    linked_fabric_suppliers: [],
+    linked_fabric_suppliers_count: 0,
+    opening_balance: openingBalance,
+    total_deliveries: totalDeliveries,
+    total_payments: 0,
+    total_adjustments: 0,
+    outstanding_balance: roundCurrency(openingBalance + totalDeliveries),
+    deliveries_count: matchedDeliveryIds.size,
+    payments_count: 0,
+    received_items_count: receivedItems.length,
+    received_quantity: totalReceivedQuantity,
+    last_delivery_at: relatedEntries[0]?.entry_date || null,
+    last_payment_at: null,
+    received_items: receivedItems,
+    payments: [],
+    entries: relatedEntries,
+  };
+};
+
+const buildSupplierSummary = (
+  supplier,
+  entries = [],
+  fabricRecords = [],
+  supplierRecords = [],
+) => {
+  const normalizedSupplier = normalizeSupplierRecord(supplier);
+  const supplierLookup = buildSupplierLookup(supplierRecords);
+
+  if (normalizedSupplier.supplier_type === "fabric") {
+    return buildFabricSupplierSummary(
+      normalizedSupplier,
+      entries,
+      fabricRecords,
+      supplierLookup,
+    );
+  }
+
+  return buildFactorySupplierSummary(
+    normalizedSupplier,
+    entries,
+    fabricRecords,
+    supplierLookup,
+  );
+};
+
+export const buildSupplierList = (
+  suppliers = [],
+  entries = [],
+  fabricRecords = [],
+  supplierRecords = [],
+) =>
   (suppliers || [])
     .map((supplier) => {
-      const supplierEntries = (entries || []).filter(
-        (entry) => String(entry?.supplier_id || "").trim() === String(supplier?.id || "").trim(),
-      );
-      const supplierFabricRecords = (fabricRecords || []).filter(
-        (record) =>
-          String(record?.supplier_id || "").trim() === String(supplier?.id || "").trim(),
-      );
       const summary = buildSupplierSummary(
         supplier,
-        supplierEntries,
-        supplierFabricRecords,
+        entries,
+        fabricRecords,
+        supplierRecords.length > 0 ? supplierRecords : suppliers,
       );
 
       return {
-        ...supplier,
+        ...normalizeSupplierRecord(supplier),
         ...summary,
         entries: undefined,
         payments: undefined,
@@ -838,6 +1119,9 @@ export const buildSupplierList = (suppliers = [], entries = [], fabricRecords = 
         product_catalog: undefined,
         fabric_catalog: undefined,
         fabric_records: undefined,
+        linked_fabric_records: undefined,
+        linked_factory_suppliers: undefined,
+        linked_fabric_suppliers: undefined,
       };
     })
     .sort((left, right) => {
@@ -850,7 +1134,12 @@ export const buildSupplierList = (suppliers = [], entries = [], fabricRecords = 
       return String(left?.name || "").localeCompare(String(right?.name || ""), "ar");
     });
 
-export const buildSupplierDetail = (supplier, entries = [], fabricRecords = []) => {
+export const buildSupplierDetail = (
+  supplier,
+  entries = [],
+  fabricRecords = [],
+  supplierRecords = [],
+) => {
   const normalizedEntries = (entries || [])
     .map(normalizeEntry)
     .sort((left, right) => {
@@ -864,12 +1153,13 @@ export const buildSupplierDetail = (supplier, entries = [], fabricRecords = []) 
     supplier,
     normalizedEntries,
     fabricRecords,
+    supplierRecords.length > 0 ? supplierRecords : [supplier],
   );
 
   return {
-    ...supplier,
+    ...normalizeSupplierRecord(supplier),
     ...summary,
-    entries: normalizedEntries,
+    entries: summary.entries,
     payments: summary.payments,
     received_items: summary.received_items,
   };
@@ -903,6 +1193,7 @@ export const buildProductSourcingDetail = (
   product = {},
   suppliers = [],
   entries = [],
+  fabricRecords = [],
 ) => {
   const reference = {
     product_ids: new Set(
@@ -920,32 +1211,58 @@ export const buildProductSourcingDetail = (
     ),
     product_name: normalizeText(product?.title).toLowerCase(),
   };
-  const supplierMap = new Map(
-    (suppliers || []).map((supplier) => [normalizeText(supplier?.id), supplier]),
+  const supplierMap = buildSupplierLookup(suppliers);
+  const normalizedFabricRecords = (fabricRecords || []).map((record) =>
+    decorateFabricRecord(record, supplierMap),
   );
+  const fabricReferenceMaps = buildFabricReferenceMaps(normalizedFabricRecords);
   const normalizedEntries = (entries || [])
     .map(normalizeEntry)
     .filter((entry) => entry.entry_type === "delivery");
   const matchedItems = [];
   const matchedDeliveries = [];
-  const supplierGroups = new Map();
+  const factorySupplierGroups = new Map();
+  const fabricSupplierGroups = new Map();
 
   for (const entry of normalizedEntries) {
     const supplierId = normalizeText(entry?.supplier_id);
     const supplier = supplierMap.get(supplierId) || null;
     const deliveryItems = (entry.items || [])
       .filter((item) => matchesProductReference(item, reference))
-      .map((item) => ({
-        ...item,
-        supplier_id: supplierId || null,
-        supplier_name: normalizeText(supplier?.name),
-        supplier_code: normalizeText(supplier?.code),
-        supplier_phone: normalizeText(supplier?.phone),
-        delivery_id: entry.id,
-        entry_date: entry.entry_date,
-        reference_code: entry.reference_code || "",
-        description: entry.description || "",
-      }));
+      .map((item) => {
+        const linkedFabricRecord = resolveFabricRecordForItem(
+          item,
+          fabricReferenceMaps,
+        );
+        const fabricSupplierId = normalizeText(
+          linkedFabricRecord?.fabric_supplier_id || item?.fabric_supplier_id,
+        );
+        const fabricSupplier = fabricSupplierId
+          ? supplierMap.get(fabricSupplierId) || null
+          : null;
+
+        return {
+          ...item,
+          fabric_id: normalizeText(item?.fabric_id || linkedFabricRecord?.id),
+          fabric_code: normalizeText(item?.fabric_code || linkedFabricRecord?.code),
+          fabric_name: normalizeText(item?.fabric_name || linkedFabricRecord?.name),
+          fabric_supplier_id: fabricSupplierId || null,
+          fabric_supplier_name: normalizeText(
+            linkedFabricRecord?.fabric_supplier_name || fabricSupplier?.name,
+          ),
+          fabric_supplier_code: normalizeText(
+            linkedFabricRecord?.fabric_supplier_code || fabricSupplier?.code,
+          ),
+          supplier_id: supplierId || null,
+          supplier_name: normalizeText(supplier?.name),
+          supplier_code: normalizeText(supplier?.code),
+          supplier_phone: normalizeText(supplier?.phone),
+          delivery_id: entry.id,
+          entry_date: entry.entry_date,
+          reference_code: entry.reference_code || "",
+          description: entry.description || "",
+        };
+      });
 
     if (deliveryItems.length === 0) {
       continue;
@@ -975,8 +1292,8 @@ export const buildProductSourcingDetail = (
 
       const supplierGroupKey =
         supplierId || `supplier:${normalizeText(supplier?.name || item.supplier_name)}`;
-      if (!supplierGroups.has(supplierGroupKey)) {
-        supplierGroups.set(supplierGroupKey, {
+      if (!factorySupplierGroups.has(supplierGroupKey)) {
+        factorySupplierGroups.set(supplierGroupKey, {
           supplier_id: supplierId || null,
           name: normalizeText(supplier?.name || item.supplier_name),
           code: normalizeText(supplier?.code || item.supplier_code),
@@ -994,7 +1311,7 @@ export const buildProductSourcingDetail = (
         });
       }
 
-      const supplierGroup = supplierGroups.get(supplierGroupKey);
+      const supplierGroup = factorySupplierGroups.get(supplierGroupKey);
       supplierGroup.total_quantity += toNumber(item.quantity);
       supplierGroup.total_cost = roundCurrency(
         supplierGroup.total_cost + toNumber(item.total_cost),
@@ -1019,16 +1336,100 @@ export const buildProductSourcingDetail = (
         supplierGroup.variants.add(item.variant_title);
       }
       supplierGroup.items.push(item);
+
+      const fabricSupplierId = normalizeText(item?.fabric_supplier_id);
+      const fabricSupplierName = normalizeText(item?.fabric_supplier_name);
+      if (fabricSupplierId || fabricSupplierName) {
+        const fabricSupplierGroupKey =
+          fabricSupplierId || `fabric-supplier:${fabricSupplierName.toLowerCase()}`;
+        if (!fabricSupplierGroups.has(fabricSupplierGroupKey)) {
+          fabricSupplierGroups.set(fabricSupplierGroupKey, {
+            supplier_id: fabricSupplierId || null,
+            name: fabricSupplierName,
+            code: normalizeText(item?.fabric_supplier_code),
+            is_active:
+              fabricSupplierId && supplierMap.has(fabricSupplierId)
+                ? supplierMap.get(fabricSupplierId)?.is_active !== false
+                : true,
+            total_quantity: 0,
+            total_cost: 0,
+            last_delivery_at: null,
+            delivery_ids: new Set(),
+            fabrics: new Set(),
+            materials: new Set(),
+            colors: new Set(),
+            variants: new Set(),
+            items: [],
+          });
+        }
+
+        const fabricSupplierGroup = fabricSupplierGroups.get(fabricSupplierGroupKey);
+        fabricSupplierGroup.total_quantity += toNumber(item.quantity);
+        fabricSupplierGroup.total_cost = roundCurrency(
+          fabricSupplierGroup.total_cost + toNumber(item.total_cost),
+        );
+        fabricSupplierGroup.delivery_ids.add(item.delivery_id || fabricSupplierGroupKey);
+        if (
+          item.entry_date &&
+          (!fabricSupplierGroup.last_delivery_at ||
+            item.entry_date > fabricSupplierGroup.last_delivery_at)
+        ) {
+          fabricSupplierGroup.last_delivery_at = item.entry_date;
+        }
+        if (getItemFabricLabel(item)) {
+          fabricSupplierGroup.fabrics.add(getItemFabricLabel(item));
+        }
+        if (item.material) {
+          fabricSupplierGroup.materials.add(item.material);
+        }
+        if (item.color) {
+          fabricSupplierGroup.colors.add(item.color);
+        }
+        if (item.variant_title) {
+          fabricSupplierGroup.variants.add(item.variant_title);
+        }
+        fabricSupplierGroup.items.push(item);
+      }
     }
   }
 
   const itemRelations = buildItemRelations(matchedItems);
-  const supplierList = Array.from(supplierGroups.values())
+  const supplierList = Array.from(factorySupplierGroups.values())
     .map((group) => ({
       supplier_id: group.supplier_id,
       name: group.name,
       code: group.code,
       phone: group.phone,
+      is_active: group.is_active,
+      total_quantity: roundCurrency(group.total_quantity),
+      total_cost: roundCurrency(group.total_cost),
+      last_delivery_at: group.last_delivery_at,
+      deliveries_count: group.delivery_ids.size,
+      fabrics: toUniqueSortedList(Array.from(group.fabrics)),
+      materials: toUniqueSortedList(Array.from(group.materials)),
+      colors: toUniqueSortedList(Array.from(group.colors)),
+      variants: toUniqueSortedList(Array.from(group.variants)),
+      items: [...group.items].sort((left, right) => {
+        const rightTime = new Date(
+          right.entry_date || right.created_at || 0,
+        ).getTime();
+        const leftTime = new Date(left.entry_date || left.created_at || 0).getTime();
+        return rightTime - leftTime;
+      }),
+    }))
+    .sort((left, right) => {
+      const rightTime = new Date(right.last_delivery_at || 0).getTime();
+      const leftTime = new Date(left.last_delivery_at || 0).getTime();
+      if (rightTime !== leftTime) {
+        return rightTime - leftTime;
+      }
+      return String(left.name || "").localeCompare(String(right.name || ""), "ar");
+    });
+  const fabricSupplierList = Array.from(fabricSupplierGroups.values())
+    .map((group) => ({
+      supplier_id: group.supplier_id,
+      name: group.name,
+      code: group.code,
       is_active: group.is_active,
       total_quantity: roundCurrency(group.total_quantity),
       total_cost: roundCurrency(group.total_cost),
@@ -1072,11 +1473,14 @@ export const buildProductSourcingDetail = (
     product_id: normalizeText(product?.id) || null,
     product_name: normalizeText(product?.title),
     supplier_count: supplierList.length,
+    fabric_supplier_count: fabricSupplierList.length,
     total_quantity: roundCurrency(totalQuantity),
     total_cost: roundCurrency(totalCost),
     deliveries_count: deliveries.length,
     last_delivery_at: deliveries[0]?.entry_date || null,
     suppliers: supplierList,
+    factory_suppliers: supplierList,
+    fabric_suppliers: fabricSupplierList,
     fabrics: itemRelations.fabric_catalog,
     variants: itemRelations.product_catalog,
     deliveries,

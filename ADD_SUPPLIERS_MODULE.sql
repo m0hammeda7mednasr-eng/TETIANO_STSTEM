@@ -3,6 +3,7 @@ create extension if not exists pgcrypto;
 create table if not exists public.suppliers (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null,
+  supplier_type text not null default 'factory' check (supplier_type in ('factory', 'fabric')),
   code text default '',
   name text not null,
   contact_name text default '',
@@ -38,6 +39,7 @@ create table if not exists public.supplier_fabrics (
   id uuid primary key default gen_random_uuid(),
   supplier_id uuid not null references public.suppliers(id) on delete cascade,
   store_id uuid not null,
+  fabric_supplier_id uuid null references public.suppliers(id) on delete set null,
   code text default '',
   name text not null,
   notes text default '',
@@ -47,17 +49,41 @@ create table if not exists public.supplier_fabrics (
   updated_at timestamptz not null default now()
 );
 
+alter table if exists public.suppliers
+  add column if not exists supplier_type text not null default 'factory';
+
+alter table if exists public.supplier_fabrics
+  add column if not exists fabric_supplier_id uuid null;
+
 create index if not exists idx_suppliers_store_id on public.suppliers(store_id);
+create index if not exists idx_suppliers_supplier_type on public.suppliers(supplier_type);
 create index if not exists idx_suppliers_name on public.suppliers(name);
 create index if not exists idx_supplier_entries_store_id on public.supplier_entries(store_id);
 create index if not exists idx_supplier_entries_supplier_id on public.supplier_entries(supplier_id);
 create index if not exists idx_supplier_entries_entry_date on public.supplier_entries(entry_date desc);
 create index if not exists idx_supplier_fabrics_store_id on public.supplier_fabrics(store_id);
 create index if not exists idx_supplier_fabrics_supplier_id on public.supplier_fabrics(supplier_id);
+create index if not exists idx_supplier_fabrics_fabric_supplier_id on public.supplier_fabrics(fabric_supplier_id);
 create index if not exists idx_supplier_fabrics_name on public.supplier_fabrics(name);
 create unique index if not exists idx_supplier_fabrics_supplier_code_unique
   on public.supplier_fabrics(supplier_id, code)
   where nullif(btrim(code), '') is not null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'supplier_fabrics_fabric_supplier_id_fkey'
+  ) then
+    alter table public.supplier_fabrics
+      add constraint supplier_fabrics_fabric_supplier_id_fkey
+      foreign key (fabric_supplier_id)
+      references public.suppliers(id)
+      on delete set null;
+  end if;
+end;
+$$;
 
 create or replace function public.set_updated_at()
 returns trigger

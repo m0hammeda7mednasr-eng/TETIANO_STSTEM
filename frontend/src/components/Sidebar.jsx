@@ -74,8 +74,20 @@ const buildSharedNav = (t, select) => [
       },
       {
         icon: Truck,
-        label: t("sidebar.suppliers", "Suppliers"),
+        label: t(
+          "sidebar.suppliers",
+          select("موردو المصانع", "Factory Suppliers"),
+        ),
         path: "/suppliers",
+        permission: "can_view_products",
+      },
+      {
+        icon: Truck,
+        label: t(
+          "sidebar.fabricSuppliers",
+          select("موردو القماش", "Fabric Suppliers"),
+        ),
+        path: "/suppliers/fabric-suppliers",
         permission: "can_view_products",
       },
       {
@@ -217,6 +229,8 @@ const isPathActive = (pathname, itemPath) => {
       );
     case "/suppliers":
       return pathname === "/suppliers";
+    case "/suppliers/fabric-suppliers":
+      return pathname === "/suppliers/fabric-suppliers";
     case "/suppliers/fabric-models":
       return pathname === "/suppliers/fabric-models";
     default:
@@ -330,14 +344,15 @@ export default function Sidebar() {
       );
     }
 
-    return (
-      <SidebarPrimaryItem
-        key={entry.path}
-        item={entry}
-        isActive={isPathActive(location.pathname, entry.path)}
-        onClick={handleItemClick}
-      />
-    );
+      return (
+        <SidebarPrimaryItem
+          key={entry.path}
+          item={entry}
+          isActive={isPathActive(location.pathname, entry.path)}
+          onClick={handleItemClick}
+          isRTL={isRTL}
+        />
+      );
   };
 
   const mobileButtonPosition = isRTL ? "right-4" : "left-4";
@@ -406,6 +421,7 @@ export default function Sidebar() {
                   item={item}
                   isActive={isPathActive(location.pathname, item.path)}
                   onClick={handleItemClick}
+                  isRTL={isRTL}
                 />
               ))}
             </NavSection>
@@ -422,6 +438,7 @@ export default function Sidebar() {
                   item={item}
                   isActive={isPathActive(location.pathname, item.path)}
                   onClick={handleItemClick}
+                  isRTL={isRTL}
                 />
               ))}
             </NavSection>
@@ -460,7 +477,7 @@ export default function Sidebar() {
   );
 }
 
-function SidebarPrimaryItem({ item, isActive, onClick }) {
+function SidebarPrimaryItem({ item, isActive, onClick, isRTL }) {
   return (
     <Link
       to={item.path}
@@ -469,9 +486,13 @@ function SidebarPrimaryItem({ item, isActive, onClick }) {
         isActive
           ? "border-sky-500/60 bg-sky-700/30 shadow-lg shadow-sky-900/30"
           : "border-slate-800 bg-slate-900/70 hover:bg-slate-800/90"
-      }`}
+      } ${isRTL ? "flex-row-reverse text-right" : "text-left"}`}
     >
-      <div className="flex min-w-0 items-center gap-3">
+      <div
+        className={`flex min-w-0 items-center gap-3 ${
+          isRTL ? "flex-row-reverse text-right" : "text-left"
+        }`}
+      >
         <div
           className={`flex h-10 w-10 items-center justify-center rounded-xl ${
             isActive ? "bg-sky-500/20 text-sky-100" : "bg-slate-800 text-slate-200"
@@ -479,7 +500,7 @@ function SidebarPrimaryItem({ item, isActive, onClick }) {
         >
           <item.icon size={18} />
         </div>
-        <div className="min-w-0">
+        <div className={`min-w-0 ${isRTL ? "text-right" : "text-left"}`}>
           <p className="truncate font-medium text-white">{item.label}</p>
           {item.subtitle && (
             <p className="truncate text-xs text-slate-400">{item.subtitle}</p>
@@ -553,6 +574,7 @@ function SidebarGroup({
                 item={item}
                 isActive={isPathActive(locationPath, item.path)}
                 onClick={onItemClick}
+                isRTL={isRTL}
               />
             ))}
           </div>
@@ -562,14 +584,14 @@ function SidebarGroup({
   );
 }
 
-function SidebarSubItem({ item, isActive, onClick }) {
+function SidebarSubItem({ item, isActive, onClick, isRTL }) {
   return (
     <Link
       to={item.path}
       onClick={onClick}
       className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition ${
         isActive ? "bg-sky-700/25 text-white" : "text-slate-300 hover:bg-slate-800"
-      }`}
+      } ${isRTL ? "flex-row-reverse justify-end text-right" : "text-left"}`}
     >
       <item.icon size={16} />
       <span className="text-sm font-medium">{item.label}</span>
@@ -577,14 +599,14 @@ function SidebarSubItem({ item, isActive, onClick }) {
   );
 }
 
-function SidebarListItem({ item, isActive, onClick }) {
+function SidebarListItem({ item, isActive, onClick, isRTL }) {
   return (
     <Link
       to={item.path}
       onClick={onClick}
       className={`flex items-center gap-3 rounded-xl px-4 py-3 transition ${
         isActive ? "bg-sky-700/25 text-white" : "text-slate-200 hover:bg-slate-800"
-      }`}
+      } ${isRTL ? "flex-row-reverse justify-end text-right" : "text-left"}`}
     >
       <item.icon size={17} />
       <span className="font-medium">{item.label}</span>

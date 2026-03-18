@@ -6,6 +6,7 @@ import { getAccessibleStoreIds } from "../models/index.js";
 import {
   buildSupplierDetail,
   buildSupplierList,
+  normalizeSupplierType,
   sanitizeDeliveryPayload,
   sanitizeFabricPayload,
   sanitizePaymentPayload,
@@ -21,6 +22,7 @@ const SUPPLIERS_SQL_FILE = "ADD_SUPPLIERS_MODULE.sql";
 const SUPPLIERS_SELECT = [
   "id",
   "store_id",
+  "supplier_type",
   "code",
   "name",
   "contact_name",
@@ -54,6 +56,7 @@ const SUPPLIER_FABRICS_SELECT = [
   "id",
   "supplier_id",
   "store_id",
+  "fabric_supplier_id",
   "code",
   "name",
   "notes",
@@ -107,6 +110,15 @@ const getRequestedStoreId = (req) => {
   }
 
   return null;
+};
+
+const getRequestedSupplierType = (req) => {
+  const normalized = String(req.query?.type || req.body?.supplier_type || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  return normalizeSupplierType(normalized);
 };
 
 const resolveIsAdmin = (req) =>
@@ -211,12 +223,17 @@ const resolveStoreContext = async (req) => {
   throw createHttpError(400, "Select a store first before opening suppliers");
 };
 
-const loadStoreSuppliers = async (storeId) => {
-  const { data, error } = await db
+const loadStoreSuppliers = async (storeId, supplierType = null) => {
+  let query = db
     .from("suppliers")
     .select(SUPPLIERS_SELECT)
-    .eq("store_id", storeId)
-    .order("name", { ascending: true });
+    .eq("store_id", storeId);
+
+  if (supplierType) {
+    query = query.eq("supplier_type", supplierType);
+  }
+
+  const { data, error } = await query.order("name", { ascending: true });
 
   if (error) {
     throw error;
@@ -279,6 +296,17 @@ const requireSupplierForStore = async (storeId, supplierId) => {
   return supplier;
 };
 
+const requireSupplierType = (supplier, supplierType, message) => {
+  if (supplierType && supplier?.supplier_type !== supplierType) {
+    throw createHttpError(
+      400,
+      message || "Supplier type does not match the requested operation",
+    );
+  }
+
+  return supplier;
+};
+
 const findSupplierFabricForStore = async (storeId, supplierId, fabricId) => {
   const { data, error } = await db
     .from("supplier_fabrics")
@@ -309,17 +337,20 @@ router.use(authenticateToken, requirePermission("can_view_products"));
 router.get("/", async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
-    const [suppliers, entries, fabrics] = await Promise.all([
-      loadStoreSuppliers(storeId),
+    const supplierType = getRequestedSupplierType(req);
+    const [suppliers, entries, fabrics, allSuppliers] = await Promise.all([
+      loadStoreSuppliers(storeId, supplierType),
       loadStoreSupplierEntries(storeId),
       loadStoreSupplierFabrics(storeId),
+      loadStoreSuppliers(storeId),
     ]);
-    const data = buildSupplierList(suppliers, entries, fabrics);
+    const data = buildSupplierList(suppliers, entries, fabrics, allSuppliers);
 
     res.json({
       data,
       meta: {
         store_id: storeId,
+        supplier_type: supplierType,
         generated_at: new Date().toISOString(),
       },
     });
@@ -339,21 +370,29 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
-    const supplier = await requireSupplierForStore(storeId, req.params.id);
-    const [entries, fabrics] = await Promise.all([
+    const requestedSupplierType = getRequestedSupplierType(req);
+    const supplier = requireSupplierType(
+      await requireSupplierForStore(storeId, req.params.id),
+      requestedSupplierType,
+      "Supplier type does not match the current page",
+    );
+    const [entries, fabrics, allSuppliers] = await Promise.all([
       loadStoreSupplierEntries(storeId),
       loadStoreSupplierFabrics(storeId),
+      loadStoreSuppliers(storeId),
     ]);
     const detail = buildSupplierDetail(
       supplier,
-      entries.filter((entry) => entry?.supplier_id === supplier.id),
-      fabrics.filter((fabric) => fabric?.supplier_id === supplier.id),
+      entries,
+      fabrics,
+      allSuppliers,
     );
 
     res.json({
       supplier: detail,
       meta: {
         store_id: storeId,
+        supplier_type: supplier.supplier_type,
         generated_at: new Date().toISOString(),
       },
     });
@@ -452,8 +491,19 @@ router.post(
   async (req, res) => {
     try {
       const { storeId } = await resolveStoreContext(req);
-      const supplier = await requireSupplierForStore(storeId, req.params.id);
+      const supplier = requireSupplierType(
+        await requireSupplierForStore(storeId, req.params.id),
+        "factory",
+        "Fabric codes can only be created under factory suppliers",
+      );
       const payload = sanitizeFabricPayload(req.body);
+      const fabricSupplier = payload.fabric_supplier_id
+        ? requireSupplierType(
+            await requireSupplierForStore(storeId, payload.fabric_supplier_id),
+            "fabric",
+            "Fabric supplier must be selected from fabric suppliers only",
+          )
+        : null;
 
       if (!payload.name) {
         return res.status(400).json({ error: "Fabric name is required" });
@@ -464,6 +514,7 @@ router.post(
         .insert({
           supplier_id: supplier.id,
           store_id: storeId,
+          fabric_supplier_id: fabricSupplier?.id || null,
           code: payload.code || null,
           name: payload.name,
           notes: payload.notes || null,
@@ -498,9 +549,20 @@ router.put(
   async (req, res) => {
     try {
       const { storeId } = await resolveStoreContext(req);
-      const supplier = await requireSupplierForStore(storeId, req.params.id);
+      const supplier = requireSupplierType(
+        await requireSupplierForStore(storeId, req.params.id),
+        "factory",
+        "Fabric codes can only be edited under factory suppliers",
+      );
       await requireSupplierFabricForStore(storeId, supplier.id, req.params.fabricId);
       const payload = sanitizeFabricPayload(req.body);
+      const fabricSupplier = payload.fabric_supplier_id
+        ? requireSupplierType(
+            await requireSupplierForStore(storeId, payload.fabric_supplier_id),
+            "fabric",
+            "Fabric supplier must be selected from fabric suppliers only",
+          )
+        : null;
 
       if (!payload.name) {
         return res.status(400).json({ error: "Fabric name is required" });
@@ -509,6 +571,7 @@ router.put(
       const { data, error } = await db
         .from("supplier_fabrics")
         .update({
+          fabric_supplier_id: fabricSupplier?.id || null,
           code: payload.code || null,
           name: payload.name,
           notes: payload.notes || null,
@@ -546,7 +609,11 @@ router.post(
   async (req, res) => {
     try {
       const { storeId } = await resolveStoreContext(req);
-      const supplier = await requireSupplierForStore(storeId, req.params.id);
+      const supplier = requireSupplierType(
+        await requireSupplierForStore(storeId, req.params.id),
+        "factory",
+        "Deliveries can only be recorded for factory suppliers",
+      );
       const payload = sanitizeDeliveryPayload(req.body);
 
       if (!payload.entry_date) {
@@ -603,7 +670,11 @@ router.post(
   async (req, res) => {
     try {
       const { storeId } = await resolveStoreContext(req);
-      const supplier = await requireSupplierForStore(storeId, req.params.id);
+      const supplier = requireSupplierType(
+        await requireSupplierForStore(storeId, req.params.id),
+        "factory",
+        "Payments can only be recorded for factory suppliers",
+      );
       const payload = sanitizePaymentPayload(req.body);
 
       if (!payload.entry_date) {

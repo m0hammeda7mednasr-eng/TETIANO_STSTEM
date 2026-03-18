@@ -20,6 +20,7 @@ describe("helpers/suppliers", () => {
       }),
     ).toEqual(
       expect.objectContaining({
+        supplier_type: "factory",
         name: "Modern Supplier",
         code: "MOD-1",
         opening_balance: 125.46,
@@ -191,8 +192,20 @@ describe("helpers/suppliers", () => {
 
   it("builds a sorted supplier list with summaries", () => {
     const suppliers = [
-      { id: "supplier-2", name: "Beta", is_active: false, opening_balance: 0 },
-      { id: "supplier-1", name: "Alpha", is_active: true, opening_balance: 0 },
+      {
+        id: "supplier-2",
+        name: "Beta",
+        supplier_type: "factory",
+        is_active: false,
+        opening_balance: 0,
+      },
+      {
+        id: "supplier-1",
+        name: "Alpha",
+        supplier_type: "factory",
+        is_active: true,
+        opening_balance: 0,
+      },
     ];
     const entries = [
       {
@@ -207,6 +220,7 @@ describe("helpers/suppliers", () => {
     const list = buildSupplierList(suppliers, entries);
 
     expect(list[0].name).toBe("Alpha");
+    expect(list[0].supplier_type).toBe("factory");
     expect(list[0].payments_count).toBe(1);
     expect(list[1].name).toBe("Beta");
   });
@@ -285,6 +299,7 @@ describe("helpers/suppliers", () => {
     const supplier = {
       id: "supplier-1",
       name: "Modern Supplier",
+      supplier_type: "factory",
       opening_balance: 0,
       is_active: true,
     };
@@ -313,20 +328,34 @@ describe("helpers/suppliers", () => {
       {
         id: "fabric-1",
         supplier_id: "supplier-1",
+        fabric_supplier_id: "supplier-2",
         code: "CF-100",
         name: "Cotton Fleece",
         is_active: true,
       },
     ];
+    const suppliers = [
+      supplier,
+      {
+        id: "supplier-2",
+        name: "Cotton Hub",
+        supplier_type: "fabric",
+        code: "FAB-1",
+        is_active: true,
+      },
+    ];
 
-    const detail = buildSupplierDetail(supplier, entries, fabricRecords);
+    const detail = buildSupplierDetail(supplier, entries, fabricRecords, suppliers);
 
     expect(detail.registered_fabrics_count).toBe(1);
+    expect(detail.linked_fabric_suppliers_count).toBe(1);
     expect(detail.received_items[0]).toEqual(
       expect.objectContaining({
         fabric_id: "fabric-1",
         fabric_code: "CF-100",
         fabric_name: "Cotton Fleece",
+        fabric_supplier_id: "supplier-2",
+        fabric_supplier_name: "Cotton Hub",
       }),
     );
     expect(detail.fabric_catalog[0]).toEqual(
@@ -334,7 +363,79 @@ describe("helpers/suppliers", () => {
         fabric_id: "fabric-1",
         fabric_code: "CF-100",
         fabric_name: "Cotton Fleece",
+        fabric_supplier_id: "supplier-2",
         deliveries_count: 1,
+      }),
+    );
+  });
+
+  it("builds a fabric supplier detail from linked factory fabric codes", () => {
+    const suppliers = [
+      {
+        id: "supplier-1",
+        name: "Modern Factory",
+        supplier_type: "factory",
+        is_active: true,
+      },
+      {
+        id: "supplier-2",
+        name: "Cotton Hub",
+        supplier_type: "fabric",
+        code: "FAB-1",
+        is_active: true,
+      },
+    ];
+    const entries = [
+      {
+        id: "delivery-1",
+        supplier_id: "supplier-1",
+        entry_type: "delivery",
+        entry_date: "2026-03-05",
+        amount: 560,
+        items: [
+          {
+            product_name: "Winter Hoodie",
+            sku: "HD-01",
+            fabric_code: "CF-100",
+            quantity: 8,
+            unit_cost: 70,
+            total_cost: 560,
+          },
+        ],
+      },
+    ];
+    const fabricRecords = [
+      {
+        id: "fabric-1",
+        supplier_id: "supplier-1",
+        fabric_supplier_id: "supplier-2",
+        code: "CF-100",
+        name: "Cotton Fleece",
+        is_active: true,
+      },
+    ];
+
+    const detail = buildSupplierDetail(
+      suppliers[1],
+      entries,
+      fabricRecords,
+      suppliers,
+    );
+
+    expect(detail.supplier_type).toBe("fabric");
+    expect(detail.linked_factories_count).toBe(1);
+    expect(detail.registered_fabrics_count).toBe(1);
+    expect(detail.linked_factory_suppliers[0]).toEqual(
+      expect.objectContaining({
+        id: "supplier-1",
+        name: "Modern Factory",
+      }),
+    );
+    expect(detail.linked_fabric_records[0]).toEqual(
+      expect.objectContaining({
+        code: "CF-100",
+        name: "Cotton Fleece",
+        supplier_id: "supplier-1",
       }),
     );
   });
@@ -381,15 +482,24 @@ describe("helpers/suppliers", () => {
       {
         id: "supplier-1",
         name: "Modern Supplier",
+        supplier_type: "factory",
         code: "MOD-1",
         phone: "0100",
         is_active: true,
       },
       {
         id: "supplier-2",
-        name: "Delta Textiles",
+        name: "Delta Factory",
+        supplier_type: "factory",
         code: "DEL-2",
         phone: "0200",
+        is_active: true,
+      },
+      {
+        id: "supplier-3",
+        name: "Cotton Hub",
+        supplier_type: "fabric",
+        code: "FAB-1",
         is_active: true,
       },
     ];
@@ -437,16 +547,46 @@ describe("helpers/suppliers", () => {
         ],
       },
     ];
+    const fabricRecords = [
+      {
+        id: "fabric-1",
+        supplier_id: "supplier-1",
+        fabric_supplier_id: "supplier-3",
+        code: "CF-100",
+        name: "Cotton Fleece",
+        is_active: true,
+      },
+      {
+        id: "fabric-2",
+        supplier_id: "supplier-2",
+        fabric_supplier_id: "supplier-3",
+        code: "RB-200",
+        name: "Rib",
+        is_active: true,
+      },
+    ];
 
-    const sourcing = buildProductSourcingDetail(product, suppliers, entries);
+    const sourcing = buildProductSourcingDetail(
+      product,
+      suppliers,
+      entries,
+      fabricRecords,
+    );
 
     expect(sourcing.supplier_count).toBe(2);
+    expect(sourcing.fabric_supplier_count).toBe(1);
     expect(sourcing.deliveries_count).toBe(2);
     expect(sourcing.total_quantity).toBe(10);
     expect(sourcing.suppliers[0]).toEqual(
       expect.objectContaining({
         supplier_id: "supplier-2",
-        name: "Delta Textiles",
+        name: "Delta Factory",
+      }),
+    );
+    expect(sourcing.fabric_suppliers[0]).toEqual(
+      expect.objectContaining({
+        supplier_id: "supplier-3",
+        name: "Cotton Hub",
       }),
     );
     expect(sourcing.fabrics).toEqual(

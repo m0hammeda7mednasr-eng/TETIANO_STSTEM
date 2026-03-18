@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
 
 const CURRENCY_LABEL = "LE";
 const toNumber = (value) => {
@@ -31,7 +32,7 @@ const formatTextList = (values, fallback = "-") => {
   const list = toArray(values)
     .map((value) => String(value || "").trim())
     .filter(Boolean);
-  return list.length > 0 ? list.join("، ") : fallback;
+  return list.length > 0 ? list.join(", ") : fallback;
 };
 
 const PRODUCT_FIELD_LABELS = {
@@ -94,6 +95,7 @@ export default function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isAdmin, hasPermission } = useAuth();
+  const { select, isRTL } = useLocale();
   const canEditProducts = hasPermission("can_edit_products");
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -515,11 +517,17 @@ export default function ProductDetails() {
 
               <ProductSupplyChainSection
                 sourcing={product.supply_chain}
-                onOpenSupplier={(supplierId) =>
+                onOpenSupplier={(supplierId, supplierType = "factory") =>
                   navigate(
                     supplierId
-                      ? `/suppliers?supplier=${encodeURIComponent(supplierId)}`
-                      : "/suppliers",
+                      ? `${
+                          supplierType === "fabric"
+                            ? "/suppliers/fabric-suppliers"
+                            : "/suppliers"
+                        }?supplier=${encodeURIComponent(supplierId)}`
+                      : supplierType === "fabric"
+                        ? "/suppliers/fabric-suppliers"
+                        : "/suppliers",
                   )
                 }
               />
@@ -671,7 +679,7 @@ export default function ProductDetails() {
                                     </div>
                                     <div>
                                       <label className="mb-1 block text-xs font-medium text-gray-600">
-                                        ØªØ¹Ø¯ÙŠÙ„ Ø§Ù„Ø³Ø¹Ø±
+                                        {select("تعديل السعر", "Edit price")}
                                       </label>
                                       <input
                                         type="number"
@@ -1375,29 +1383,38 @@ export default function ProductDetails() {
 }
 
 function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
+  const { select, isRTL, languageTag } = useLocale();
   if (!sourcing) {
     return null;
   }
 
-  const suppliers = toArray(sourcing.suppliers);
+  const factorySuppliers = toArray(sourcing.factory_suppliers || sourcing.suppliers);
+  const fabricSuppliers = toArray(sourcing.fabric_suppliers);
   const fabrics = toArray(sourcing.fabrics);
   const variants = toArray(sourcing.variants);
   const deliveries = toArray(sourcing.deliveries);
+  const textAlignClass = isRTL ? "text-right" : "text-left";
+  const miniStatsAlignClass = isRTL ? "text-right" : "text-left";
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">سلسلة التوريد</h2>
+        <div className={textAlignClass}>
+          <h2 className="text-xl font-bold text-gray-800">
+            {select("سلسلة التوريد", "Supply Chain")}
+          </h2>
           <p className="mt-2 text-sm text-gray-600">
-            الموردين والأقمشة والواردات المرتبطة بهذا المنتج بشكل مباشر.
+            {select(
+              "المصانع ومورّدو القماش والأقمشة والواردات المرتبطة بهذا المنتج بشكل مباشر.",
+              "Factories, fabric suppliers, fabrics, and deliveries linked to this product.",
+            )}
           </p>
         </div>
         <button
-          onClick={() => onOpenSupplier("")}
+          onClick={() => onOpenSupplier("", "factory")}
           className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100"
         >
-          فتح شاشة الموردين
+          {select("فتح شاشة الموردين", "Open suppliers")}
         </button>
       </div>
 
@@ -1405,67 +1422,69 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
         <>
           <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <SupplyMetric
-              label="عدد الموردين"
-              value={formatCount(sourcing.supplier_count)}
+              label={select("عدد المصانع", "Factories")}
+              value={formatCount(factorySuppliers.length)}
             />
             <SupplyMetric
-              label="عدد الواردات"
+              label={select("عدد مورّدي القماش", "Fabric Suppliers")}
+              value={formatCount(sourcing.fabric_supplier_count || fabricSuppliers.length)}
+            />
+            <SupplyMetric
+              label={select("عدد الواردات", "Deliveries")}
               value={formatCount(sourcing.deliveries_count)}
             />
             <SupplyMetric
-              label="إجمالي الكمية"
-              value={formatCount(sourcing.total_quantity)}
-            />
-            <SupplyMetric
-              label="إجمالي التكلفة"
+              label={select("إجمالي التكلفة", "Total Cost")}
               value={formatMoney(sourcing.total_cost)}
             />
           </div>
 
           <div className="mt-6 grid gap-6 xl:grid-cols-2">
             <div className="space-y-3">
-              <h3 className="text-base font-semibold text-gray-800">
-                الموردون
+              <h3 className={`text-base font-semibold text-gray-800 ${textAlignClass}`}>
+                {select("المصانع", "Factories")}
               </h3>
-              {suppliers.map((supplier) => (
+              {factorySuppliers.map((supplier) => (
                 <div
                   key={supplier.supplier_id || supplier.name}
                   className="rounded-xl border border-gray-200 bg-gray-50 p-4"
                 >
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
+                    <div className={textAlignClass}>
                       <div className="text-sm font-semibold text-gray-900">
                         {supplier.name || "-"}
                       </div>
                       <div className="mt-1 text-xs text-gray-500">
-                        {supplier.code ? `الكود: ${supplier.code}` : "بدون كود"}
+                        {supplier.code
+                          ? `${select("الكود", "Code")}: ${supplier.code}`
+                          : select("بدون كود", "No code")}
                         {supplier.phone ? ` | ${supplier.phone}` : ""}
                       </div>
                     </div>
                     {supplier.supplier_id ? (
                       <button
-                        onClick={() => onOpenSupplier(supplier.supplier_id)}
+                        onClick={() => onOpenSupplier(supplier.supplier_id, "factory")}
                         className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
                       >
-                        فتح المورد
+                        {select("فتح المورد", "Open supplier")}
                       </button>
                     ) : null}
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <SupplyInlineStat
-                      label="الكمية"
+                      label={select("الكمية", "Quantity")}
                       value={formatCount(supplier.total_quantity)}
                     />
                     <SupplyInlineStat
-                      label="التكلفة"
+                      label={select("التكلفة", "Cost")}
                       value={formatMoney(supplier.total_cost)}
                     />
                     <SupplyInlineStat
-                      label="الأقمشة"
+                      label={select("الأقمشة", "Fabrics")}
                       value={formatTextList(supplier.fabrics)}
                     />
                     <SupplyInlineStat
-                      label="المتغيرات"
+                      label={select("المتغيرات", "Variants")}
                       value={formatTextList(supplier.variants)}
                     />
                   </div>
@@ -1475,8 +1494,64 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
 
             <div className="space-y-4">
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <div className="text-sm font-semibold text-gray-900">
-                  الأقمشة المرتبطة
+                <div className={`text-sm font-semibold text-gray-900 ${textAlignClass}`}>
+                  {select("مورّدو القماش", "Fabric Suppliers")}
+                </div>
+                {fabricSuppliers.length > 0 ? (
+                  <div className="mt-3 space-y-3">
+                    {fabricSuppliers.map((supplier) => (
+                      <div
+                        key={supplier.supplier_id || supplier.name}
+                        className="rounded-lg border border-gray-200 bg-white p-3"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div className={textAlignClass}>
+                            <div className="text-sm font-medium text-gray-900">
+                              {supplier.name || "-"}
+                            </div>
+                            <div className="mt-1 text-xs text-gray-500">
+                              {supplier.code
+                                ? `${select("الكود", "Code")}: ${supplier.code}`
+                                : select("بدون كود", "No code")}
+                            </div>
+                          </div>
+                          {supplier.supplier_id ? (
+                            <button
+                              onClick={() =>
+                                onOpenSupplier(supplier.supplier_id, "fabric")
+                              }
+                              className="rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                            >
+                              {select("فتح المورد", "Open supplier")}
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <SupplyInlineStat
+                            label={select("الأقمشة", "Fabrics")}
+                            value={formatTextList(supplier.fabrics)}
+                          />
+                          <SupplyInlineStat
+                            label={select("التكلفة", "Cost")}
+                            value={formatMoney(supplier.total_cost)}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-3 text-sm text-gray-500">
+                    {select(
+                      "لا يوجد مورّدو قماش مرتبطون بهذا المنتج حتى الآن.",
+                      "No fabric suppliers are linked to this product yet.",
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <div className={`text-sm font-semibold text-gray-900 ${textAlignClass}`}>
+                  {select("الأقمشة المرتبطة", "Linked Fabrics")}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {fabrics.length > 0 ? (
@@ -1485,20 +1560,22 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
                         key={fabric.key || fabric.fabric_name}
                         className="rounded-full bg-white px-3 py-1 text-sm text-gray-700 border border-gray-200"
                       >
-                        {fabric.fabric_name}
+                        {fabric.fabric_code
+                          ? `${fabric.fabric_code} | ${fabric.fabric_name}`
+                          : fabric.fabric_name}
                       </span>
                     ))
                   ) : (
                     <span className="text-sm text-gray-500">
-                      لا توجد أقمشة مسجلة.
+                      {select("لا توجد أقمشة مسجلة.", "No fabrics recorded.")}
                     </span>
                   )}
                 </div>
               </div>
 
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <div className="text-sm font-semibold text-gray-900">
-                  تفاصيل المتغيرات
+                <div className={`text-sm font-semibold text-gray-900 ${textAlignClass}`}>
+                  {select("تفاصيل المتغيرات", "Variant Details")}
                 </div>
                 {variants.length > 0 ? (
                   <div className="mt-3 space-y-2">
@@ -1518,22 +1595,29 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
                                 "-"}
                             </div>
                             <div className="mt-1 text-xs text-gray-500">
-                              {variant.sku ? `SKU: ${variant.sku}` : "بدون SKU"}
+                              {variant.sku
+                                ? `SKU: ${variant.sku}`
+                                : select("بدون SKU", "No SKU")}
                             </div>
                           </div>
                           <div className="text-sm font-semibold text-gray-800">
-                            {formatCount(variant.total_quantity)} قطعة
+                            {formatCount(variant.total_quantity)}{" "}
+                            {select("قطعة", "pcs")}
                           </div>
                         </div>
                         <div className="mt-2 text-xs text-gray-600">
-                          الخامات: {formatTextList(variant.fabrics)}
+                          {select("الخامات", "Materials")}:{" "}
+                          {formatTextList(variant.fabrics)}
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className="mt-3 text-sm text-gray-500">
-                    لا توجد متغيرات أو موردون مسجلون لهذا المنتج حتى الآن.
+                    {select(
+                      "لا توجد متغيرات أو موردون مسجلون لهذا المنتج حتى الآن.",
+                      "No variants or supplier links are recorded for this product yet.",
+                    )}
                   </div>
                 )}
               </div>
@@ -1541,8 +1625,8 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
           </div>
 
           <div className="mt-6 space-y-3">
-            <h3 className="text-base font-semibold text-gray-800">
-              آخر الواردات
+            <h3 className={`text-base font-semibold text-gray-800 ${textAlignClass}`}>
+              {select("آخر الواردات", "Recent Deliveries")}
             </h3>
             {deliveries.map((delivery) => (
               <details
@@ -1551,28 +1635,31 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
               >
                 <summary className="cursor-pointer list-none p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
+                    <div className={textAlignClass}>
                       <div className="text-sm font-semibold text-gray-900">
-                        {delivery.supplier_name || "مورد غير محدد"}
+                        {delivery.supplier_name ||
+                          select("مورد غير محدد", "Unknown supplier")}
                       </div>
                       <div className="mt-1 text-xs text-gray-500">
                         {delivery.entry_date
                           ? new Date(delivery.entry_date).toLocaleDateString(
-                              "ar-EG",
+                              languageTag,
                             )
-                          : "بدون تاريخ"}
+                          : select("بدون تاريخ", "No date")}
                         {delivery.reference_code
-                          ? ` | مرجع: ${delivery.reference_code}`
+                          ? ` | ${select("مرجع", "Ref")}: ${delivery.reference_code}`
                           : ""}
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-left text-xs sm:min-w-[220px]">
+                    <div
+                      className={`grid grid-cols-2 gap-2 text-xs sm:min-w-[220px] ${miniStatsAlignClass}`}
+                    >
                       <SupplyMiniStat
-                        label="الكمية"
+                        label={select("الكمية", "Quantity")}
                         value={formatCount(delivery.quantity)}
                       />
                       <SupplyMiniStat
-                        label="التكلفة"
+                        label={select("التكلفة", "Cost")}
                         value={formatMoney(delivery.total_cost)}
                       />
                     </div>
@@ -1591,7 +1678,9 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
                               {item.variant_title || item.product_name || "-"}
                             </div>
                             <div className="mt-1 text-xs text-gray-500">
-                              {item.sku ? `SKU: ${item.sku}` : "بدون SKU"}
+                              {item.sku
+                                ? `SKU: ${item.sku}`
+                                : select("بدون SKU", "No SKU")}
                             </div>
                           </div>
                           <div className="text-sm font-semibold text-gray-800">
@@ -1600,19 +1689,27 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
                         </div>
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           <SupplyInlineStat
-                            label="القماش"
-                            value={item.fabric_name || item.material || "-"}
+                            label={select("القماش", "Fabric")}
+                            value={
+                              item.fabric_code
+                                ? `${item.fabric_code} | ${item.fabric_name || item.material || "-"}`
+                                : item.fabric_name || item.material || "-"
+                            }
                           />
                           <SupplyInlineStat
-                            label="الوصف"
-                            value={item.material || "-"}
+                            label={select("مورد القماش", "Fabric Supplier")}
+                            value={item.fabric_supplier_name || "-"}
                           />
                           <SupplyInlineStat
-                            label="الكمية"
+                            label={select("الكمية", "Quantity")}
                             value={formatCount(item.quantity)}
                           />
                           <SupplyInlineStat
-                            label="تكلفة الوحدة"
+                            label={select("الوصف", "Description")}
+                            value={item.material || "-"}
+                          />
+                          <SupplyInlineStat
+                            label={select("تكلفة الوحدة", "Unit Cost")}
                             value={formatMoney(item.unit_cost)}
                           />
                         </div>
@@ -1626,7 +1723,10 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
         </>
       ) : (
         <div className="mt-6 rounded-xl border border-dashed border-gray-300 bg-gray-50 p-6 text-sm text-gray-500">
-          لا توجد حركات موردين مرتبطة بهذا المنتج حتى الآن.
+          {select(
+            "لا توجد حركات موردين مرتبطة بهذا المنتج حتى الآن.",
+            "No supplier movements are linked to this product yet.",
+          )}
         </div>
       )}
     </div>
@@ -1634,8 +1734,14 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
 }
 
 function SupplyMetric({ label, value }) {
+  const { isRTL } = useLocale();
+
   return (
-    <div className="rounded-xl border border-sky-100 bg-sky-50 p-4">
+    <div
+      className={`rounded-xl border border-sky-100 bg-sky-50 p-4 ${
+        isRTL ? "text-right" : "text-left"
+      }`}
+    >
       <div className="text-xs font-medium text-sky-700">{label}</div>
       <div className="mt-2 text-lg font-bold text-sky-900">{value}</div>
     </div>
@@ -1643,8 +1749,14 @@ function SupplyMetric({ label, value }) {
 }
 
 function SupplyInlineStat({ label, value }) {
+  const { isRTL } = useLocale();
+
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+    <div
+      className={`rounded-lg border border-gray-200 bg-white px-3 py-2 ${
+        isRTL ? "text-right" : "text-left"
+      }`}
+    >
       <div className="text-[11px] text-gray-500">{label}</div>
       <div className="mt-1 text-sm font-medium text-gray-800">{value}</div>
     </div>
@@ -1652,8 +1764,14 @@ function SupplyInlineStat({ label, value }) {
 }
 
 function SupplyMiniStat({ label, value }) {
+  const { isRTL } = useLocale();
+
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+    <div
+      className={`rounded-lg border border-gray-200 bg-white px-3 py-2 ${
+        isRTL ? "text-right" : "text-left"
+      }`}
+    >
       <div className="text-[11px] text-gray-500">{label}</div>
       <div className="mt-1 text-sm font-semibold text-gray-800">{value}</div>
     </div>

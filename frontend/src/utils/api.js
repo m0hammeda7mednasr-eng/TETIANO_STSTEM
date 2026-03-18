@@ -170,8 +170,8 @@ export const productAnalysisAPI = {
 };
 
 export const suppliersAPI = {
-  list: () => api.get("/suppliers"),
-  getById: (id) => api.get(`/suppliers/${id}`),
+  list: (params = {}) => api.get("/suppliers", { params }),
+  getById: (id, params = {}) => api.get(`/suppliers/${id}`, { params }),
   create: (data) => api.post("/suppliers", data),
   update: (id, data) => api.put(`/suppliers/${id}`, data),
   addFabric: (id, data) => api.post(`/suppliers/${id}/fabrics`, data),

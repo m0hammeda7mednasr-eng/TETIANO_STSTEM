@@ -371,6 +371,7 @@ const endOfDay = (dateString) => {
 export default function Orders() {
   const navigate = useNavigate();
   const { locale, select, isRTL } = useLocale();
+  const tableHeaderAlignClass = isRTL ? "text-right" : "text-left";
   const cacheKey = useMemo(() => buildStoreScopedCacheKey("orders:list"), []);
   const initialCachedSnapshot = useMemo(() => {
     const cached = peekCachedView(cacheKey);
@@ -1395,41 +1396,63 @@ export default function Orders() {
               <table className="data-table w-full min-w-[1280px]">
                 <thead>
                   <tr className="bg-slate-50 border-b">
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       <input
                         type="checkbox"
                         checked={allFilteredOrdersSelected}
                         onChange={toggleSelectAllFilteredOrders}
                       />
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       Order
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       Customer
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       Items
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       Total
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       Payment
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       Payment Method
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       Fulfillment
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       Refund
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       Date
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                    <th
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                    >
                       Details
                     </th>
                   </tr>

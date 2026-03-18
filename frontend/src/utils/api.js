@@ -174,6 +174,9 @@ export const suppliersAPI = {
   getById: (id) => api.get(`/suppliers/${id}`),
   create: (data) => api.post("/suppliers", data),
   update: (id, data) => api.put(`/suppliers/${id}`, data),
+  addFabric: (id, data) => api.post(`/suppliers/${id}/fabrics`, data),
+  updateFabric: (id, fabricId, data) =>
+    api.put(`/suppliers/${id}/fabrics/${fabricId}`, data),
   addDelivery: (id, data) => api.post(`/suppliers/${id}/deliveries`, data),
   addPayment: (id, data) => api.post(`/suppliers/${id}/payments`, data),
 };

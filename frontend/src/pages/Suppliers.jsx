@@ -259,11 +259,20 @@ const createEmptySupplierForm = () => ({
   is_active: true,
 });
 
+const createEmptyFabricForm = () => ({
+  code: "",
+  name: "",
+  notes: "",
+  is_active: true,
+});
+
 const createEmptyDeliveryItem = () => ({
   item_type: "model",
   product_id: "",
   variant_id: "",
   variant_title: "",
+  fabric_id: "",
+  fabric_code: "",
   product_name: "",
   sku: "",
   catalog_query: "",
@@ -378,6 +387,13 @@ const buildSupplierFormFromRecord = (supplier) => ({
   is_active: supplier?.is_active !== false,
 });
 
+const buildFabricFormFromRecord = (fabric) => ({
+  code: fabric?.code || "",
+  name: fabric?.name || fabric?.fabric_name || "",
+  notes: fabric?.notes || "",
+  is_active: fabric?.is_active !== false,
+});
+
 const isSuppliersRelatedUpdate = (event) =>
   String(event?.source || "").toLowerCase().includes("/suppliers");
 const isProductsRelatedUpdate = (event) => {
@@ -448,6 +464,52 @@ const buildProductDetailsPath = (productId) => {
   const normalized = normalizeText(productId);
   return normalized ? `/products/${encodeURIComponent(normalized)}` : "";
 };
+const buildSupplierFabricOptionValue = (fabric) => {
+  const fabricId = normalizeText(fabric?.id || fabric?.fabric_id);
+  if (fabricId) {
+    return `id:${fabricId}`;
+  }
+
+  const fabricCode = normalizeText(fabric?.code || fabric?.fabric_code);
+  if (fabricCode) {
+    return `code:${fabricCode.toLowerCase()}`;
+  }
+
+  const fabricName = normalizeText(fabric?.name || fabric?.fabric_name);
+  if (fabricName) {
+    return `name:${fabricName.toLowerCase()}`;
+  }
+
+  return "";
+};
+const getSupplierFabricLookupKeys = (fabric) => {
+  const keys = [];
+  const fabricId = normalizeText(fabric?.id || fabric?.fabric_id);
+  const fabricCode = normalizeText(fabric?.code || fabric?.fabric_code);
+  const fabricName = normalizeText(fabric?.name || fabric?.fabric_name);
+
+  if (fabricId) {
+    keys.push(`id:${fabricId}`);
+  }
+  if (fabricCode) {
+    keys.push(`code:${fabricCode.toLowerCase()}`);
+  }
+  if (fabricName) {
+    keys.push(`name:${fabricName.toLowerCase()}`);
+  }
+
+  return keys;
+};
+const formatSupplierFabricDisplay = (fabric = {}) => {
+  const fabricCode = normalizeText(fabric?.code || fabric?.fabric_code);
+  const fabricName = normalizeText(fabric?.name || fabric?.fabric_name);
+
+  if (fabricCode && fabricName) {
+    return `${fabricCode} | ${fabricName}`;
+  }
+
+  return fabricCode || fabricName || "-";
+};
 const PRODUCT_LEVEL_LINK_LABEL = "المنتج الأساسي - كل الفاريانتات";
 const getLinkedScopeLabel = (record = {}) => {
   const variantTitle = normalizeVariantTitle(record?.variant_title);
@@ -464,22 +526,24 @@ const getLinkedScopeLabel = (record = {}) => {
 const buildSupplierFabricOptions = (supplier) => {
   const seen = new Set();
 
-  return toArray(supplier?.fabric_catalog)
-    .map((group) => normalizeText(group?.fabric_name))
-    .filter((name) => {
-      const key = name.toLowerCase();
-      if (!key || seen.has(key)) {
+  return toArray(supplier?.fabric_records)
+    .filter((fabric) => fabric?.is_active !== false)
+    .map((fabric) => ({
+      value: buildSupplierFabricOptionValue(fabric),
+      fabric_id: normalizeText(fabric?.id),
+      fabric_code: normalizeText(fabric?.code),
+      fabric_name: normalizeText(fabric?.name || fabric?.fabric_name),
+      label: formatSupplierFabricDisplay(fabric),
+    }))
+    .filter((fabric) => {
+      if (!fabric.value || seen.has(fabric.value)) {
         return false;
       }
 
-      seen.add(key);
+      seen.add(fabric.value);
       return true;
     })
-    .sort((left, right) => left.localeCompare(right, "ar"))
-    .map((fabricName) => ({
-      value: fabricName,
-      label: fabricName,
-    }));
+    .sort((left, right) => left.label.localeCompare(right.label, "ar"));
 };
 const buildSupplierFabricModelOptions = (supplier, catalogOptions = []) => {
   const baseProductOptionsById = new Map(
@@ -493,8 +557,8 @@ const buildSupplierFabricModelOptions = (supplier, catalogOptions = []) => {
   const lookup = new Map();
 
   for (const group of toArray(supplier?.fabric_catalog)) {
-    const fabricName = normalizeText(group?.fabric_name);
-    if (!fabricName) {
+    const fabricKeys = getSupplierFabricLookupKeys(group);
+    if (fabricKeys.length === 0) {
       continue;
     }
 
@@ -532,27 +596,42 @@ const buildSupplierFabricModelOptions = (supplier, catalogOptions = []) => {
       });
     }
 
-    lookup.set(
-      fabricName.toLowerCase(),
-      suggestions.sort((left, right) =>
-        String(left.product_name || "").localeCompare(
-          String(right.product_name || ""),
-          "ar",
-        ),
+    const sortedSuggestions = suggestions.sort((left, right) =>
+      String(left.product_name || "").localeCompare(
+        String(right.product_name || ""),
+        "ar",
       ),
     );
+
+    fabricKeys.forEach((key) => lookup.set(key, sortedSuggestions));
   }
 
   return lookup;
 };
+const findSupplierFabricOptionByItem = (fabricOptions = [], item = {}) =>
+  (fabricOptions || []).find((option) =>
+    getSupplierFabricLookupKeys({
+      id: option?.fabric_id,
+      code: option?.fabric_code,
+      name: option?.fabric_name,
+    }).some((key) =>
+      getSupplierFabricLookupKeys({
+        fabric_id: item?.fabric_id,
+        fabric_code: item?.fabric_code,
+        fabric_name: item?.fabric_name,
+      }).includes(key),
+    ),
+  ) || null;
+
 const isDeliveryItemDirty = (item) =>
   Boolean(
     normalizeText(item?.product_name) ||
-      normalizeText(item?.catalog_query) ||
-      normalizeText(item?.material) ||
-      normalizeText(item?.color) ||
-      normalizeText(item?.piece_label) ||
-      normalizeText(item?.fabric_name) ||
+    normalizeText(item?.catalog_query) ||
+    normalizeText(item?.material) ||
+    normalizeText(item?.color) ||
+    normalizeText(item?.piece_label) ||
+    normalizeText(item?.fabric_code) ||
+    normalizeText(item?.fabric_name) ||
       normalizeText(item?.pieces_per_unit) ||
       normalizeText(item?.price_per_meter) ||
       normalizeText(item?.price_per_kilo) ||
@@ -585,10 +664,14 @@ export default function Suppliers() {
   const [showSupplierForm, setShowSupplierForm] = useState(false);
   const [editingSupplierId, setEditingSupplierId] = useState("");
   const [supplierForm, setSupplierForm] = useState(createEmptySupplierForm);
+  const [showFabricForm, setShowFabricForm] = useState(false);
+  const [editingFabricId, setEditingFabricId] = useState("");
+  const [fabricForm, setFabricForm] = useState(createEmptyFabricForm);
   const [deliveryForm, setDeliveryForm] = useState(createEmptyDeliveryForm);
   const [paymentForm, setPaymentForm] = useState(createEmptyPaymentForm);
   const [productCatalogRows, setProductCatalogRows] = useState([]);
   const [savingSupplier, setSavingSupplier] = useState(false);
+  const [savingFabric, setSavingFabric] = useState(false);
   const [savingDelivery, setSavingDelivery] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
 
@@ -802,6 +885,28 @@ export default function Suppliers() {
     setShowSupplierForm(false);
   };
 
+  const startCreatingFabric = () => {
+    setEditingFabricId("");
+    setFabricForm(createEmptyFabricForm());
+    setShowFabricForm(true);
+  };
+
+  const startEditingFabric = (fabric) => {
+    if (!fabric) {
+      return;
+    }
+
+    setEditingFabricId(fabric.id || "");
+    setFabricForm(buildFabricFormFromRecord(fabric));
+    setShowFabricForm(true);
+  };
+
+  const closeFabricForm = () => {
+    setEditingFabricId("");
+    setFabricForm(createEmptyFabricForm());
+    setShowFabricForm(false);
+  };
+
   const saveSupplier = async () => {
     if (!supplierForm.name.trim()) {
       setMessage({ type: "error", text: "اسم المورد مطلوب" });
@@ -848,11 +953,62 @@ export default function Suppliers() {
     }
   };
 
+  const saveFabric = async () => {
+    if (!selectedSupplierId) {
+      setMessage({ type: "error", text: "اختر موردًا أولًا" });
+      return;
+    }
+
+    if (!normalizeText(fabricForm.name)) {
+      setMessage({ type: "error", text: "اسم القماش مطلوب" });
+      return;
+    }
+
+    try {
+      setSavingFabric(true);
+      setMessage({ type: "", text: "" });
+
+      const payload = {
+        ...fabricForm,
+      };
+
+      if (editingFabricId) {
+        await suppliersAPI.updateFabric(selectedSupplierId, editingFabricId, payload);
+      } else {
+        await suppliersAPI.addFabric(selectedSupplierId, payload);
+      }
+
+      await Promise.all([loadSuppliers(), loadSupplierDetail(selectedSupplierId)]);
+      setMessage({
+        type: "success",
+        text: editingFabricId ? "تم تحديث بيانات القماش" : "تم إضافة القماش بنجاح",
+      });
+      closeFabricForm();
+    } catch (requestError) {
+      console.error("Error saving supplier fabric:", requestError);
+      setMessage({
+        type: "error",
+        text:
+          requestError?.response?.data?.error || "فشل حفظ بيانات القماش",
+      });
+    } finally {
+      setSavingFabric(false);
+    }
+  };
+
   const updateDeliveryItem = (index, field, value) => {
     setDeliveryForm((current) => ({
       ...current,
       items: current.items.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, [field]: value } : item,
+        itemIndex === index
+          ? {
+              ...item,
+              [field]: value,
+              ...(field === "fabric_code" || field === "fabric_name"
+                ? { fabric_id: "" }
+                : {}),
+            }
+          : item,
       ),
     }));
   };
@@ -886,6 +1042,36 @@ export default function Suppliers() {
           product_name: selectedOption.product_name,
           sku: selectedOption.sku,
           catalog_query: selectedOption.label,
+        };
+      }),
+    }));
+  };
+
+  const selectDeliveryFabric = (index, selectedValue) => {
+    const selectedFabric = buildSupplierFabricOptions(selectedSupplier).find(
+      (option) => option.value === selectedValue,
+    );
+
+    setDeliveryForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) => {
+        if (itemIndex !== index) {
+          return item;
+        }
+
+        if (!selectedFabric) {
+          return {
+            ...item,
+            fabric_id: "",
+            fabric_code: "",
+          };
+        }
+
+        return {
+          ...item,
+          fabric_id: selectedFabric.fabric_id,
+          fabric_code: selectedFabric.fabric_code,
+          fabric_name: selectedFabric.fabric_name,
         };
       }),
     }));
@@ -1143,7 +1329,7 @@ export default function Suppliers() {
                                 {supplier.name}
                               </div>
                               <div className="mt-1 text-xs text-slate-500">
-                                {translateSupplierUiText("الكود", locale)}: {supplier.code || "-"}
+                                كود المصنع: {supplier.code || "-"}
                               </div>
                             </div>
                             <span
@@ -1229,9 +1415,19 @@ export default function Suppliers() {
                 detailLoading,
                 canEditProducts: canManageSuppliers,
                 startEditingSupplier,
+                showFabricForm,
+                editingFabricId,
+                fabricForm,
+                setFabricForm,
+                savingFabric,
+                startCreatingFabric,
+                startEditingFabric,
+                saveFabric,
+                closeFabricForm,
                 deliveryForm,
                 setDeliveryForm,
                 updateDeliveryItem,
+                selectDeliveryFabric,
                 selectDeliveryProduct,
                 removeDeliveryItem,
                 addDeliveryItem,
@@ -1262,9 +1458,19 @@ function renderDetails({
   detailLoading,
   canEditProducts,
   startEditingSupplier,
+  showFabricForm,
+  editingFabricId,
+  fabricForm,
+  setFabricForm,
+  savingFabric,
+  startCreatingFabric,
+  startEditingFabric,
+  saveFabric,
+  closeFabricForm,
   deliveryForm,
   setDeliveryForm,
   updateDeliveryItem,
+  selectDeliveryFabric,
   selectDeliveryProduct,
   removeDeliveryItem,
   addDeliveryItem,
@@ -1333,7 +1539,7 @@ function renderDetails({
       <div className="grid gap-6 lg:grid-cols-2">
         <SectionCard
           title={selectedSupplier.name}
-          subtitle={`الكود: ${selectedSupplier.code || "-"}`}
+          subtitle={`كود المصنع: ${selectedSupplier.code || "-"}`}
           action={
             canEditProducts ? (
               <button
@@ -1360,6 +1566,10 @@ function renderDetails({
             <DetailLine
               label="آخر دفعة"
               value={formatDateTime(selectedSupplier.last_payment_at)}
+            />
+            <DetailLine
+              label="أكواد الأقمشة المسجلة"
+              value={formatCount(selectedSupplier.registered_fabrics_count)}
             />
           </div>
           {selectedSupplier.notes ? (
@@ -1402,6 +1612,20 @@ function renderDetails({
         </SectionCard>
       </div>
 
+      <SupplierFabricsSection
+        supplier={selectedSupplier}
+        showForm={showFabricForm}
+        editingFabricId={editingFabricId}
+        form={fabricForm}
+        setForm={setFabricForm}
+        saving={savingFabric}
+        onStartCreate={startCreatingFabric}
+        onStartEdit={startEditingFabric}
+        onSave={saveFabric}
+        onCancel={closeFabricForm}
+        canManage={canEditProducts}
+      />
+
       <SupplierCatalogExplorer supplier={selectedSupplier} />
 
       {canEditProducts ? (
@@ -1411,6 +1635,7 @@ function renderDetails({
             form={deliveryForm}
             setForm={setDeliveryForm}
             updateItem={updateDeliveryItem}
+            selectFabric={selectDeliveryFabric}
             selectProduct={selectDeliveryProduct}
             removeItem={removeDeliveryItem}
             addItem={addDeliveryItem}
@@ -1449,7 +1674,7 @@ function SupplierForm({ form, setForm, saving, onSave }) {
     <div className="space-y-3">
       <div className="grid gap-3 md:grid-cols-2">
         <TextInput label="اسم المورد" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} />
-        <TextInput label="الكود" value={form.code} onChange={(value) => setForm((current) => ({ ...current, code: value }))} />
+        <TextInput label="كود المصنع" value={form.code} onChange={(value) => setForm((current) => ({ ...current, code: value }))} />
         <TextInput label="اسم المسؤول" value={form.contact_name} onChange={(value) => setForm((current) => ({ ...current, contact_name: value }))} />
         <TextInput label="الهاتف" value={form.phone} onChange={(value) => setForm((current) => ({ ...current, phone: value }))} />
         <TextInput label="العنوان" value={form.address} onChange={(value) => setForm((current) => ({ ...current, address: value }))} />
@@ -1476,11 +1701,193 @@ function SupplierForm({ form, setForm, saving, onSave }) {
 
 }
 
+function SupplierFabricsSection({
+  supplier,
+  showForm,
+  editingFabricId,
+  form,
+  setForm,
+  saving,
+  onStartCreate,
+  onStartEdit,
+  onSave,
+  onCancel,
+  canManage,
+}) {
+  const { locale } = useLocale();
+  const fabricRecords = toArray(supplier?.fabric_records);
+  const activeFabricsCount = fabricRecords.filter(
+    (fabric) => fabric?.is_active !== false,
+  ).length;
+
+  return (
+    <SectionCard
+      title="سجل الأقمشة"
+      subtitle="أكواد الأقمشة الخاصة بهذا المصنع، وتظهر مباشرة داخل الواردات والربط بالموديلات."
+      action={
+        canManage ? (
+          <button
+            onClick={showForm ? onCancel : onStartCreate}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            <Plus size={16} />
+            {showForm
+              ? "إغلاق نموذج القماش"
+              : editingFabricId
+                ? "تعديل القماش"
+                : "قماش جديد"}
+          </button>
+        ) : null
+      }
+    >
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <DetailLineCompact
+              label="إجمالي الأكواد"
+              value={formatCount(fabricRecords.length)}
+            />
+            <DetailLineCompact
+              label="أقمشة نشطة"
+              value={formatCount(activeFabricsCount)}
+            />
+          </div>
+
+          {fabricRecords.length > 0 ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {fabricRecords.map((fabric) => (
+                <div
+                  key={fabric.id || `${fabric.code}-${fabric.name}`}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900">
+                        {fabric.name || fabric.fabric_name || "-"}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        كود القماش: {fabric.code || "-"}
+                      </div>
+                    </div>
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                        fabric.is_active !== false
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {fabric.is_active !== false ? "نشط" : "مؤرشف"}
+                    </span>
+                  </div>
+
+                  {fabric.notes ? (
+                    <div className="mt-3 rounded-xl bg-white px-3 py-2 text-xs text-slate-600">
+                      {fabric.notes}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <DetailLineCompact
+                      label="آخر تحديث"
+                      value={formatDateTime(fabric.updated_at || fabric.created_at)}
+                    />
+                    <DetailLineCompact
+                      label="الربط الحالي"
+                      value={formatCount(
+                        toArray(supplier?.fabric_catalog).find((group) =>
+                          getSupplierFabricLookupKeys(group).some((key) =>
+                            getSupplierFabricLookupKeys(fabric).includes(key),
+                          ),
+                        )?.products?.length || 0,
+                      )}
+                    />
+                  </div>
+
+                  {canManage ? (
+                    <button
+                      onClick={() => onStartEdit(fabric)}
+                      className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-sky-700 hover:text-sky-800"
+                    >
+                      <Save size={14} />
+                      {translateSupplierUiText("تعديل", locale)}
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="لا توجد أكواد أقمشة مسجلة لهذا المورد بعد." />
+          )}
+        </div>
+
+        {canManage && showForm ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-4">
+              <h3 className="text-base font-semibold text-slate-900">
+                {editingFabricId ? "تعديل كود قماش" : "إضافة كود قماش"}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                سجل القماش مرة واحدة ثم استخدمه في الواردات والربط بالموديل.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <TextInput
+                label="كود القماش"
+                value={form.code}
+                onChange={(value) =>
+                  setForm((current) => ({ ...current, code: value }))
+                }
+              />
+              <TextInput
+                label="اسم القماش"
+                value={form.name}
+                onChange={(value) =>
+                  setForm((current) => ({ ...current, name: value }))
+                }
+              />
+              <TextArea
+                label="ملاحظات"
+                value={form.notes}
+                onChange={(value) =>
+                  setForm((current) => ({ ...current, notes: value }))
+                }
+              />
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.is_active}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      is_active: event.target.checked,
+                    }))
+                  }
+                />
+                القماش نشط ويظهر في قائمة الربط
+              </label>
+              <button
+                onClick={onSave}
+                disabled={saving}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Save size={18} />
+                {saving ? "جارٍ حفظ القماش..." : "حفظ كود القماش"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </SectionCard>
+  );
+}
+
 function DeliveryForm({
   supplier,
   form,
   setForm,
   updateItem,
+  selectFabric,
   selectProduct,
   removeItem,
   addItem,
@@ -1534,13 +1941,13 @@ function DeliveryForm({
             const materialUnitPrice = getDeliveryItemMaterialUnitPrice(item);
             const pieceCost = getDeliveryItemPieceCost(item);
             const suggestedUnitCost = getDeliveryItemSuggestedUnitCost(item);
-            const selectedFabricValue = supplierFabricOptions.some(
-              (option) => option.value === item.fabric_name,
-            )
-              ? item.fabric_name
-              : "";
+            const selectedFabricOption = findSupplierFabricOptionByItem(
+              supplierFabricOptions,
+              item,
+            );
+            const selectedFabricValue = selectedFabricOption?.value || "";
             const relatedModelOptions =
-              fabricModelOptionsByFabric.get(normalizeText(item.fabric_name).toLowerCase()) || [];
+              fabricModelOptionsByFabric.get(selectedFabricValue) || [];
             const relatedModelValue =
               !normalizeText(item.variant_id) &&
               relatedModelOptions.some((option) => option.value === selectedValue)
@@ -1578,7 +1985,7 @@ function DeliveryForm({
                       },
                       ...supplierFabricOptions,
                     ]}
-                    onChange={(value) => updateItem(index, "fabric_name", value)}
+                    onChange={(value) => selectFabric(index, value)}
                   />
                   <TextInput
                     label="اسم الموديل / الصنف"
@@ -1590,13 +1997,13 @@ function DeliveryForm({
                     value={relatedModelValue}
                     disabled={
                       catalogLoading ||
-                      !item.fabric_name ||
+                      !selectedFabricValue ||
                       relatedModelOptions.length === 0
                     }
                     options={[
                       {
                         value: "",
-                        label: !item.fabric_name
+                        label: !selectedFabricValue
                           ? "اختر القماش أولًا"
                           : relatedModelOptions.length > 0
                             ? "اختر موديلًا مرتبطًا بهذا القماش"
@@ -1631,6 +2038,7 @@ function DeliveryForm({
                     onChange={(value) => selectProduct(index, value)}
                   />
                   <TextInput label="اللون" value={item.color} onChange={(value) => updateItem(index, "color", value)} />
+                  <TextInput label="كود القماش" value={item.fabric_code} onChange={(value) => updateItem(index, "fabric_code", value)} />
                   <TextInput label="اسم القماش" value={item.fabric_name} onChange={(value) => updateItem(index, "fabric_name", value)} />
                   <TextInput label="القطعة / الرولة" value={item.piece_label} onChange={(value) => updateItem(index, "piece_label", value)} />
                   <SelectInput
@@ -1663,6 +2071,7 @@ function DeliveryForm({
                   <div className="mt-1 text-xs text-slate-500">
                     {translateSupplierUiText(getLinkedScopeLabel(item), locale)}
                     {item.sku ? ` | SKU: ${item.sku}` : ""}
+                    {item.fabric_code ? ` | كود القماش: ${item.fabric_code}` : ""}
                     {selectedOption
                       ? ` | ${translateSupplierUiText("المخزون الحالي", locale)}: ${formatCount(selectedOption.inventory_quantity)}`
                       : ""}
@@ -1918,7 +2327,7 @@ function SupplierCatalogExplorer({ supplier }) {
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           <DetailLineCompact
                             label="القماش"
-                            value={item.fabric_name || item.material || "-"}
+                            value={formatSupplierFabricDisplay(item) || item.material || "-"}
                           />
                           <DetailLineCompact
                             label="الوصف"
@@ -1962,9 +2371,10 @@ function SupplierCatalogExplorer({ supplier }) {
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-slate-900">
-                        {group.fabric_name || "-"}
+                        {formatSupplierFabricDisplay(group)}
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
+                        {group.fabric_code ? `كود القماش: ${group.fabric_code} | ` : ""}
                         {formatTextList(
                           toArray(group.measurement_units).map(
                             formatDeliveryMeasurementUnitLabel,
@@ -2101,7 +2511,9 @@ function ReceivedItemsTable({ items }) {
                       <div className="mt-1 text-xs text-slate-500">{translateSupplierUiText("اللون", locale)}: {item.color}</div>
                     ) : null}
                     {item.fabric_name ? (
-                      <div className="mt-1 text-xs text-slate-500">{translateSupplierUiText("القماش", locale)}: {item.fabric_name}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {translateSupplierUiText("القماش", locale)}: {formatSupplierFabricDisplay(item)}
+                      </div>
                     ) : null}
                   </td>
                   <td className="px-3 py-3">{item.sku || "-"}</td>

@@ -7,6 +7,7 @@ import {
   buildSupplierDetail,
   buildSupplierList,
   sanitizeDeliveryPayload,
+  sanitizeFabricPayload,
   sanitizePaymentPayload,
   sanitizeSupplierPayload,
 } from "../helpers/suppliers.js";
@@ -45,6 +46,18 @@ const SUPPLIER_ENTRIES_SELECT = [
   "payment_account",
   "items",
   "notes",
+  "created_by",
+  "created_at",
+  "updated_at",
+].join(",");
+const SUPPLIER_FABRICS_SELECT = [
+  "id",
+  "supplier_id",
+  "store_id",
+  "code",
+  "name",
+  "notes",
+  "is_active",
   "created_by",
   "created_at",
   "updated_at",
@@ -227,6 +240,21 @@ const loadStoreSupplierEntries = async (storeId) => {
   return data || [];
 };
 
+const loadStoreSupplierFabrics = async (storeId) => {
+  const { data, error } = await db
+    .from("supplier_fabrics")
+    .select(SUPPLIER_FABRICS_SELECT)
+    .eq("store_id", storeId)
+    .order("is_active", { ascending: false })
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+};
+
 const findSupplierForStore = async (storeId, supplierId) => {
   const { data, error } = await db
     .from("suppliers")
@@ -251,16 +279,42 @@ const requireSupplierForStore = async (storeId, supplierId) => {
   return supplier;
 };
 
+const findSupplierFabricForStore = async (storeId, supplierId, fabricId) => {
+  const { data, error } = await db
+    .from("supplier_fabrics")
+    .select(SUPPLIER_FABRICS_SELECT)
+    .eq("store_id", storeId)
+    .eq("supplier_id", supplierId)
+    .eq("id", fabricId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+};
+
+const requireSupplierFabricForStore = async (storeId, supplierId, fabricId) => {
+  const fabric = await findSupplierFabricForStore(storeId, supplierId, fabricId);
+  if (!fabric) {
+    throw createHttpError(404, "Fabric record not found for the selected supplier");
+  }
+
+  return fabric;
+};
+
 router.use(authenticateToken, requirePermission("can_view_products"));
 
 router.get("/", async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
-    const [suppliers, entries] = await Promise.all([
+    const [suppliers, entries, fabrics] = await Promise.all([
       loadStoreSuppliers(storeId),
       loadStoreSupplierEntries(storeId),
+      loadStoreSupplierFabrics(storeId),
     ]);
-    const data = buildSupplierList(suppliers, entries);
+    const data = buildSupplierList(suppliers, entries, fabrics);
 
     res.json({
       data,
@@ -286,10 +340,14 @@ router.get("/:id", async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     const supplier = await requireSupplierForStore(storeId, req.params.id);
-    const entries = await loadStoreSupplierEntries(storeId);
+    const [entries, fabrics] = await Promise.all([
+      loadStoreSupplierEntries(storeId),
+      loadStoreSupplierFabrics(storeId),
+    ]);
     const detail = buildSupplierDetail(
       supplier,
       entries.filter((entry) => entry?.supplier_id === supplier.id),
+      fabrics.filter((fabric) => fabric?.supplier_id === supplier.id),
     );
 
     res.json({
@@ -387,6 +445,100 @@ router.put("/:id", requirePermission("can_edit_products"), async (req, res) => {
     });
   }
 });
+
+router.post(
+  "/:id/fabrics",
+  requirePermission("can_edit_products"),
+  async (req, res) => {
+    try {
+      const { storeId } = await resolveStoreContext(req);
+      const supplier = await requireSupplierForStore(storeId, req.params.id);
+      const payload = sanitizeFabricPayload(req.body);
+
+      if (!payload.name) {
+        return res.status(400).json({ error: "Fabric name is required" });
+      }
+
+      const { data, error } = await db
+        .from("supplier_fabrics")
+        .insert({
+          supplier_id: supplier.id,
+          store_id: storeId,
+          code: payload.code || null,
+          name: payload.name,
+          notes: payload.notes || null,
+          is_active: payload.is_active,
+          created_by: req.user?.id || null,
+        })
+        .select(SUPPLIER_FABRICS_SELECT)
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      res.status(201).json(data);
+    } catch (error) {
+      console.error("Error creating supplier fabric:", error);
+
+      if (isSchemaCompatibilityError(error)) {
+        return handleSchemaError(res);
+      }
+
+      res.status(error.status || 500).json({
+        error: error.status ? error.message : "Failed to create supplier fabric",
+      });
+    }
+  },
+);
+
+router.put(
+  "/:id/fabrics/:fabricId",
+  requirePermission("can_edit_products"),
+  async (req, res) => {
+    try {
+      const { storeId } = await resolveStoreContext(req);
+      const supplier = await requireSupplierForStore(storeId, req.params.id);
+      await requireSupplierFabricForStore(storeId, supplier.id, req.params.fabricId);
+      const payload = sanitizeFabricPayload(req.body);
+
+      if (!payload.name) {
+        return res.status(400).json({ error: "Fabric name is required" });
+      }
+
+      const { data, error } = await db
+        .from("supplier_fabrics")
+        .update({
+          code: payload.code || null,
+          name: payload.name,
+          notes: payload.notes || null,
+          is_active: payload.is_active,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("store_id", storeId)
+        .eq("supplier_id", supplier.id)
+        .eq("id", req.params.fabricId)
+        .select(SUPPLIER_FABRICS_SELECT)
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      res.json(data);
+    } catch (error) {
+      console.error("Error updating supplier fabric:", error);
+
+      if (isSchemaCompatibilityError(error)) {
+        return handleSchemaError(res);
+      }
+
+      res.status(error.status || 500).json({
+        error: error.status ? error.message : "Failed to update supplier fabric",
+      });
+    }
+  },
+);
 
 router.post(
   "/:id/deliveries",

@@ -5,6 +5,7 @@ import {
   buildSupplierDetail,
   buildSupplierList,
   sanitizeDeliveryPayload,
+  sanitizeFabricPayload,
   sanitizePaymentPayload,
   sanitizeSupplierPayload,
 } from "./suppliers.js";
@@ -65,6 +66,7 @@ describe("helpers/suppliers", () => {
             item_type: "model",
             product_name: "Winter Hoodie",
             color: "Black",
+            fabric_code: "CF-100",
             fabric_name: "Cotton Fleece",
             measurement_unit: "meter",
             pieces_per_unit: 4,
@@ -89,6 +91,7 @@ describe("helpers/suppliers", () => {
           expect.objectContaining({
             item_type: "model",
             measurement_unit: "meter",
+            fabric_code: "CF-100",
             piece_cost: 50,
             unit_cost: 70,
             total_cost: 560,
@@ -103,6 +106,23 @@ describe("helpers/suppliers", () => {
             total_cost: 360,
           }),
         ],
+      }),
+    );
+  });
+
+  it("normalizes supplier fabric payload", () => {
+    expect(
+      sanitizeFabricPayload({
+        code: "  CF-100 ",
+        name: "  Cotton Fleece ",
+        notes: "  Main factory fabric ",
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        code: "CF-100",
+        name: "Cotton Fleece",
+        notes: "Main factory fabric",
+        is_active: true,
       }),
     );
   });
@@ -258,6 +278,95 @@ describe("helpers/suppliers", () => {
           sku: "HD-01",
         }),
       ]),
+    );
+  });
+
+  it("merges registered fabric codes into supplier detail and received items", () => {
+    const supplier = {
+      id: "supplier-1",
+      name: "Modern Supplier",
+      opening_balance: 0,
+      is_active: true,
+    };
+    const entries = [
+      {
+        id: "delivery-1",
+        supplier_id: "supplier-1",
+        entry_type: "delivery",
+        entry_date: "2026-03-05",
+        amount: 560,
+        items: [
+          {
+            product_id: "product-1",
+            product_name: "Winter Hoodie",
+            sku: "HD-01",
+            fabric_code: "CF-100",
+            item_type: "model",
+            quantity: 8,
+            unit_cost: 70,
+            total_cost: 560,
+          },
+        ],
+      },
+    ];
+    const fabricRecords = [
+      {
+        id: "fabric-1",
+        supplier_id: "supplier-1",
+        code: "CF-100",
+        name: "Cotton Fleece",
+        is_active: true,
+      },
+    ];
+
+    const detail = buildSupplierDetail(supplier, entries, fabricRecords);
+
+    expect(detail.registered_fabrics_count).toBe(1);
+    expect(detail.received_items[0]).toEqual(
+      expect.objectContaining({
+        fabric_id: "fabric-1",
+        fabric_code: "CF-100",
+        fabric_name: "Cotton Fleece",
+      }),
+    );
+    expect(detail.fabric_catalog[0]).toEqual(
+      expect.objectContaining({
+        fabric_id: "fabric-1",
+        fabric_code: "CF-100",
+        fabric_name: "Cotton Fleece",
+        deliveries_count: 1,
+      }),
+    );
+  });
+
+  it("keeps registered fabrics visible even before any deliveries", () => {
+    const supplier = {
+      id: "supplier-1",
+      name: "Modern Supplier",
+      opening_balance: 0,
+      is_active: true,
+    };
+    const fabricRecords = [
+      {
+        id: "fabric-1",
+        supplier_id: "supplier-1",
+        code: "RB-200",
+        name: "Rib",
+        is_active: true,
+      },
+    ];
+
+    const detail = buildSupplierDetail(supplier, [], fabricRecords);
+
+    expect(detail.fabric_catalog).toHaveLength(1);
+    expect(detail.fabric_catalog[0]).toEqual(
+      expect.objectContaining({
+        fabric_id: "fabric-1",
+        fabric_code: "RB-200",
+        fabric_name: "Rib",
+        total_quantity: 0,
+        deliveries_count: 0,
+      }),
     );
   });
 

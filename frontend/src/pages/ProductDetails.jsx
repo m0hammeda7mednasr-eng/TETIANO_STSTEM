@@ -95,7 +95,7 @@ export default function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isAdmin, hasPermission } = useAuth();
-  const { select, isRTL } = useLocale();
+  const { select } = useLocale();
   const canEditProducts = hasPermission("can_edit_products");
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);

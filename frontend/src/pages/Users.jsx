@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { getErrorMessage } from "../utils/api";
 import { useLocale } from "../context/LocaleContext";
@@ -117,6 +117,46 @@ export default function Users() {
 
   const tabQueryValue = useMemo(() => getTabFromQuery(searchParams.get("tab")), [searchParams]);
 
+  const fetchUsers = useCallback(async () => {
+    try {
+
+      const response = await api.get("/users");
+
+
+      setUsers(extractArray(response.data));
+    } catch (err) {
+      console.error("Error fetching users:", err);
+      setMessage({
+        type: "error",
+        text:
+          select("فشل تحميل المستخدمين: ", "Failed to load users: ") +
+          getErrorMessage(err),
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [select]);
+
+  const fetchAccessRequests = useCallback(async () => {
+    try {
+      const response = await api.get("/access-requests/all");
+      setAccessRequests(extractArray(response.data));
+    } catch (err) {
+      console.error("Error fetching access requests:", err);
+      setMessage({ type: "error", text: getErrorMessage(err) });
+    }
+  }, []);
+
+  const fetchDailyReports = useCallback(async () => {
+    try {
+      const response = await api.get("/daily-reports/all");
+      setDailyReports(extractArray(response.data));
+    } catch (err) {
+      console.error("Error fetching daily reports:", err);
+      setMessage({ type: "error", text: getErrorMessage(err) });
+    }
+  }, []);
+
   useEffect(() => {
     fetchUsers();
     fetchAccessRequests();
@@ -146,7 +186,7 @@ export default function Users() {
       unsubscribe();
       window.removeEventListener("focus", onFocus);
     };
-  }, []);
+  }, [fetchAccessRequests, fetchDailyReports, fetchUsers]);
 
   useEffect(() => {
     setActiveTab(tabQueryValue);
@@ -155,46 +195,6 @@ export default function Users() {
   const handleTabChange = (tabKey) => {
     setActiveTab(tabKey);
     setSearchParams({ tab: tabKey });
-  };
-
-  const fetchUsers = async () => {
-    try {
-
-      const response = await api.get("/users");
-
-
-      setUsers(extractArray(response.data));
-    } catch (err) {
-      console.error("Error fetching users:", err);
-      setMessage({
-        type: "error",
-        text:
-          select("فشل تحميل المستخدمين: ", "Failed to load users: ") +
-          getErrorMessage(err),
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchAccessRequests = async () => {
-    try {
-      const response = await api.get("/access-requests/all");
-      setAccessRequests(extractArray(response.data));
-    } catch (err) {
-      console.error("Error fetching access requests:", err);
-      setMessage({ type: "error", text: getErrorMessage(err) });
-    }
-  };
-
-  const fetchDailyReports = async () => {
-    try {
-      const response = await api.get("/daily-reports/all");
-      setDailyReports(extractArray(response.data));
-    } catch (err) {
-      console.error("Error fetching daily reports:", err);
-      setMessage({ type: "error", text: getErrorMessage(err) });
-    }
   };
 
   const handleApproveRequest = async (requestId, status, notes = "") => {

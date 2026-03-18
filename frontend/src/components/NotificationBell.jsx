@@ -22,7 +22,7 @@ const TYPE_LABELS = {
   order_missing_escalated: "Critical Order",
 };
 
-const formatTimestamp = (value) => {
+const formatTimestamp = (value, locale) => {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
@@ -38,7 +38,7 @@ const formatTimestamp = (value) => {
     return `${Math.floor(diffMinutes / 60)}h ago`;
   }
 
-  return date.toLocaleString("ar-EG", {
+  return date.toLocaleString(locale === "ar" ? "ar-EG" : "en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -385,7 +385,7 @@ export default function NotificationBell() {
                       ) : null}
                       <div className="flex items-center justify-between gap-2 mt-2">
                         <p className="text-[11px] text-slate-400">
-                          {formatTimestamp(item.created_at)}
+                          {formatTimestamp(item.created_at, locale)}
                         </p>
                         {getNotificationRoute(item, isAdmin) && (
                           <span className="text-[11px] text-blue-600 font-medium">

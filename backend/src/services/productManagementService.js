@@ -1,4 +1,5 @@
 import { Product } from "../models/index.js";
+import { extractProductLocalMetadata } from "../helpers/productLocalMetadata.js";
 
 export class ProductManagementService {
   /**
@@ -34,6 +35,7 @@ export class ProductManagementService {
           productData = {};
         }
       }
+      const localMetadata = extractProductLocalMetadata(productData);
 
       // Extract ALL product details from Shopify data
 
@@ -141,6 +143,8 @@ export class ProductManagementService {
 
       // Metafields (custom fields)
       product.metafields = productData?.metafields || [];
+      product.supplier_phone = localMetadata.supplier_phone;
+      product.supplier_location = localMetadata.supplier_location;
 
       // Inventory tracking
       product.inventory_tracked = variants.some(
@@ -151,7 +155,9 @@ export class ProductManagementService {
         0,
       );
       product.inventory_quantity =
-        variants.length > 0 ? product.total_inventory : product.inventory_quantity;
+        variants.length > 0
+          ? product.total_inventory
+          : product.inventory_quantity;
       product.variants_count = variants.length;
       product.has_multiple_variants = variants.length > 1;
 

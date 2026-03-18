@@ -612,6 +612,19 @@ const hasScopedOrderActivity = (entry) =>
   toNumber(entry?.net_sales) > 0 ||
   toNumber(entry?.orders_count) > 0;
 
+const hasVariantResult = (entry) =>
+  hasScopedOrderActivity(entry) || toNumber(entry?.related_tasks_count) > 0;
+
+const countRelevantVariants = (variants = []) => {
+  const rows = Array.isArray(variants) ? variants : [];
+  if (rows.length === 0) {
+    return 0;
+  }
+
+  const activeCount = rows.filter((variant) => hasVariantResult(variant)).length;
+  return activeCount > 0 ? activeCount : rows.length;
+};
+
 const getFreshCacheEntry = (key) => {
   const entry = analyticsCache.get(key);
   if (!entry) {
@@ -731,15 +744,30 @@ const buildOrderLineEntries = (order, refundDetails, fulfillmentDetails) => {
       orderedQuantity,
       getItemDeliveredQuantity(order, item, fulfillmentDetails),
     );
-    const cancelledQuantity = orderCancelled
+    const returnedQuantity = Math.min(deliveredQuantity, refundedQuantity);
+    const refundedUndeliveredQuantity = Math.max(
+      0,
+      refundedQuantity - returnedQuantity,
+    );
+    const explicitCancelledQuantity = orderCancelled
       ? Math.max(0, orderedQuantity - deliveredQuantity)
       : 0;
+    const cancelledQuantity = Math.min(
+      Math.max(0, orderedQuantity - deliveredQuantity),
+      Math.max(explicitCancelledQuantity, refundedUndeliveredQuantity),
+    );
     const pendingQuantity = Math.max(
       0,
       orderedQuantity - deliveredQuantity - cancelledQuantity,
     );
-    const netDeliveredQuantity = Math.max(0, deliveredQuantity - refundedQuantity);
-    const saleableQuantity = Math.max(0, orderedQuantity - cancelledQuantity);
+    const netDeliveredQuantity = Math.max(
+      0,
+      deliveredQuantity - returnedQuantity,
+    );
+    const saleableQuantity = Math.max(
+      0,
+      orderedQuantity - explicitCancelledQuantity,
+    );
     const orderLineAmount = getLineItemBookedAmount(item);
     const grossSales =
       isPaidLike && orderedQuantity > 0
@@ -766,6 +794,7 @@ const buildOrderLineEntries = (order, refundDetails, fulfillmentDetails) => {
       item,
       orderedQuantity,
       refundedQuantity,
+      returnedQuantity,
       deliveredQuantity,
       cancelledQuantity,
       pendingQuantity,
@@ -868,6 +897,7 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
         item,
         orderedQuantity,
         refundedQuantity,
+        returnedQuantity,
         deliveredQuantity,
         cancelledQuantity,
         pendingQuantity,
@@ -906,7 +936,7 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
       for (const target of targets) {
         target.ordered_quantity += orderedQuantity;
         target.delivered_quantity += deliveredQuantity;
-        target.returned_quantity += refundedQuantity;
+        target.returned_quantity += returnedQuantity;
         target.net_delivered_quantity += netDeliveredQuantity;
         target.pending_quantity += pendingQuantity;
         target.cancelled_quantity += cancelledQuantity;
@@ -992,9 +1022,7 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
   const summary = serializedProducts.reduce(
     (acc, product) => {
       acc.total_products += 1;
-      acc.total_variants += Array.isArray(product?.variants)
-        ? product.variants.length
-        : 0;
+      acc.total_variants += countRelevantVariants(product?.variants);
       acc.ordered_quantity += toNumber(product?.ordered_quantity);
       acc.delivered_quantity += toNumber(product?.delivered_quantity);
       acc.net_delivered_quantity += toNumber(product?.net_delivered_quantity);

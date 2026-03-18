@@ -27,30 +27,91 @@ const SUMMARY_DEFAULT = {
 const CURRENCY_LABEL = "LE";
 const EMPTY_COST_FORM = {
   cost_name: "",
-  cost_type: "ads",
+  cost_type: "operations",
   amount: "",
   apply_to: "per_unit",
   description: "",
 };
-const FIXED_COST_CONFIGS = [
-  { key: "marketing", cost_name: "Marketing Cost", cost_type: "ads" },
-  { key: "shipping", cost_name: "Shipping Cost", cost_type: "shipping" },
-  { key: "other", cost_name: "Other Fixed Cost", cost_type: "other" },
-];
+const COST_TYPE_LABELS = {
+  ads: "Ads",
+  shipping: "Shipping",
+  operations: "Operations",
+  packaging: "Packaging",
+  other: "Other",
+};
+const COST_TYPE_DEFAULT_NAMES = {
+  ads: "Ads Cost",
+  shipping: "Shipping Cost",
+  operations: "Operational Cost",
+  packaging: "Packaging Cost",
+  other: "Other Cost",
+};
+const COST_TYPE_GROUPS = {
+  ads: "ads",
+  shipping: "shipping",
+  operations: "operations",
+  packaging: "other",
+  other: "other",
+};
 
-const formatAmount = (value) => `${Number(value || 0).toFixed(2)} ${CURRENCY_LABEL}`;
-const buildFixedCostsState = (costs) => {
-  const activeFixedCosts = (costs || []).filter(
-    (cost) => !cost.product_id && cost.apply_to === "fixed" && cost.is_active !== false,
+const formatAmount = (value) =>
+  `${Number(value || 0).toFixed(2)} ${CURRENCY_LABEL}`;
+const toAmount = (value) => Number(value || 0);
+const hasCostPrice = (value) =>
+  value !== null && value !== undefined && String(value).trim() !== "";
+const getCostGroupKey = (costType) =>
+  COST_TYPE_GROUPS[String(costType || "").toLowerCase()] || "other";
+const getAppliedCostTotal = (cost, soldQuantity, ordersCount) => {
+  const amount = toAmount(cost?.amount);
+  if (String(cost?.apply_to || "") === "per_order") {
+    return amount * toAmount(ordersCount);
+  }
+  if (String(cost?.apply_to || "") === "fixed") {
+    return amount;
+  }
+  return amount * toAmount(soldQuantity);
+};
+const getApplyToLabel = (applyTo) => {
+  switch (String(applyTo || "")) {
+    case "per_order":
+      return "Per order";
+    case "fixed":
+      return "Fixed";
+    default:
+      return "Per unit";
+  }
+};
+const formatEntryCount = (count) => {
+  if (!count) return "No entries";
+  return `${count} ${count === 1 ? "entry" : "entries"}`;
+};
+const buildProductCostBreakdown = (product, costs) => {
+  const soldQuantity = toAmount(product?.sold_quantity);
+  const ordersCount = toAmount(product?.orders_count);
+  const breakdown = {
+    ads: 0,
+    shipping: 0,
+    operations: 0,
+    other: 0,
+  };
+
+  (costs || []).forEach((cost) => {
+    const bucket = getCostGroupKey(cost?.cost_type);
+    breakdown[bucket] += getAppliedCostTotal(cost, soldQuantity, ordersCount);
+  });
+
+  const operationalTotal = Object.values(breakdown).reduce(
+    (sum, amount) => sum + toAmount(amount),
+    0,
   );
 
-  return FIXED_COST_CONFIGS.reduce((acc, config) => {
-    const total = activeFixedCosts
-      .filter((cost) => cost.cost_type === config.cost_type)
-      .reduce((sum, cost) => sum + Number(cost.amount || 0), 0);
-    acc[config.key] = total > 0 ? String(total) : "";
-    return acc;
-  }, {});
+  return {
+    ...breakdown,
+    operationalTotal: parseFloat(operationalTotal.toFixed(2)),
+    totalCosts: parseFloat(
+      (toAmount(product?.total_cost) + operationalTotal).toFixed(2),
+    ),
+  };
 };
 
 export default function NetProfit() {
@@ -66,14 +127,9 @@ export default function NetProfit() {
 
   const [showCostModal, setShowCostModal] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState(null);
-  const [editingOperationalCostId, setEditingOperationalCostId] = useState(null);
+  const [editingOperationalCostId, setEditingOperationalCostId] =
+    useState(null);
   const [newCost, setNewCost] = useState(EMPTY_COST_FORM);
-
-  const [fixedCosts, setFixedCosts] = useState({
-    marketing: "",
-    shipping: "",
-    other: "",
-  });
 
   const fetchProfitability = useCallback(async () => {
     try {
@@ -96,10 +152,8 @@ export default function NetProfit() {
       const { data } = await api.get("/operational-costs");
       const list = extractArray(data);
       setOperationalCosts(list);
-      setFixedCosts(buildFixedCostsState(list));
     } catch (error) {
       setOperationalCosts([]);
-      setFixedCosts({ marketing: "", shipping: "", other: "" });
     }
   }, []);
 
@@ -136,9 +190,32 @@ export default function NetProfit() {
     );
   }, [products, searchTerm]);
 
+  const operationalCostsByProduct = useMemo(() => {
+    const nextMap = new Map();
+
+    operationalCosts.forEach((cost) => {
+      if (!cost?.product_id || cost.is_active === false) {
+        return;
+      }
+
+      const list = nextMap.get(cost.product_id) || [];
+      list.push(cost);
+      nextMap.set(cost.product_id, list);
+    });
+
+    return nextMap;
+  }, [operationalCosts]);
+
+  const selectedProduct = useMemo(
+    () => products.find((product) => product.id === selectedProductId) || null,
+    [products, selectedProductId],
+  );
+
   const startEditCost = (product) => {
     setEditingProductId(product.id);
-    setEditingCostPrice(String(product.cost_price || 0));
+    setEditingCostPrice(
+      hasCostPrice(product.cost_price) ? String(product.cost_price) : "",
+    );
   };
 
   const cancelEditCost = () => {
@@ -147,9 +224,25 @@ export default function NetProfit() {
   };
 
   const saveCostPrice = async (productId) => {
+    const normalizedCostPrice = String(editingCostPrice || "").trim();
+    const parsedCostPrice = parseFloat(normalizedCostPrice);
+
+    if (!normalizedCostPrice) {
+      setMessage({ type: "error", text: "Product cost is required" });
+      return;
+    }
+
+    if (!Number.isFinite(parsedCostPrice) || parsedCostPrice < 0) {
+      setMessage({
+        type: "error",
+        text: "Product cost must be a valid number",
+      });
+      return;
+    }
+
     try {
       await api.put(`/dashboard/products/${productId}`, {
-        cost_price: parseFloat(editingCostPrice || 0),
+        cost_price: parsedCostPrice,
       });
       setMessage({ type: "success", text: "Cost price updated successfully" });
       cancelEditCost();
@@ -169,7 +262,7 @@ export default function NetProfit() {
       cost
         ? {
             cost_name: cost.cost_name || "",
-            cost_type: cost.cost_type || "ads",
+            cost_type: cost.cost_type || "operations",
             amount: String(cost.amount ?? ""),
             apply_to: cost.apply_to || "per_unit",
             description: cost.description || "",
@@ -187,20 +280,28 @@ export default function NetProfit() {
   };
 
   const saveOperationalCost = async () => {
-    if (!newCost.cost_name || !newCost.amount) {
-      setMessage({ type: "error", text: "Cost name and amount are required" });
+    if (!newCost.amount) {
+      setMessage({ type: "error", text: "Amount is required" });
       return;
     }
 
     try {
+      const normalizedCostName =
+        String(newCost.cost_name || "").trim() ||
+        COST_TYPE_DEFAULT_NAMES[newCost.cost_type] ||
+        "Operational Cost";
       const payload = {
         ...newCost,
+        cost_name: normalizedCostName,
         product_id: selectedProductId,
         amount: parseFloat(newCost.amount),
       };
 
       if (editingOperationalCostId) {
-        await api.put(`/operational-costs/${editingOperationalCostId}`, payload);
+        await api.put(
+          `/operational-costs/${editingOperationalCostId}`,
+          payload,
+        );
       } else {
         await api.post("/operational-costs", payload);
       }
@@ -221,77 +322,6 @@ export default function NetProfit() {
     }
   };
 
-  const saveFixedCosts = async () => {
-    try {
-      for (const config of FIXED_COST_CONFIGS) {
-        const rawValue = String(fixedCosts[config.key] || "").trim();
-        const existingRows = operationalCosts
-          .filter(
-            (cost) =>
-              !cost.product_id &&
-              cost.apply_to === "fixed" &&
-              cost.cost_type === config.cost_type &&
-              cost.is_active !== false,
-          )
-          .sort(
-            (a, b) =>
-              new Date(b.updated_at || b.created_at || 0).getTime() -
-              new Date(a.updated_at || a.created_at || 0).getTime(),
-          );
-
-        if (!rawValue) {
-          for (const cost of existingRows) {
-            await api.put(`/operational-costs/${cost.id}`, {
-              is_active: false,
-            });
-          }
-          continue;
-        }
-
-        const parsedAmount = parseFloat(rawValue);
-        if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
-          throw new Error(`${config.cost_name} must be a valid number`);
-        }
-
-        const primaryRow = existingRows[0] || null;
-        const duplicateRows = existingRows.slice(1);
-
-        if (primaryRow) {
-          await api.put(`/operational-costs/${primaryRow.id}`, {
-            cost_name: config.cost_name,
-            cost_type: config.cost_type,
-            amount: parsedAmount,
-            apply_to: "fixed",
-            product_id: null,
-            is_active: true,
-          });
-        } else {
-          await api.post("/operational-costs", {
-            cost_name: config.cost_name,
-            cost_type: config.cost_type,
-            amount: parsedAmount,
-            apply_to: "fixed",
-            product_id: null,
-          });
-        }
-
-        for (const duplicateRow of duplicateRows) {
-          await api.put(`/operational-costs/${duplicateRow.id}`, {
-            is_active: false,
-          });
-        }
-      }
-
-      setMessage({ type: "success", text: "Fixed costs saved successfully" });
-      await Promise.all([fetchProfitability(), fetchOperationalCosts()]);
-    } catch (error) {
-      setMessage({
-        type: "error",
-        text: error.response?.data?.error || "Failed to save fixed costs",
-      });
-    }
-  };
-
   const deleteOperationalCost = async (costId) => {
     if (!window.confirm("Delete this operational cost?")) return;
     try {
@@ -308,9 +338,7 @@ export default function NetProfit() {
   };
 
   const getProductCosts = (productId) =>
-    operationalCosts.filter(
-      (cost) => cost.product_id === productId && cost.is_active !== false,
-    );
+    operationalCostsByProduct.get(productId) || [];
 
   if (loading) {
     return (
@@ -331,7 +359,8 @@ export default function NetProfit() {
           <div>
             <h1 className="text-3xl font-bold text-gray-800">Net Profit</h1>
             <p className="text-gray-600 mt-1">
-              Per-product profitability based on real sales and operating costs
+              Per-product profitability using product cost, ads, shipping and
+              operating expenses
             </p>
           </div>
 
@@ -386,83 +415,38 @@ export default function NetProfit() {
             />
           </div>
 
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">
-              Add Fixed Operational Costs
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <input
-                type="number"
-                step="0.01"
-                placeholder="Marketing"
-                value={fixedCosts.marketing}
-                onChange={(e) =>
-                  setFixedCosts((prev) => ({
-                    ...prev,
-                    marketing: e.target.value,
-                  }))
-                }
-                className="px-3 py-2 border rounded-lg"
-              />
-              <input
-                type="number"
-                step="0.01"
-                placeholder="Shipping"
-                value={fixedCosts.shipping}
-                onChange={(e) =>
-                  setFixedCosts((prev) => ({
-                    ...prev,
-                    shipping: e.target.value,
-                  }))
-                }
-                className="px-3 py-2 border rounded-lg"
-              />
-              <input
-                type="number"
-                step="0.01"
-                placeholder="Other"
-                value={fixedCosts.other}
-                onChange={(e) =>
-                  setFixedCosts((prev) => ({ ...prev, other: e.target.value }))
-                }
-                className="px-3 py-2 border rounded-lg"
-              />
-              <button
-                onClick={saveFixedCosts}
-                className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4 py-2"
-              >
-                Save Fixed Costs
-              </button>
-            </div>
-          </div>
-
           <div className="bg-white rounded-lg shadow-lg p-4">
-            <div className="flex items-center gap-3">
-              <Search className="text-gray-500" size={18} />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by product name or ID..."
-                className="w-full px-3 py-2 border rounded-lg"
-              />
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-3 flex-1">
+                <Search className="text-gray-500" size={18} />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search by product name or ID..."
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-800 border border-blue-100">
+                Costs are now tracked per product only. Add ads, shipping and
+                operations directly on each item.
+              </div>
             </div>
           </div>
 
           <div className="bg-white rounded-lg shadow-lg overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="data-table table-auto w-full min-w-[1480px]">
+              <table className="data-table table-auto w-full min-w-[1640px]">
                 <colgroup>
                   <col className="w-[320px]" />
                   <col className="w-[90px]" />
                   <col className="w-[90px]" />
                   <col className="w-[120px]" />
-                  <col className="w-[120px]" />
                   <col className="w-[140px]" />
-                  <col className="w-[140px]" />
-                  <col className="w-[220px]" />
+                  <col className="w-[560px]" />
                   <col className="w-[150px]" />
-                  <col className="w-[100px]" />
+                  <col className="w-[150px]" />
+                  <col className="w-[110px]" />
                   <col className="w-[110px]" />
                 </colgroup>
                 <thead className="bg-gray-50">
@@ -480,16 +464,13 @@ export default function NetProfit() {
                       Avg Sell
                     </th>
                     <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
-                      Cost
-                    </th>
-                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
-                      Unit Profit
-                    </th>
-                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
                       Revenue
                     </th>
                     <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
-                      Op. Costs
+                      Cost Breakdown
+                    </th>
+                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
+                      Total Costs
                     </th>
                     <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
                       Net Profit
@@ -506,6 +487,22 @@ export default function NetProfit() {
                   {filteredProducts.map((product) => {
                     const isEditing = editingProductId === product.id;
                     const opCosts = getProductCosts(product.id);
+                    const breakdown = buildProductCostBreakdown(
+                      product,
+                      opCosts,
+                    );
+                    const costGroupsCount = opCosts.reduce(
+                      (acc, cost) => {
+                        const groupKey = getCostGroupKey(cost?.cost_type);
+                        acc[groupKey] = (acc[groupKey] || 0) + 1;
+                        return acc;
+                      },
+                      { ads: 0, shipping: 0, operations: 0, other: 0 },
+                    );
+                    const productCostMissing = !hasCostPrice(
+                      product.cost_price,
+                    );
+
                     return (
                       <tr key={product.id} className="hover:bg-gray-50">
                         <td className="px-5 py-4">
@@ -525,9 +522,12 @@ export default function NetProfit() {
                               <p className="font-semibold text-gray-900 leading-6 break-normal whitespace-normal">
                                 {product.title}
                               </p>
-                              <p className="text-xs text-gray-500 truncate mt-1">
-                                {product.id}
-                              </p>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                                <span className="truncate">{product.id}</span>
+                                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                                  {opCosts.length} tracked costs
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -540,63 +540,139 @@ export default function NetProfit() {
                         <td className="px-4 py-4 text-sm text-right font-medium text-gray-800">
                           {formatAmount(product.avg_selling_price)}
                         </td>
-                        <td className="px-4 py-4 text-sm text-right">
-                          {isEditing ? (
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={editingCostPrice}
-                              onChange={(e) =>
-                                setEditingCostPrice(e.target.value)
-                              }
-                              className="w-28 px-2 py-1 border rounded ml-auto block"
-                            />
-                          ) : (
-                            formatAmount(product.cost_price)
-                          )}
-                        </td>
-                        <td className="px-4 py-4 text-sm text-right text-gray-800">
-                          {formatAmount(product.profit_per_unit)}
-                        </td>
                         <td className="px-4 py-4 text-sm text-right text-blue-700 font-semibold">
                           {formatAmount(product.total_revenue)}
                         </td>
-                        <td className="px-4 py-4 text-sm text-right text-amber-700">
-                          <div className="space-y-2">
-                            <p className="font-medium">
-                              {formatAmount(
-                                Number(product.operational_costs_total || 0) +
-                                  Number(product.fixed_cost_share || 0),
-                              )}
-                            </p>
-                          {opCosts.length > 0 && (
-                            <div className="text-xs text-gray-500 space-y-1">
-                              {opCosts.map((cost) => (
-                                <div
-                                  key={cost.id}
-                                  className="flex items-center justify-end gap-1"
-                                >
-                                  <span>{cost.cost_name}</span>
-                                  <button
-                                    onClick={() => openCostModal(product.id, cost)}
-                                    className="text-blue-500 hover:text-blue-700"
-                                    title="Edit cost"
-                                  >
-                                    <Pencil size={12} />
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      deleteOperationalCost(cost.id)
-                                    }
-                                    className="text-red-500 hover:text-red-700"
-                                    title="Delete cost"
-                                  >
-                                    <Trash2 size={12} />
-                                  </button>
-                                </div>
-                              ))}
+                        <td className="px-4 py-4">
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+                              <BreakdownMetric
+                                label="Product Cost"
+                                value={
+                                  isEditing ? (
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={editingCostPrice}
+                                      onChange={(e) =>
+                                        setEditingCostPrice(e.target.value)
+                                      }
+                                      className="w-full rounded-lg border px-2 py-1.5 text-right"
+                                    />
+                                  ) : productCostMissing ? (
+                                    "Missing"
+                                  ) : (
+                                    `${formatAmount(product.cost_price)} / unit`
+                                  )
+                                }
+                                note={
+                                  productCostMissing
+                                    ? "Set it to calculate the real product cost"
+                                    : `Base total ${formatAmount(product.total_cost)}`
+                                }
+                                valueClassName={
+                                  productCostMissing
+                                    ? "text-amber-700"
+                                    : "text-gray-900"
+                                }
+                              />
+                              <BreakdownMetric
+                                label="Ads"
+                                value={formatAmount(breakdown.ads)}
+                                note={formatEntryCount(costGroupsCount.ads)}
+                                valueClassName="text-rose-700"
+                              />
+                              <BreakdownMetric
+                                label="Shipping"
+                                value={formatAmount(breakdown.shipping)}
+                                note={formatEntryCount(
+                                  costGroupsCount.shipping,
+                                )}
+                                valueClassName="text-sky-700"
+                              />
+                              <BreakdownMetric
+                                label="Operations"
+                                value={formatAmount(breakdown.operations)}
+                                note={formatEntryCount(
+                                  costGroupsCount.operations,
+                                )}
+                                valueClassName="text-amber-700"
+                              />
+                              <BreakdownMetric
+                                label="Other"
+                                value={formatAmount(breakdown.other)}
+                                note={formatEntryCount(costGroupsCount.other)}
+                                valueClassName="text-slate-700"
+                              />
                             </div>
-                          )}
+
+                            {opCosts.length > 0 ? (
+                              <div className="space-y-2">
+                                {opCosts.map((cost) => (
+                                  <div
+                                    key={cost.id}
+                                    className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2"
+                                  >
+                                    <div className="min-w-0 text-right">
+                                      <p className="truncate text-xs font-semibold text-gray-800">
+                                        {cost.cost_name ||
+                                          COST_TYPE_LABELS[cost.cost_type] ||
+                                          "Operational Cost"}
+                                      </p>
+                                      <p className="text-[11px] text-gray-500">
+                                        {COST_TYPE_LABELS[cost.cost_type] ||
+                                          "Other"}{" "}
+                                        | {getApplyToLabel(cost.apply_to)} |{" "}
+                                        {formatAmount(cost.amount)}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-xs font-semibold text-gray-800">
+                                        {formatAmount(
+                                          getAppliedCostTotal(
+                                            cost,
+                                            product.sold_quantity,
+                                            product.orders_count,
+                                          ),
+                                        )}
+                                      </span>
+                                      <button
+                                        onClick={() =>
+                                          openCostModal(product.id, cost)
+                                        }
+                                        className="rounded p-1 text-blue-500 hover:bg-blue-50 hover:text-blue-700"
+                                        title="Edit cost"
+                                      >
+                                        <Pencil size={12} />
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          deleteOperationalCost(cost.id)
+                                        }
+                                        className="rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-700"
+                                        title="Delete cost"
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-gray-500 text-right">
+                                No per-product costs added yet.
+                              </p>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-sm text-right">
+                          <div className="space-y-1">
+                            <p className="font-semibold text-gray-900">
+                              {formatAmount(breakdown.totalCosts)}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Ops {formatAmount(breakdown.operationalTotal)}
+                            </p>
                           </div>
                         </td>
                         <td
@@ -634,14 +710,22 @@ export default function NetProfit() {
                               <>
                                 <button
                                   onClick={() => startEditCost(product)}
-                                  className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                                  title="Edit cost price"
+                                  className={`rounded p-1 ${
+                                    productCostMissing
+                                      ? "text-amber-600 hover:bg-amber-50"
+                                      : "text-blue-600 hover:bg-blue-50"
+                                  }`}
+                                  title={
+                                    productCostMissing
+                                      ? "Set product cost"
+                                      : "Edit cost price"
+                                  }
                                 >
                                   <Edit size={16} />
                                 </button>
                                 <button
                                   onClick={() => openCostModal(product.id)}
-                                  className="p-1 text-purple-600 hover:bg-purple-50 rounded"
+                                  className="rounded p-1 text-emerald-600 hover:bg-emerald-50"
                                   title="Add operational cost"
                                 >
                                   <Plus size={16} />
@@ -671,12 +755,19 @@ export default function NetProfit() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <h2 className="text-xl font-bold mb-4">
-              {editingOperationalCostId ? "Edit Product Cost" : "Add Product Cost"}
+              {editingOperationalCostId
+                ? "Edit Product Cost"
+                : "Add Product Cost"}
             </h2>
+            {selectedProduct && (
+              <p className="mb-4 text-sm text-gray-500">
+                {selectedProduct.title}
+              </p>
+            )}
             <div className="space-y-3">
               <input
                 type="text"
-                placeholder="Cost name"
+                placeholder="Cost name (optional)"
                 value={newCost.cost_name}
                 onChange={(e) =>
                   setNewCost((prev) => ({ ...prev, cost_name: e.target.value }))
@@ -690,8 +781,8 @@ export default function NetProfit() {
                 }
                 className="w-full px-3 py-2 border rounded-lg"
               >
-                <option value="ads">Ads</option>
                 <option value="operations">Operations</option>
+                <option value="ads">Ads</option>
                 <option value="shipping">Shipping</option>
                 <option value="packaging">Packaging</option>
                 <option value="other">Other</option>
@@ -717,6 +808,10 @@ export default function NetProfit() {
                 <option value="per_order">Per Order</option>
                 <option value="fixed">Fixed</option>
               </select>
+              <p className="text-xs text-gray-500">
+                Per unit is multiplied by sold quantity. Per order is multiplied
+                by the number of orders.
+              </p>
               <textarea
                 rows={3}
                 placeholder="Description"
@@ -747,6 +842,25 @@ export default function NetProfit() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function BreakdownMetric({
+  label,
+  value,
+  note,
+  valueClassName = "text-gray-900",
+}) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-right">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+        {label}
+      </p>
+      <div className={`mt-1 text-sm font-semibold ${valueClassName}`}>
+        {value}
+      </div>
+      <p className="mt-1 text-[11px] text-gray-500">{note}</p>
     </div>
   );
 }

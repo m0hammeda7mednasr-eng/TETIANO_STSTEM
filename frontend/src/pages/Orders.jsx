@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -31,6 +38,7 @@ import {
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
 const ORDERS_PAGE_SIZE = 100;
+const ORDERS_VISIBLE_LIMIT = 4500;
 const ORDERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const CURRENCY_LABEL = "LE";
 
@@ -269,7 +277,9 @@ export default function Orders() {
   const initialCachedSnapshot = useMemo(() => {
     const cached = peekCachedView(cacheKey);
     return {
-      rows: Array.isArray(cached?.value?.rows) ? cached.value.rows : [],
+      rows: Array.isArray(cached?.value?.rows)
+        ? cached.value.rows.slice(0, ORDERS_VISIBLE_LIMIT)
+        : [],
       updatedAt: cached?.updatedAt ? new Date(cached.updatedAt) : null,
     };
   }, [cacheKey]);
@@ -288,6 +298,7 @@ export default function Orders() {
     active: false,
     message: "",
   });
+  const deferredSearchTerm = useDeferredValue(filters.searchTerm);
   const refreshTimeoutRef = useRef(null);
   const fetchPromiseRef = useRef(null);
   const missingFetchPromiseRef = useRef(null);
@@ -301,7 +312,9 @@ export default function Orders() {
     let active = true;
 
     readCachedView(cacheKey).then((cached) => {
-      const cachedRows = Array.isArray(cached?.value?.rows) ? cached.value.rows : [];
+      const cachedRows = Array.isArray(cached?.value?.rows)
+        ? cached.value.rows.slice(0, ORDERS_VISIBLE_LIMIT)
+        : [];
       if (!active || cachedRows.length === 0 || cachedRows.length <= ordersRef.current.length) {
         return;
       }
@@ -365,7 +378,7 @@ export default function Orders() {
       return fetchPromiseRef.current;
     }
 
-      const request = (async () => {
+    const request = (async () => {
       if (!silent) {
         setLoading(Boolean(forceSync));
         setError("");
@@ -374,52 +387,40 @@ export default function Orders() {
       setLoadStatus({
         active: true,
         message: forceSync
-          ? "Refreshing Shopify orders and loading saved data..."
-          : "Loading orders in batches...",
+          ? `Refreshing Shopify orders and loading the latest ${ORDERS_VISIBLE_LIMIT.toLocaleString()} orders...`
+          : `Loading the latest ${ORDERS_VISIBLE_LIMIT.toLocaleString()} orders...`,
       });
 
       try {
-        const rows = await fetchAllPagesProgressively(
-          ({ limit, offset, pageIndex }) =>
-            api.get("/shopify/orders", {
-              params: {
-                limit,
-                offset,
-                sort_by: "created_at",
-                sort_dir: "desc",
-                sync_recent:
-                  forceSync && pageIndex === 0 ? "force" : "false",
-              },
-            }),
-          {
-            limit: ORDERS_PAGE_SIZE,
-            onPage: ({ rows: accumulatedRows, hasMore }) => {
-              setOrders(accumulatedRows);
-              setLastUpdatedAt(new Date());
-              setLoadStatus({
-                active: hasMore,
-                message: hasMore
-                  ? `Loaded ${accumulatedRows.length.toLocaleString()} orders so far...`
-                  : `Loaded ${accumulatedRows.length.toLocaleString()} orders`,
-              });
-              if (!silent && forceSync) {
-                setLoading(false);
-              }
+        const [ordersResponse] = await Promise.all([
+          api.get("/shopify/orders", {
+            params: {
+              limit: ORDERS_VISIBLE_LIMIT,
+              offset: 0,
+              sort_by: "created_at",
+              sort_dir: "desc",
+              sync_recent: forceSync ? "force" : "false",
             },
-          },
-        );
+          }),
+          fetchMissingOrderIds(),
+        ]);
+
+        const rows = Array.isArray(ordersResponse?.data?.data)
+          ? ordersResponse.data.data.slice(0, ORDERS_VISIBLE_LIMIT)
+          : [];
 
         setOrders(rows);
-        await fetchMissingOrderIds();
         setLastUpdatedAt(new Date());
         setLoadStatus({
           active: false,
           message:
             rows.length > 0
-              ? `Loaded ${rows.length.toLocaleString()} orders`
+              ? `Loaded ${rows.length.toLocaleString()} recent orders`
               : "No orders found",
         });
-        await writeCachedView(cacheKey, { rows });
+        await writeCachedView(cacheKey, {
+          rows: rows.slice(0, ORDERS_VISIBLE_LIMIT),
+        });
       } catch (requestError) {
         console.error("Error fetching orders:", requestError);
         if (!silent) {
@@ -480,7 +481,7 @@ export default function Orders() {
         return;
       }
 
-      await fetchMissingOrderIds();
+      void fetchMissingOrderIds();
 
       const hasCachedRows = Array.isArray(cached?.value?.rows) && cached.value.rows.length > 0;
       if (!hasCachedRows && !isCacheFresh(cached, ORDERS_CACHE_FRESH_MS)) {
@@ -558,9 +559,9 @@ export default function Orders() {
       (order) => !missingOrderIdSet.has(String(order?.id || "").trim()),
     );
 
-    if (filters.searchTerm.trim()) {
+    if (deferredSearchTerm.trim()) {
       result = result.filter((order) => {
-        return matchesOrderSearch(order._searchIndex, filters.searchTerm);
+        return matchesOrderSearch(order._searchIndex, deferredSearchTerm);
       });
     }
 
@@ -672,7 +673,7 @@ export default function Orders() {
     });
 
     return result;
-  }, [filters, missingOrderIdSet, ordersWithMeta]);
+  }, [deferredSearchTerm, filters, missingOrderIdSet, ordersWithMeta]);
 
   const selectableOrders = useMemo(
     () =>
@@ -1036,8 +1037,9 @@ export default function Orders() {
                   />
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  Multi-word search supports customer, phone, email, product title, SKU,
-                  payment, fulfillment, and order number.
+                  Showing the latest {ORDERS_VISIBLE_LIMIT.toLocaleString()} orders only.
+                  Search supports customer name, phone digits, email, product title,
+                  SKU, payment, fulfillment, and order number.
                 </p>
               </div>
 

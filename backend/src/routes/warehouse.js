@@ -4,6 +4,10 @@ import { authenticateToken } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { getAccessibleStoreIds } from "../models/index.js";
 import { emitRealtimeEvent } from "../services/realtimeEventService.js";
+import {
+  buildWarehouseVariantCatalog,
+  normalizeWarehouseCode,
+} from "../helpers/warehouseCatalog.js";
 
 const router = express.Router();
 
@@ -40,7 +44,6 @@ const PRODUCT_LOOKUP_SELECT = [
   "created_at",
   "data",
 ].join(",");
-const DEFAULT_VARIANT_TITLES = new Set(["default", "default title"]);
 const productCatalogCache = new Map();
 
 const createHttpError = (status, message) => {
@@ -84,31 +87,11 @@ const getRequestedStoreId = (req) => {
 const resolveIsAdmin = (req) =>
   Boolean(req.user?.isAdmin || String(req.user?.role || "").toLowerCase() === "admin");
 
-const normalizeSku = (value) =>
-  String(value || "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toUpperCase();
+const normalizeSku = (value) => normalizeWarehouseCode(value);
 
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const parseJsonField = (value) => {
-  if (!value) {
-    return {};
-  }
-
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return {};
-    }
-  }
-
-  return value;
 };
 
 const toPositiveInteger = (value, fallback = 1) => {
@@ -299,174 +282,6 @@ const resolveStoreContext = async (req) => {
   throw createHttpError(400, "Select a store first before using warehouse tools");
 };
 
-const getProductVariantRows = (product) => {
-  const parsedData = parseJsonField(product?.data);
-  return Array.isArray(parsedData?.variants) ? parsedData.variants : [];
-};
-
-const getProductImageRows = (product) => {
-  const parsedData = parseJsonField(product?.data);
-  const images = Array.isArray(parsedData?.images) ? parsedData.images : [];
-
-  return images.map((image) => ({
-    id: image?.id || null,
-    src: image?.src || "",
-    variant_ids: Array.isArray(image?.variant_ids) ? image.variant_ids : [],
-  }));
-};
-
-const getProductPrimaryImageUrl = (product) => {
-  const parsedData = parseJsonField(product?.data);
-  return (
-    parsedData?.image?.src ||
-    parsedData?.featured_image?.src ||
-    String(product?.image_url || "").trim() ||
-    ""
-  );
-};
-
-const resolveVariantImageUrl = (variant, imageRows = [], fallbackImageUrl = "") => {
-  const variantId = String(variant?.id || "").trim();
-  const variantImageId = String(variant?.image_id || "").trim();
-
-  if (variantImageId) {
-    const directImage = imageRows.find(
-      (image) => String(image?.id || "").trim() === variantImageId,
-    );
-    if (directImage?.src) {
-      return directImage.src;
-    }
-  }
-
-  if (variantId) {
-    const linkedImage = imageRows.find((image) =>
-      Array.isArray(image?.variant_ids) &&
-      image.variant_ids.some((value) => String(value || "").trim() === variantId),
-    );
-    if (linkedImage?.src) {
-      return linkedImage.src;
-    }
-  }
-
-  return fallbackImageUrl;
-};
-
-const getVariantDisplayTitle = (product, variant, index) => {
-  const rawTitle = String(variant?.title || "").trim();
-  if (!rawTitle) {
-    return `Variant ${index + 1}`;
-  }
-
-  const normalizedTitle = rawTitle.toLowerCase();
-  if (DEFAULT_VARIANT_TITLES.has(normalizedTitle)) {
-    return "Default Variant";
-  }
-
-  const normalizedProductTitle = String(product?.title || "").trim().toLowerCase();
-  if (normalizedProductTitle && normalizedTitle === normalizedProductTitle) {
-    return "Default Variant";
-  }
-
-  return rawTitle;
-};
-
-const buildFallbackVariant = (product) => ({
-  id: product?.shopify_id || product?.id || null,
-  title: product?.title || "Default Variant",
-  sku: product?.sku || "",
-  barcode: "",
-  price: product?.price ?? null,
-  inventory_quantity: product?.inventory_quantity ?? 0,
-  created_at: product?.created_at || null,
-  updated_at: product?.updated_at || null,
-});
-
-const buildWarehouseVariantCatalogEntry = (product, variant, index, variantsCount) => {
-  const rawSku = String(variant?.sku || product?.sku || "").trim();
-  const normalizedSku = normalizeSku(rawSku);
-  if (!normalizedSku) {
-    return null;
-  }
-
-  const imageRows = getProductImageRows(product);
-  const fallbackImageUrl = getProductPrimaryImageUrl(product);
-  const variantTitle = getVariantDisplayTitle(product, variant, index);
-  const isDefaultVariant = variantTitle === "Default Variant";
-  const productTitle = product?.title || "Untitled product";
-
-  return {
-    key: `${product?.id || "product"}:${variant?.id || normalizedSku}:${index}`,
-    id: variant?.id || normalizedSku,
-    product_id: product?.id || null,
-    variant_id: variant?.id || null,
-    shopify_id: product?.shopify_id || null,
-    store_id: product?.store_id || null,
-    title: productTitle,
-    product_title: productTitle,
-    variant_title: variantTitle,
-    display_title: isDefaultVariant ? productTitle : `${productTitle} / ${variantTitle}`,
-    vendor: product?.vendor || "",
-    product_type: product?.product_type || "",
-    sku: rawSku || normalizedSku,
-    normalized_sku: normalizedSku,
-    barcode: String(variant?.barcode || "").trim(),
-    image_url: resolveVariantImageUrl(variant, imageRows, fallbackImageUrl),
-    price: variant?.price ?? product?.price ?? null,
-    shopify_inventory_quantity: toNumber(
-      variant?.inventory_quantity ?? product?.inventory_quantity,
-    ),
-    has_multiple_variants: variantsCount > 1,
-    variants_count: variantsCount,
-    option_values: [variant?.option1, variant?.option2, variant?.option3]
-      .map((value) => String(value || "").trim())
-      .filter(Boolean),
-    last_synced_at: product?.last_synced_at || null,
-    created_at: variant?.created_at || product?.created_at || null,
-    updated_at: variant?.updated_at || product?.updated_at || null,
-  };
-};
-
-const buildWarehouseVariantCatalog = (products = []) => {
-  const rows = [];
-  const rowsBySku = new Map();
-  const duplicateSkus = new Set();
-
-  for (const product of products) {
-    const variants = getProductVariantRows(product);
-    const normalizedVariants =
-      variants.length > 0 ? variants : [buildFallbackVariant(product)];
-
-    normalizedVariants.forEach((variant, index) => {
-      const entry = buildWarehouseVariantCatalogEntry(
-        product,
-        variant,
-        index,
-        normalizedVariants.length,
-      );
-
-      if (!entry) {
-        return;
-      }
-
-      rows.push(entry);
-
-      const normalizedSku = entry.normalized_sku;
-      const existing = rowsBySku.get(normalizedSku);
-      if (existing) {
-        duplicateSkus.add(normalizedSku);
-      } else {
-        rowsBySku.set(normalizedSku, entry);
-      }
-    });
-  }
-
-  return {
-    rows,
-    rowsBySku,
-    duplicateSkus,
-  };
-};
-
 const loadAllStoreProducts = async (storeId) => {
   const rows = [];
   const pageSize = 500;
@@ -521,7 +336,7 @@ const getInventoryRowsForStore = async (storeId) => {
   return data || [];
 };
 
-const mapInventoryRowsBySku = (rows = []) =>
+const mapInventoryRowsByCode = (rows = []) =>
   new Map(
     (rows || [])
       .filter((row) => normalizeSku(row?.sku))
@@ -545,13 +360,25 @@ const serializeWarehouseVariantRow = (variantRow, inventoryRow) => {
     display_title:
       variantRow?.display_title ||
       variantRow?.title ||
-      `Archived SKU ${inventoryRow?.sku || ""}`.trim(),
+      `Archived code ${inventoryRow?.sku || ""}`.trim(),
     vendor: variantRow?.vendor || "",
     product_type: variantRow?.product_type || "",
+    warehouse_code:
+      variantRow?.warehouse_code || normalizeSku(variantRow?.sku || inventoryRow?.sku),
+    warehouse_code_source: variantRow?.warehouse_code_source || "legacy",
     sku: variantRow?.sku || inventoryRow?.sku || "",
     normalized_sku:
       variantRow?.normalized_sku || normalizeSku(variantRow?.sku || inventoryRow?.sku),
     barcode: variantRow?.barcode || "",
+    normalized_barcode:
+      variantRow?.normalized_barcode || normalizeSku(variantRow?.barcode),
+    barcode_or_sku:
+      variantRow?.barcode_or_sku ||
+      variantRow?.sku ||
+      variantRow?.barcode ||
+      inventoryRow?.sku ||
+      "",
+    barcode_or_sku_label: variantRow?.barcode_or_sku_label || "Code",
     image_url: variantRow?.image_url || "",
     option_values: Array.isArray(variantRow?.option_values)
       ? variantRow.option_values
@@ -569,6 +396,10 @@ const serializeWarehouseVariantRow = (variantRow, inventoryRow) => {
     has_multiple_variants: Boolean(variantRow?.has_multiple_variants),
     variants_count: toNumber(variantRow?.variants_count),
     is_archived: Boolean(variantRow?.is_archived),
+    is_scannable:
+      variantRow?.is_scannable !== undefined
+        ? Boolean(variantRow.is_scannable)
+        : Boolean(variantRow?.warehouse_code || inventoryRow?.sku),
     last_scanned_at: inventoryRow?.last_scanned_at || null,
     last_movement_type: inventoryRow?.last_movement_type || null,
     last_movement_quantity: toNumber(inventoryRow?.last_movement_quantity),
@@ -589,12 +420,17 @@ const buildOrphanWarehouseRow = (inventoryRow) =>
       title: "Archived product",
       product_title: "Archived product",
       variant_title: "Unknown Variant",
-      display_title: `Archived SKU ${inventoryRow?.sku || ""}`.trim(),
+      display_title: `Archived code ${inventoryRow?.sku || ""}`.trim(),
       is_archived: true,
+      warehouse_code: normalizeSku(inventoryRow?.sku),
+      warehouse_code_source: "legacy",
       sku: inventoryRow?.sku || "",
       normalized_sku: normalizeSku(inventoryRow?.sku),
+      barcode_or_sku: inventoryRow?.sku || "",
+      barcode_or_sku_label: "Legacy code",
       shopify_inventory_quantity: 0,
       price: null,
+      is_scannable: Boolean(inventoryRow?.sku),
       has_multiple_variants: false,
       variants_count: 0,
       option_values: [],
@@ -615,8 +451,8 @@ const sortWarehouseRows = (rows, { sortBy, ascending }) => {
 
     switch (sortBy) {
       case "sku":
-        leftValue = left?.normalized_sku || "";
-        rightValue = right?.normalized_sku || "";
+        leftValue = left?.warehouse_code || left?.normalized_sku || "";
+        rightValue = right?.warehouse_code || right?.normalized_sku || "";
         break;
       case "price":
         leftValue = toNumber(left?.price);
@@ -657,35 +493,35 @@ const sortWarehouseRows = (rows, { sortBy, ascending }) => {
       return 1 * direction;
     }
 
-    return String(left?.normalized_sku || "").localeCompare(
-      String(right?.normalized_sku || ""),
+    return String(left?.warehouse_code || left?.normalized_sku || "").localeCompare(
+      String(right?.warehouse_code || right?.normalized_sku || ""),
     );
   });
 
   return sortedRows;
 };
 
-const findCatalogVariantBySku = async ({ storeId, scanCode }) => {
-  const normalizedSku = normalizeSku(scanCode);
-  if (!normalizedSku) {
+const findCatalogVariantByScanCode = async ({ storeId, scanCode }) => {
+  const normalizedCode = normalizeSku(scanCode);
+  if (!normalizedCode) {
     return null;
   }
 
   const catalog = await getWarehouseProductCatalog(storeId);
 
-  if (catalog.duplicateSkus.has(normalizedSku)) {
+  if (catalog.duplicateScanCodes.has(normalizedCode)) {
     throw createHttpError(
       409,
-      `More than one variant uses SKU ${normalizedSku}. SKU must be unique per store.`,
+      `More than one variant matches code ${normalizedCode}. SKU or barcode must be unique per store.`,
     );
   }
 
-  return catalog.rowsBySku.get(normalizedSku) || null;
+  return catalog.rowsByAnyCode.get(normalizedCode) || null;
 };
 
 const enrichScanEvent = (scan, catalog) => {
-  const normalizedSku = normalizeSku(scan?.sku);
-  const variantRow = normalizedSku ? catalog.rowsBySku.get(normalizedSku) : null;
+  const normalizedCode = normalizeSku(scan?.sku || scan?.scan_code);
+  const variantRow = normalizedCode ? catalog.rowsByAnyCode.get(normalizedCode) : null;
   const fallbackProduct = scan?.product || {};
 
   return {
@@ -699,9 +535,11 @@ const enrichScanEvent = (scan, catalog) => {
         variantRow?.product_title || fallbackProduct?.title || "Archived product",
       variant_title: variantRow?.variant_title || "Unknown Variant",
       display_title:
-        variantRow?.display_title || fallbackProduct?.title || scan?.sku || "-",
+        variantRow?.display_title || fallbackProduct?.title || scan?.sku || scan?.scan_code || "-",
+      warehouse_code: variantRow?.warehouse_code || normalizedCode || "",
+      warehouse_code_source: variantRow?.warehouse_code_source || "legacy",
       sku: variantRow?.sku || fallbackProduct?.sku || scan?.sku || "-",
-      normalized_sku: variantRow?.normalized_sku || normalizedSku,
+      normalized_sku: variantRow?.normalized_sku || normalizeSku(variantRow?.sku),
       vendor: variantRow?.vendor || fallbackProduct?.vendor || "",
       image_url: variantRow?.image_url || "",
       barcode: variantRow?.barcode || "",
@@ -731,8 +569,8 @@ const writeActivityLog = async ({
       entity_name:
         product?.display_title || product?.title || product?.sku || scanCode,
       details: {
-        sku: product?.sku || scanCode,
-        normalized_sku: normalizeSku(scanCode),
+        sku: product?.warehouse_code || product?.sku || scanCode,
+        normalized_sku: normalizeSku(product?.warehouse_code || scanCode),
         product_id: product?.product_id || product?.id || null,
         variant_id: product?.variant_id || null,
         movement_type: movementType,
@@ -764,15 +602,18 @@ router.get("/stock", async (req, res) => {
       getInventoryRowsForStore(storeId),
     ]);
 
-    const inventoryBySku = mapInventoryRowsBySku(inventoryRows);
+    const inventoryByCode = mapInventoryRowsByCode(inventoryRows);
     const catalogRows = catalog.rows.map((variantRow) =>
       serializeWarehouseVariantRow(
         variantRow,
-        inventoryBySku.get(variantRow.normalized_sku),
+        inventoryByCode.get(variantRow.warehouse_code),
       ),
     );
     const orphanRows = inventoryRows
-      .filter((inventoryRow) => !catalog.rowsBySku.has(normalizeSku(inventoryRow?.sku)))
+      .filter(
+        (inventoryRow) =>
+          !catalog.rowsByPrimaryCode.has(normalizeSku(inventoryRow?.sku)),
+      )
       .map((inventoryRow) => buildOrphanWarehouseRow(inventoryRow));
     const sortedRows = sortWarehouseRows(
       [...catalogRows, ...orphanRows],
@@ -860,26 +701,26 @@ router.post("/scan", async (req, res) => {
     const movementType = String(req.body?.movement_type || "").trim().toLowerCase();
     const quantity = toPositiveInteger(req.body?.quantity, 1);
     const scanCode = String(req.body?.code || req.body?.sku || "").trim();
-    const normalizedSku = normalizeSku(scanCode);
+    const normalizedScanCode = normalizeSku(scanCode);
     const note = String(req.body?.note || "").trim();
 
-    if (!normalizedSku) {
-      throw createHttpError(400, "SKU code is required");
+    if (!normalizedScanCode) {
+      throw createHttpError(400, "Scan code is required");
     }
 
     if (!MOVEMENT_TYPES.has(movementType)) {
       throw createHttpError(400, "movement_type must be either in or out");
     }
 
-    const product = await findCatalogVariantBySku({
+    const product = await findCatalogVariantByScanCode({
       storeId,
-      scanCode: normalizedSku,
+      scanCode: normalizedScanCode,
     });
 
     if (!product) {
       throw createHttpError(
         404,
-        `No product was found for SKU ${normalizedSku} in the selected store`,
+        `No product was found for code ${normalizedScanCode} in the selected store`,
       );
     }
 
@@ -889,7 +730,7 @@ router.post("/scan", async (req, res) => {
         "id, store_id, product_id, sku, quantity, last_scanned_at, last_movement_type, last_movement_quantity",
       )
       .eq("store_id", storeId)
-      .eq("sku", normalizedSku)
+      .eq("sku", product.warehouse_code)
       .maybeSingle();
 
     if (inventoryLookupError && inventoryLookupError.code !== "PGRST116") {
@@ -903,7 +744,7 @@ router.post("/scan", async (req, res) => {
     if (nextQuantity < 0) {
       throw createHttpError(
         400,
-        `Cannot scan out ${quantity}. Available warehouse quantity for ${normalizedSku} is ${currentQuantity}.`,
+        `Cannot scan out ${quantity}. Available warehouse quantity for ${product.warehouse_code} is ${currentQuantity}.`,
       );
     }
 
@@ -911,7 +752,7 @@ router.post("/scan", async (req, res) => {
     const inventoryPayload = {
       store_id: storeId,
       product_id: product.product_id,
-      sku: normalizedSku,
+      sku: product.warehouse_code,
       quantity: nextQuantity,
       last_scanned_at: nowIso,
       last_movement_type: movementType,
@@ -954,7 +795,7 @@ router.post("/scan", async (req, res) => {
       .from("warehouse_scan_events")
       .insert({
         store_id: storeId,
-        sku: normalizedSku,
+        sku: product.warehouse_code,
         product_id: product.product_id,
         user_id: req.user?.id || null,
         movement_type: movementType,
@@ -991,7 +832,7 @@ router.post("/scan", async (req, res) => {
       payload: {
         resource: "warehouse",
         context: "scanner",
-        sku: normalizedSku,
+        sku: product.warehouse_code,
         movement_type: movementType,
         quantity,
       },
@@ -1000,8 +841,8 @@ router.post("/scan", async (req, res) => {
     res.status(201).json({
       message:
         movementType === "in"
-          ? `Warehouse stock increased for SKU ${normalizedSku}`
-          : `Warehouse stock decreased for SKU ${normalizedSku}`,
+          ? `Warehouse stock increased for code ${product.warehouse_code}`
+          : `Warehouse stock decreased for code ${product.warehouse_code}`,
       product: {
         id: product.product_id,
         product_id: product.product_id,
@@ -1010,6 +851,8 @@ router.post("/scan", async (req, res) => {
         product_title: product.product_title,
         variant_title: product.variant_title,
         display_title: product.display_title,
+        warehouse_code: product.warehouse_code,
+        warehouse_code_source: product.warehouse_code_source,
         sku: product.sku,
         vendor: product.vendor,
         price: product.price,

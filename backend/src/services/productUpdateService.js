@@ -1,5 +1,10 @@
 import axios from "axios";
 import { Product } from "../models/index.js";
+import {
+  extractProductLocalMetadata,
+  mergeProductLocalMetadata,
+  preserveProductLocalMetadata,
+} from "../helpers/productLocalMetadata.js";
 
 const getShopifyTokenForStore = async (storeId, fallbackUserId) => {
   const { supabase } = await import("../supabaseClient.js");
@@ -33,6 +38,7 @@ const parseNumeric = (value) => {
 };
 
 const normalizeSku = (value) => String(value ?? "").trim();
+const normalizeText = (value) => String(value ?? "").trim();
 
 const hasOwn = (value, key) =>
   Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
@@ -160,10 +166,48 @@ export class ProductUpdateService {
    * Update product (price, cost_price, inventory, sku) locally and sync with Shopify
    */
   static async updateProduct(userId, productId, updates) {
-    const { price, cost_price, inventory, sku } = updates;
+    const {
+      price,
+      cost_price,
+      inventory,
+      sku,
+      supplier_phone,
+      supplier_location,
+    } = updates;
     const variantUpdates = Array.isArray(updates?.variant_updates)
       ? updates.variant_updates
       : [];
+    const localFieldUpdates = {};
+    if (hasOwn(updates, "supplier_phone")) {
+      localFieldUpdates.supplier_phone = normalizeText(supplier_phone);
+    }
+    if (hasOwn(updates, "supplier_location")) {
+      localFieldUpdates.supplier_location = normalizeText(supplier_location);
+    }
+    const localOnlyFields = [];
+    if (cost_price !== undefined) {
+      localOnlyFields.push("cost_price");
+    }
+    if (hasOwn(localFieldUpdates, "supplier_phone")) {
+      localOnlyFields.push("supplier_phone");
+    }
+    if (hasOwn(localFieldUpdates, "supplier_location")) {
+      localOnlyFields.push("supplier_location");
+    }
+    const shopifyFields = [];
+    if (price !== undefined) {
+      shopifyFields.push("price");
+    }
+    if (inventory !== undefined) {
+      shopifyFields.push("inventory");
+    }
+    if (sku !== undefined) {
+      shopifyFields.push("sku");
+    }
+    if (variantUpdates.length > 0) {
+      shopifyFields.push("variants");
+    }
+    const requiresShopifySync = shopifyFields.length > 0;
 
     // Validation
     if (price !== undefined) {
@@ -187,6 +231,18 @@ export class ProductUpdateService {
     }
     if (sku !== undefined && normalizeSku(sku).length > 255) {
       throw new Error("SKU exceeds maximum allowed length");
+    }
+    if (
+      hasOwn(localFieldUpdates, "supplier_phone") &&
+      localFieldUpdates.supplier_phone.length > 100
+    ) {
+      throw new Error("Supplier phone exceeds maximum allowed length");
+    }
+    if (
+      hasOwn(localFieldUpdates, "supplier_location") &&
+      localFieldUpdates.supplier_location.length > 255
+    ) {
+      throw new Error("Supplier location exceeds maximum allowed length");
     }
     for (const variantUpdate of variantUpdates) {
       if (!variantUpdate?.id) {
@@ -247,13 +303,38 @@ export class ProductUpdateService {
       const currentProductData = parseProductData(product.data);
       let nextProductData = cloneJsonValue(currentProductData);
 
+      const oldValues = {};
+      const currentLocalMetadata =
+        extractProductLocalMetadata(currentProductData);
+
+      if (
+        hasOwn(localFieldUpdates, "supplier_phone") &&
+        localFieldUpdates.supplier_phone !== currentLocalMetadata.supplier_phone
+      ) {
+        oldValues.supplier_phone = currentLocalMetadata.supplier_phone;
+      }
+      if (
+        hasOwn(localFieldUpdates, "supplier_location") &&
+        localFieldUpdates.supplier_location !==
+          currentLocalMetadata.supplier_location
+      ) {
+        oldValues.supplier_location = currentLocalMetadata.supplier_location;
+      }
+
+      if (Object.keys(localFieldUpdates).length > 0) {
+        nextProductData = mergeProductLocalMetadata(
+          nextProductData,
+          localFieldUpdates,
+        );
+      }
+
       // Build update object
       const updateData = {
-        pending_sync: true,
+        pending_sync: requiresShopifySync,
+        sync_error: null,
         local_updated_at: new Date().toISOString(),
       };
 
-      const oldValues = {};
       if (price !== undefined) {
         updateData.price = price;
         oldValues.price = product.price;
@@ -287,13 +368,11 @@ export class ProductUpdateService {
       }
 
       if (variantUpdates.length > 0) {
-        nextProductData = applyVariantUpdates(
-          nextProductData,
-          variantUpdates,
-        );
+        nextProductData = applyVariantUpdates(nextProductData, variantUpdates);
       }
 
-      const hasVariantBackedData = getProductVariants(nextProductData).length > 0;
+      const hasVariantBackedData =
+        getProductVariants(nextProductData).length > 0;
       const primaryVariant = hasVariantBackedData
         ? getProductVariants(nextProductData)[0] || null
         : null;
@@ -326,6 +405,13 @@ export class ProductUpdateService {
           ? getTotalInventory(getProductVariants(nextProductData), inventory)
           : inventory;
       }
+      if (
+        Object.keys(localFieldUpdates).length > 0 &&
+        !Object.prototype.hasOwnProperty.call(oldValues, "data")
+      ) {
+        oldValues.data = cloneJsonValue(currentProductData);
+        updateData.data = nextProductData;
+      }
 
       // Update locally
       const { error: updateError } = await Product.update(
@@ -337,11 +423,16 @@ export class ProductUpdateService {
       }
 
       // Log operation
-      this.logActivity(userId, 'product_update', productId, product.title, { updates, old_values: oldValues });
-      await this.logSyncOperation(userId, productId, "product_update", {
+      this.logActivity(userId, "product_update", productId, product.title, {
         updates,
         old_values: oldValues,
       });
+      if (requiresShopifySync) {
+        await this.logSyncOperation(userId, productId, "product_update", {
+          updates,
+          old_values: oldValues,
+        });
+      }
 
       // Sync to Shopify asynchronously (only price, inventory, and sku; not cost_price)
       const shopifyUpdates = {};
@@ -355,7 +446,7 @@ export class ProductUpdateService {
         shopifyUpdates.variant_updates = variantUpdates;
       }
 
-      if (Object.keys(shopifyUpdates).length > 0) {
+      if (requiresShopifySync) {
         try {
           await this.syncToShopify(userId, productId, shopifyUpdates);
         } catch (syncError) {
@@ -368,17 +459,22 @@ export class ProductUpdateService {
           if (Object.prototype.hasOwnProperty.call(oldValues, "price")) {
             rollbackData.price = oldValues.price;
           }
-          if (Object.prototype.hasOwnProperty.call(oldValues, "cost_price")) {
-            rollbackData.cost_price = oldValues.cost_price;
-          }
-          if (Object.prototype.hasOwnProperty.call(oldValues, "inventory_quantity")) {
+          if (
+            Object.prototype.hasOwnProperty.call(
+              oldValues,
+              "inventory_quantity",
+            )
+          ) {
             rollbackData.inventory_quantity = oldValues.inventory_quantity;
           }
           if (Object.prototype.hasOwnProperty.call(oldValues, "sku")) {
             rollbackData.sku = oldValues.sku;
           }
           if (Object.prototype.hasOwnProperty.call(oldValues, "data")) {
-            rollbackData.data = oldValues.data;
+            rollbackData.data =
+              Object.keys(localFieldUpdates).length > 0
+                ? mergeProductLocalMetadata(oldValues.data, localFieldUpdates)
+                : oldValues.data;
           }
 
           const { error: rollbackError } = await Product.update(
@@ -386,7 +482,10 @@ export class ProductUpdateService {
             rollbackData,
           );
           if (rollbackError) {
-            console.error("Rollback failed after Shopify sync failure:", rollbackError);
+            console.error(
+              "Rollback failed after Shopify sync failure:",
+              rollbackError,
+            );
           }
           throw new Error(
             `Shopify sync failed. Local changes were reverted: ${syncError.message}`,
@@ -397,8 +496,9 @@ export class ProductUpdateService {
       return {
         success: true,
         localUpdate: true,
-        shopifySync:
-          Object.keys(shopifyUpdates).length > 0 ? "synced" : "not_needed",
+        shopifySync: requiresShopifySync ? "synced" : "not_needed",
+        shopifyFields,
+        localOnlyFields,
       };
     } catch (error) {
       console.error("Update product error:", error);
@@ -442,7 +542,10 @@ export class ProductUpdateService {
   static async syncToShopify(userId, productId, updates) {
     try {
       // Get product and Shopify token
-      const { data: product } = await Product.findByIdForUser(userId, productId);
+      const { data: product } = await Product.findByIdForUser(
+        userId,
+        productId,
+      );
       if (!product || !product.shopify_id) {
         throw new Error("Product not found or missing Shopify ID");
       }
@@ -454,12 +557,14 @@ export class ProductUpdateService {
       }
 
       // Build Shopify API payload
-      const parsedProductData =
-        parseProductData(product.data);
+      const parsedProductData = parseProductData(product.data);
 
       let variantPayloads = [];
 
-      if (Array.isArray(updates.variant_updates) && updates.variant_updates.length > 0) {
+      if (
+        Array.isArray(updates.variant_updates) &&
+        updates.variant_updates.length > 0
+      ) {
         const variants = getProductVariants(parsedProductData);
         variantPayloads = updates.variant_updates.map((variantUpdate) => {
           const matchingVariant = variants.find(
@@ -532,13 +637,23 @@ export class ProductUpdateService {
 
       // Update sync status
       const syncedProductData = response.data?.product || parsedProductData;
+      const mergedSyncedProductData = preserveProductLocalMetadata(
+        syncedProductData,
+        product.data,
+      );
       const syncedVariants = getProductVariants(syncedProductData);
       const syncedPrimaryVariant = syncedVariants[0] || {};
-      const requestedPrimaryVariantUpdate = Array.isArray(updates.variant_updates)
+      const requestedPrimaryVariantUpdate = Array.isArray(
+        updates.variant_updates,
+      )
         ? updates.variant_updates.find(
             (variantUpdate) =>
               String(variantUpdate?.id || "") ===
-              String(syncedPrimaryVariant?.id || parsedProductData?.variants?.[0]?.id || ""),
+              String(
+                syncedPrimaryVariant?.id ||
+                  parsedProductData?.variants?.[0]?.id ||
+                  "",
+              ),
           ) || null
         : null;
       const resolvedPrimaryPrice =
@@ -553,7 +668,8 @@ export class ProductUpdateService {
               : product.price;
       const resolvedPrimarySku = hasOwn(syncedPrimaryVariant, "sku")
         ? normalizeSku(syncedPrimaryVariant.sku)
-        : requestedPrimaryVariantUpdate && hasOwn(requestedPrimaryVariantUpdate, "sku")
+        : requestedPrimaryVariantUpdate &&
+            hasOwn(requestedPrimaryVariantUpdate, "sku")
           ? normalizeSku(requestedPrimaryVariantUpdate.sku)
           : updates.sku !== undefined
             ? normalizeSku(updates.sku)
@@ -564,7 +680,7 @@ export class ProductUpdateService {
         last_synced_at: new Date().toISOString(),
         shopify_updated_at: response.data.product.updated_at,
         sync_error: null,
-        data: syncedProductData,
+        data: mergedSyncedProductData,
         inventory_quantity: getTotalInventory(
           syncedVariants,
           product.inventory_quantity,

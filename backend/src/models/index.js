@@ -1,4 +1,5 @@
 import { supabase } from "../supabaseClient.js";
+import { preserveProductLocalMetadata } from "../helpers/productLocalMetadata.js";
 
 const sortByCreatedAtDesc = { ascending: false };
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
@@ -70,10 +71,7 @@ const executeWithSchemaAndEmptyFallback = (
       }
 
       lastError = error;
-      if (
-        !continueOnUnexpectedError &&
-        !isSchemaCompatibilityError(error)
-      ) {
+      if (!continueOnUnexpectedError && !isSchemaCompatibilityError(error)) {
         return { data: null, error };
       }
     }
@@ -223,7 +221,9 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
 
     if (!primaryScopeResult.error) {
       return {
-        data: Array.isArray(primaryScopeResult.data) ? primaryScopeResult.data : [],
+        data: Array.isArray(primaryScopeResult.data)
+          ? primaryScopeResult.data
+          : [],
         error: null,
       };
     }
@@ -236,14 +236,18 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
 
   if (result.error && isSchemaCompatibilityError(result.error)) {
     return {
-      data: Array.isArray(primaryScopeResult.data) ? primaryScopeResult.data : [],
+      data: Array.isArray(primaryScopeResult.data)
+        ? primaryScopeResult.data
+        : [],
       error: null,
     };
   }
 
   if (result.error && !primaryScopeResult.error) {
     return {
-      data: Array.isArray(primaryScopeResult.data) ? primaryScopeResult.data : [],
+      data: Array.isArray(primaryScopeResult.data)
+        ? primaryScopeResult.data
+        : [],
       error: null,
     };
   }
@@ -278,17 +282,15 @@ const findRowByIdForUserWithFallback = async (tableName, userId, id) => {
     }
   }
 
-  const { data, error } = await executeWithSchemaAndEmptyFallback(
-    [
-      async () =>
-        supabase
-          .from(tableName)
-          .select()
-          .eq("id", id)
-          .eq("user_id", userId)
-          .maybeSingle(),
-    ],
-  );
+  const { data, error } = await executeWithSchemaAndEmptyFallback([
+    async () =>
+      supabase
+        .from(tableName)
+        .select()
+        .eq("id", id)
+        .eq("user_id", userId)
+        .maybeSingle(),
+  ]);
 
   if (error && isSchemaCompatibilityError(error)) {
     return { data: primaryScopeResult.data || null, error: null };
@@ -395,9 +397,9 @@ const syncRowsIndividually = async (tableName, rows, itemLabel) => {
     error:
       failures.length > 0
         ? {
-          message: `Failed to sync ${failures.length} ${itemLabel} rows`,
-          details: failures,
-        }
+            message: `Failed to sync ${failures.length} ${itemLabel} rows`,
+            details: failures,
+          }
         : null,
   };
 };
@@ -462,6 +464,84 @@ const upsertRowsWithManualFallback = async (tableName, rows, itemLabel) => {
     data: persistedRows,
     error: null,
   };
+};
+
+const findMatchingProductRow = (existingRows = [], row = {}) => {
+  const normalizedShopifyId = String(row?.shopify_id || "").trim();
+  if (!normalizedShopifyId) {
+    return null;
+  }
+
+  const scopedRows = existingRows.filter(
+    (existingRow) =>
+      String(existingRow?.shopify_id || "").trim() === normalizedShopifyId,
+  );
+
+  if (scopedRows.length === 0) {
+    return null;
+  }
+
+  const normalizedStoreId = String(row?.store_id || "").trim();
+  if (normalizedStoreId) {
+    const byStore = scopedRows.find(
+      (existingRow) =>
+        String(existingRow?.store_id || "").trim() === normalizedStoreId,
+    );
+    if (byStore) {
+      return byStore;
+    }
+  }
+
+  const normalizedUserId = String(row?.user_id || "").trim();
+  if (normalizedUserId) {
+    const byUser = scopedRows.find(
+      (existingRow) =>
+        String(existingRow?.user_id || "").trim() === normalizedUserId,
+    );
+    if (byUser) {
+      return byUser;
+    }
+  }
+
+  return scopedRows[0];
+};
+
+const preserveLocalProductMetadataForUpserts = async (rows = []) => {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return rows;
+  }
+
+  const shopifyIds = Array.from(
+    new Set(
+      rows.map((row) => String(row?.shopify_id || "").trim()).filter(Boolean),
+    ),
+  );
+
+  if (shopifyIds.length === 0) {
+    return rows;
+  }
+
+  const { data: existingRows, error } = await supabase
+    .from("products")
+    .select("shopify_id, store_id, user_id, data")
+    .in("shopify_id", shopifyIds);
+
+  if (error) {
+    console.warn("Product local metadata preservation skipped:", error.message);
+    return rows;
+  }
+
+  return rows.map((row) => {
+    const matchingRow = findMatchingProductRow(existingRows || [], row);
+    if (!matchingRow?.data || row?.data === undefined) {
+      return row;
+    }
+
+    return {
+      ...row,
+      data: preserveProductLocalMetadata(row.data, matchingRow.data),
+    };
+  });
 };
 
 export const getAccessibleStoreIds = async (userId, context = {}) => {
@@ -692,10 +772,12 @@ export const Product = {
       created_at: p.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }));
+    const upsertsWithPreservedLocalMetadata =
+      await preserveLocalProductMetadataForUpserts(upserts);
 
     return await upsertRowsWithManualFallback(
       "products",
-      upserts,
+      upsertsWithPreservedLocalMetadata,
       "product",
     );
   },
@@ -761,11 +843,7 @@ export const Customer = {
       updated_at: new Date().toISOString(),
     }));
 
-    return await upsertRowsWithManualFallback(
-      "customers",
-      upserts,
-      "customer",
-    );
+    return await upsertRowsWithManualFallback("customers", upserts, "customer");
   },
 };
 

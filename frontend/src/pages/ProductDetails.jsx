@@ -20,6 +20,67 @@ const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+const formatMoney = (value) =>
+  `${toNumber(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} ${CURRENCY_LABEL}`;
+const formatCount = (value) => toNumber(value).toLocaleString("ar-EG");
+const toArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
+const formatTextList = (values, fallback = "-") => {
+  const list = toArray(values)
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return list.length > 0 ? list.join("، ") : fallback;
+};
+
+const PRODUCT_FIELD_LABELS = {
+  price: "Price",
+  inventory: "Inventory",
+  sku: "SKU",
+  variants: "Variant changes",
+  cost_price: "Cost price",
+  supplier_phone: "Supplier phone",
+  supplier_location: "Supplier location",
+};
+const formatFieldList = (fields = []) => {
+  const labels = Array.from(
+    new Set(
+      fields
+        .map((field) => PRODUCT_FIELD_LABELS[field] || field)
+        .filter(Boolean),
+    ),
+  );
+
+  if (labels.length === 0) return "";
+  if (labels.length === 1) return labels[0];
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels.at(-1)}`;
+};
+const buildSaveMessage = (result = {}) => {
+  const shopifyFields = Array.isArray(result?.shopifyFields)
+    ? result.shopifyFields
+    : [];
+  const localOnlyFields = Array.isArray(result?.localOnlyFields)
+    ? result.localOnlyFields
+    : [];
+
+  if (shopifyFields.length > 0 && localOnlyFields.length > 0) {
+    return `Saved. ${formatFieldList(shopifyFields)} synced to Shopify. ${formatFieldList(localOnlyFields)} saved locally only.`;
+  }
+
+  if (shopifyFields.length > 0) {
+    return `Saved. ${formatFieldList(shopifyFields)} synced to Shopify.`;
+  }
+
+  if (localOnlyFields.length > 0) {
+    return `Saved. ${formatFieldList(localOnlyFields)} saved locally only.`;
+  }
+
+  return result?.shopifySync === "synced"
+    ? "Saved and synced to Shopify."
+    : "Saved locally.";
+};
 
 const cloneVariantDrafts = (variants = []) =>
   variants.map((variant) => ({
@@ -47,9 +108,7 @@ export default function ProductDetails() {
   const hasMultipleVariants = (product?.variants?.length || 0) > 1;
   const editedVariantsById = useMemo(
     () =>
-      new Map(
-        editedVariants.map((variant) => [String(variant.id), variant]),
-      ),
+      new Map(editedVariants.map((variant) => [String(variant.id), variant])),
     [editedVariants],
   );
 
@@ -68,7 +127,13 @@ export default function ProductDetails() {
     return editing
       ? toNumber(editedProduct.inventory_quantity)
       : toNumber(product.inventory_quantity);
-  }, [editedProduct.inventory_quantity, editedVariants, editing, hasMultipleVariants, product]);
+  }, [
+    editedProduct.inventory_quantity,
+    editedVariants,
+    editing,
+    hasMultipleVariants,
+    product,
+  ]);
 
   const fetchProductDetails = useCallback(async () => {
     setLoading(true);
@@ -97,6 +162,12 @@ export default function ProductDetails() {
       const nextPrice = parseFloat(editedProduct.price);
       const nextInventory = parseInt(editedProduct.inventory_quantity, 10);
       const nextSku = String(editedProduct.sku || "").trim();
+      const nextSupplierPhone = String(
+        editedProduct.supplier_phone || "",
+      ).trim();
+      const nextSupplierLocation = String(
+        editedProduct.supplier_location || "",
+      ).trim();
 
       if (
         !hasMultipleVariants &&
@@ -129,6 +200,16 @@ export default function ProductDetails() {
         nextSku !== String(product.sku || "").trim()
       ) {
         payload.sku = nextSku;
+      }
+
+      if (nextSupplierPhone !== String(product.supplier_phone || "").trim()) {
+        payload.supplier_phone = nextSupplierPhone;
+      }
+
+      if (
+        nextSupplierLocation !== String(product.supplier_location || "").trim()
+      ) {
+        payload.supplier_location = nextSupplierLocation;
       }
 
       const originalVariantsById = new Map(
@@ -188,7 +269,22 @@ export default function ProductDetails() {
         return;
       }
 
-      await api.post(`/shopify/products/${id}/update`, payload);
+      const response = await api.post(
+        `/shopify/products/${id}/update`,
+        payload,
+      );
+      const saveResult = response.data || {};
+      showNotification(buildSaveMessage(saveResult), "success");
+      setEditing(false);
+
+      if (saveResult.shopifySync === "synced") {
+        setTimeout(() => {
+          fetchProductDetails();
+        }, 1500);
+      } else {
+        fetchProductDetails();
+      }
+      return;
 
       showNotification(
         "تم الحفظ بنجاح، جاري المزامنة مع Shopify...",
@@ -429,6 +525,17 @@ export default function ProductDetails() {
                 </div>
               )}
 
+              <ProductSupplyChainSection
+                sourcing={product.supply_chain}
+                onOpenSupplier={(supplierId) =>
+                  navigate(
+                    supplierId
+                      ? `/suppliers?supplier=${encodeURIComponent(supplierId)}`
+                      : "/suppliers",
+                  )
+                }
+              />
+
               {/* Variants */}
               {product.variants && product.variants.length > 0 && (
                 <div className="bg-white rounded-lg shadow p-6">
@@ -437,8 +544,8 @@ export default function ProductDetails() {
                   </h2>
                   {hasMultipleVariants && (
                     <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                      تحكم في مخزون كل Variant من هنا، وإجمالي المخزون بيتحدث
-                      من مجموع كل الفاريانتس.
+                      تحكم في مخزون كل Variant من هنا، وإجمالي المخزون بيتحدث من
+                      مجموع كل الفاريانتس.
                     </div>
                   )}
                   <div className="space-y-3">
@@ -447,185 +554,198 @@ export default function ProductDetails() {
                         editedVariantsById.get(String(variant.id || "")) || {};
                       const displayedVariantPrice =
                         editing && hasMultipleVariants
-                          ? variantDraft.price ?? variant.price
+                          ? (variantDraft.price ?? variant.price)
                           : variant.price;
                       const displayedVariantSku =
                         editing && hasMultipleVariants
-                          ? variantDraft.sku ?? variant.sku
+                          ? (variantDraft.sku ?? variant.sku)
                           : variant.sku;
                       const displayedVariantInventory = toNumber(
                         editing && hasMultipleVariants
-                          ? variantDraft.inventory_quantity ??
-                              variant.inventory_quantity
+                          ? (variantDraft.inventory_quantity ??
+                              variant.inventory_quantity)
                           : variant.inventory_quantity,
                       );
 
                       return (
-                      <div
-                        key={index}
-                        className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
-                        data-variant-inventory={displayedVariantInventory}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <p className="font-semibold text-gray-800">
-                              {variant.title}
-                            </p>
-                            {(displayedVariantSku || (editing && hasMultipleVariants)) && (
-                              <p className="text-sm text-gray-600">
-                                SKU: {displayedVariantSku || "-"}
+                        <div
+                          key={index}
+                          className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+                          data-variant-inventory={displayedVariantInventory}
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <p className="font-semibold text-gray-800">
+                                {variant.title}
                               </p>
-                            )}
-                            {variant.barcode && (
-                              <p className="text-sm text-gray-600">
-                                Barcode: {variant.barcode}
-                              </p>
-                            )}
-                            {variant.weight && (
-                              <p className="text-sm text-gray-600">
-                                الوزن: {variant.weight} {variant.weight_unit}
-                              </p>
-                            )}
-                            <div className="flex gap-4 mt-2">
-                              {variant.option1 && (
-                                <span className="text-xs bg-gray-100 px-2 py-1 rounded">
-                                  {variant.option1}
-                                </span>
+                              {(displayedVariantSku ||
+                                (editing && hasMultipleVariants)) && (
+                                <p className="text-sm text-gray-600">
+                                  SKU: {displayedVariantSku || "-"}
+                                </p>
                               )}
-                              {variant.option2 && (
-                                <span className="text-xs bg-gray-100 px-2 py-1 rounded">
-                                  {variant.option2}
-                                </span>
+                              {variant.barcode && (
+                                <p className="text-sm text-gray-600">
+                                  Barcode: {variant.barcode}
+                                </p>
                               )}
-                              {variant.option3 && (
-                                <span className="text-xs bg-gray-100 px-2 py-1 rounded">
-                                  {variant.option3}
-                                </span>
+                              {variant.weight && (
+                                <p className="text-sm text-gray-600">
+                                  الوزن: {variant.weight} {variant.weight_unit}
+                                </p>
+                              )}
+                              <div className="flex gap-4 mt-2">
+                                {variant.option1 && (
+                                  <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                    {variant.option1}
+                                  </span>
+                                )}
+                                {variant.option2 && (
+                                  <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                    {variant.option2}
+                                  </span>
+                                )}
+                                {variant.option3 && (
+                                  <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                    {variant.option3}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-left">
+                              <p className="text-lg font-bold text-gray-800">
+                                {displayedVariantPrice} {CURRENCY_LABEL}
+                              </p>
+                              {variant.compare_at_price &&
+                                parseFloat(variant.compare_at_price) >
+                                  parseFloat(displayedVariantPrice) && (
+                                  <p className="text-sm text-gray-500 line-through">
+                                    {variant.compare_at_price} {CURRENCY_LABEL}
+                                  </p>
+                                )}
+                              <p
+                                className={`text-sm ${
+                                  toNumber(
+                                    editing
+                                      ? (editedVariantsById.get(
+                                          String(variant.id || ""),
+                                        )?.inventory_quantity ??
+                                          variant.inventory_quantity)
+                                      : variant.inventory_quantity,
+                                  ) > 10
+                                    ? "text-green-600"
+                                    : toNumber(
+                                          editing
+                                            ? (editedVariantsById.get(
+                                                String(variant.id || ""),
+                                              )?.inventory_quantity ??
+                                                variant.inventory_quantity)
+                                            : variant.inventory_quantity,
+                                        ) > 0
+                                      ? "text-yellow-600"
+                                      : "text-red-600"
+                                }`}
+                              >
+                                المخزون:{" "}
+                                {toNumber(
+                                  editing
+                                    ? (editedVariantsById.get(
+                                        String(variant.id || ""),
+                                      )?.inventory_quantity ??
+                                        variant.inventory_quantity)
+                                    : variant.inventory_quantity,
+                                )}
+                              </p>
+                              {editing &&
+                                canEditProducts &&
+                                hasMultipleVariants && (
+                                  <div className="mt-3 space-y-3">
+                                    <div>
+                                      <label className="mb-1 block text-xs font-medium text-gray-600">
+                                        SKU
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={
+                                          variantDraft.sku ??
+                                          String(variant.sku || "")
+                                        }
+                                        onChange={(event) =>
+                                          handleVariantFieldChange(
+                                            variant.id,
+                                            "sku",
+                                            event.target.value,
+                                          )
+                                        }
+                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="SKU-001"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="mb-1 block text-xs font-medium text-gray-600">
+                                        ØªØ¹Ø¯ÙŠÙ„ Ø§Ù„Ø³Ø¹Ø±
+                                      </label>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={
+                                          variantDraft.price ??
+                                          String(variant.price ?? "")
+                                        }
+                                        onChange={(event) =>
+                                          handleVariantFieldChange(
+                                            variant.id,
+                                            "price",
+                                            event.target.value,
+                                          )
+                                        }
+                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="mb-1 block text-xs font-medium text-gray-600">
+                                        تعديل مخزون هذا الـ Variant
+                                      </label>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        value={
+                                          editedVariantsById.get(
+                                            String(variant.id || ""),
+                                          )?.inventory_quantity ??
+                                          String(
+                                            toNumber(
+                                              variant.inventory_quantity,
+                                            ),
+                                          )
+                                        }
+                                        onChange={(event) =>
+                                          handleVariantFieldChange(
+                                            variant.id,
+                                            "inventory_quantity",
+                                            event.target.value,
+                                          )
+                                        }
+                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              {variant.requires_shipping && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  يتطلب شحن
+                                </p>
+                              )}
+                              {variant.taxable && (
+                                <p className="text-xs text-gray-500">
+                                  خاضع للضريبة
+                                </p>
                               )}
                             </div>
                           </div>
-                          <div className="text-left">
-                            <p className="text-lg font-bold text-gray-800">
-                              {displayedVariantPrice} {CURRENCY_LABEL}
-                            </p>
-                            {variant.compare_at_price &&
-                              parseFloat(variant.compare_at_price) >
-                                parseFloat(displayedVariantPrice) && (
-                                <p className="text-sm text-gray-500 line-through">
-                                  {variant.compare_at_price} {CURRENCY_LABEL}
-                                </p>
-                              )}
-                            <p
-                              className={`text-sm ${
-                                toNumber(
-                                  editing
-                                    ? editedVariantsById.get(
-                                        String(variant.id || ""),
-                                      )?.inventory_quantity ??
-                                        variant.inventory_quantity
-                                    : variant.inventory_quantity,
-                                ) > 10
-                                  ? "text-green-600"
-                                  : toNumber(
-                                        editing
-                                          ? editedVariantsById.get(
-                                              String(variant.id || ""),
-                                            )?.inventory_quantity ??
-                                              variant.inventory_quantity
-                                          : variant.inventory_quantity,
-                                      ) > 0
-                                    ? "text-yellow-600"
-                                    : "text-red-600"
-                              }`}
-                            >
-                              المخزون:{" "}
-                              {toNumber(
-                                editing
-                                  ? editedVariantsById.get(
-                                      String(variant.id || ""),
-                                    )?.inventory_quantity ??
-                                      variant.inventory_quantity
-                                  : variant.inventory_quantity,
-                              )}
-                            </p>
-                            {editing && canEditProducts && hasMultipleVariants && (
-                              <div className="mt-3 space-y-3">
-                                <div>
-                                  <label className="mb-1 block text-xs font-medium text-gray-600">
-                                    SKU
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={variantDraft.sku ?? String(variant.sku || "")}
-                                    onChange={(event) =>
-                                      handleVariantFieldChange(
-                                        variant.id,
-                                        "sku",
-                                        event.target.value,
-                                      )
-                                    }
-                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="SKU-001"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="mb-1 block text-xs font-medium text-gray-600">
-                                    ØªØ¹Ø¯ÙŠÙ„ Ø§Ù„Ø³Ø¹Ø±
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={variantDraft.price ?? String(variant.price ?? "")}
-                                    onChange={(event) =>
-                                      handleVariantFieldChange(
-                                        variant.id,
-                                        "price",
-                                        event.target.value,
-                                      )
-                                    }
-                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                  />
-                                </div>
-                                <div>
-                                <label className="mb-1 block text-xs font-medium text-gray-600">
-                                  تعديل مخزون هذا الـ Variant
-                                </label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  value={
-                                    editedVariantsById.get(
-                                      String(variant.id || ""),
-                                    )?.inventory_quantity ??
-                                    String(toNumber(variant.inventory_quantity))
-                                  }
-                                  onChange={(event) =>
-                                    handleVariantFieldChange(
-                                      variant.id,
-                                      "inventory_quantity",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                />
-                              </div>
-                              </div>
-                            )}
-                            {variant.requires_shipping && (
-                              <p className="text-xs text-gray-500 mt-1">
-                                يتطلب شحن
-                              </p>
-                            )}
-                            {variant.taxable && (
-                              <p className="text-xs text-gray-500">
-                                خاضع للضريبة
-                              </p>
-                            )}
-                          </div>
                         </div>
-                      </div>
                       );
                     })}
                   </div>
@@ -891,9 +1011,13 @@ export default function ProductDetails() {
                   معلومات المنتج
                 </h2>
                 <div className="space-y-3">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    SKU syncs with Shopify. Supplier phone and location are
+                    saved on this product locally.
+                  </div>
                   {product.vendor && (
                     <div>
-                      <p className="text-sm text-gray-600">المورد</p>
+                      <p className="text-sm text-gray-600">Vendor في Shopify</p>
                       <p className="font-semibold text-gray-800">
                         {product.vendor}
                       </p>
@@ -928,6 +1052,9 @@ export default function ProductDetails() {
                           {product.sku || "-"}
                         </p>
                       )}
+                      <p className="mt-1 text-xs text-gray-500">
+                        Primary SKU syncs to Shopify.
+                      </p>
                     </div>
                   ) : null}
                   {editing && hasMultipleVariants && (
@@ -935,6 +1062,58 @@ export default function ProductDetails() {
                       <p className="text-sm text-gray-600">SKU</p>
                       <p className="font-semibold text-gray-800">
                         Edit each variant SKU in the variants section.
+                      </p>
+                    </div>
+                  )}
+                  {(editing || product.supplier_phone) && (
+                    <div>
+                      <p className="text-sm text-gray-600">Supplier Phone</p>
+                      {editing ? (
+                        <input
+                          type="text"
+                          value={editedProduct.supplier_phone || ""}
+                          onChange={(e) =>
+                            setEditedProduct({
+                              ...editedProduct,
+                              supplier_phone: e.target.value,
+                            })
+                          }
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="01000000000"
+                        />
+                      ) : (
+                        <p className="font-semibold text-gray-800">
+                          {product.supplier_phone || "-"}
+                        </p>
+                      )}
+                      <p className="mt-1 text-xs text-gray-500">
+                        Saved locally on this product. Not synced to Shopify.
+                      </p>
+                    </div>
+                  )}
+                  {(editing || product.supplier_location) && (
+                    <div>
+                      <p className="text-sm text-gray-600">Supplier Location</p>
+                      {editing ? (
+                        <input
+                          type="text"
+                          value={editedProduct.supplier_location || ""}
+                          onChange={(e) =>
+                            setEditedProduct({
+                              ...editedProduct,
+                              supplier_location: e.target.value,
+                            })
+                          }
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Warehouse, city, or supplier location"
+                        />
+                      ) : (
+                        <p className="font-semibold text-gray-800">
+                          {product.supplier_location || "-"}
+                        </p>
+                      )}
+                      <p className="mt-1 text-xs text-gray-500">
+                        Saved locally on this product. Not synced to Shopify.
                       </p>
                     </div>
                   )}
@@ -1036,8 +1215,7 @@ export default function ProductDetails() {
                     <div>
                       <p className="text-sm text-gray-600">السعر الأصلي</p>
                       <p className="text-lg font-bold text-gray-500 line-through">
-                        {product.compare_at_price_min}{" "}
-                        {CURRENCY_LABEL}
+                        {product.compare_at_price_min} {CURRENCY_LABEL}
                       </p>
                     </div>
                     <div>
@@ -1204,6 +1382,292 @@ export default function ProductDetails() {
           </div>
         </div>
       </main>
+    </div>
+  );
+}
+
+function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
+  if (!sourcing) {
+    return null;
+  }
+
+  const suppliers = toArray(sourcing.suppliers);
+  const fabrics = toArray(sourcing.fabrics);
+  const variants = toArray(sourcing.variants);
+  const deliveries = toArray(sourcing.deliveries);
+
+  return (
+    <div className="bg-white rounded-lg shadow p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">سلسلة التوريد</h2>
+          <p className="mt-2 text-sm text-gray-600">
+            الموردين والأقمشة والواردات المرتبطة بهذا المنتج بشكل مباشر.
+          </p>
+        </div>
+        <button
+          onClick={() => onOpenSupplier("")}
+          className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100"
+        >
+          فتح شاشة الموردين
+        </button>
+      </div>
+
+      {sourcing.deliveries_count > 0 ? (
+        <>
+          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <SupplyMetric
+              label="عدد الموردين"
+              value={formatCount(sourcing.supplier_count)}
+            />
+            <SupplyMetric
+              label="عدد الواردات"
+              value={formatCount(sourcing.deliveries_count)}
+            />
+            <SupplyMetric
+              label="إجمالي الكمية"
+              value={formatCount(sourcing.total_quantity)}
+            />
+            <SupplyMetric
+              label="إجمالي التكلفة"
+              value={formatMoney(sourcing.total_cost)}
+            />
+          </div>
+
+          <div className="mt-6 grid gap-6 xl:grid-cols-2">
+            <div className="space-y-3">
+              <h3 className="text-base font-semibold text-gray-800">
+                الموردون
+              </h3>
+              {suppliers.map((supplier) => (
+                <div
+                  key={supplier.supplier_id || supplier.name}
+                  className="rounded-xl border border-gray-200 bg-gray-50 p-4"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">
+                        {supplier.name || "-"}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {supplier.code ? `الكود: ${supplier.code}` : "بدون كود"}
+                        {supplier.phone ? ` | ${supplier.phone}` : ""}
+                      </div>
+                    </div>
+                    {supplier.supplier_id ? (
+                      <button
+                        onClick={() => onOpenSupplier(supplier.supplier_id)}
+                        className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      >
+                        فتح المورد
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <SupplyInlineStat
+                      label="الكمية"
+                      value={formatCount(supplier.total_quantity)}
+                    />
+                    <SupplyInlineStat
+                      label="التكلفة"
+                      value={formatMoney(supplier.total_cost)}
+                    />
+                    <SupplyInlineStat
+                      label="الأقمشة"
+                      value={formatTextList(supplier.fabrics)}
+                    />
+                    <SupplyInlineStat
+                      label="المتغيرات"
+                      value={formatTextList(supplier.variants)}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <div className="text-sm font-semibold text-gray-900">
+                  الأقمشة المرتبطة
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {fabrics.length > 0 ? (
+                    fabrics.map((fabric) => (
+                      <span
+                        key={fabric.key || fabric.fabric_name}
+                        className="rounded-full bg-white px-3 py-1 text-sm text-gray-700 border border-gray-200"
+                      >
+                        {fabric.fabric_name}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-gray-500">
+                      لا توجد أقمشة مسجلة.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <div className="text-sm font-semibold text-gray-900">
+                  تفاصيل المتغيرات
+                </div>
+                {variants.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {variants.map((variant) => (
+                      <div
+                        key={
+                          variant.key ||
+                          `${variant.product_name}-${variant.variant_title}`
+                        }
+                        className="rounded-lg border border-gray-200 bg-white p-3"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {variant.variant_title ||
+                                variant.product_name ||
+                                "-"}
+                            </div>
+                            <div className="mt-1 text-xs text-gray-500">
+                              {variant.sku ? `SKU: ${variant.sku}` : "بدون SKU"}
+                            </div>
+                          </div>
+                          <div className="text-sm font-semibold text-gray-800">
+                            {formatCount(variant.total_quantity)} قطعة
+                          </div>
+                        </div>
+                        <div className="mt-2 text-xs text-gray-600">
+                          الخامات: {formatTextList(variant.fabrics)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-3 text-sm text-gray-500">
+                    لا توجد متغيرات أو موردون مسجلون لهذا المنتج حتى الآن.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 space-y-3">
+            <h3 className="text-base font-semibold text-gray-800">
+              آخر الواردات
+            </h3>
+            {deliveries.map((delivery) => (
+              <details
+                key={delivery.id}
+                className="rounded-xl border border-gray-200 bg-gray-50"
+              >
+                <summary className="cursor-pointer list-none p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">
+                        {delivery.supplier_name || "مورد غير محدد"}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {delivery.entry_date
+                          ? new Date(delivery.entry_date).toLocaleDateString(
+                              "ar-EG",
+                            )
+                          : "بدون تاريخ"}
+                        {delivery.reference_code
+                          ? ` | مرجع: ${delivery.reference_code}`
+                          : ""}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-left text-xs sm:min-w-[220px]">
+                      <SupplyMiniStat
+                        label="الكمية"
+                        value={formatCount(delivery.quantity)}
+                      />
+                      <SupplyMiniStat
+                        label="التكلفة"
+                        value={formatMoney(delivery.total_cost)}
+                      />
+                    </div>
+                  </div>
+                </summary>
+                <div className="border-t border-gray-200 bg-white p-4">
+                  <div className="space-y-3">
+                    {toArray(delivery.items).map((item, index) => (
+                      <div
+                        key={`${delivery.id}-${index}`}
+                        className="rounded-lg border border-gray-200 bg-gray-50 p-3"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {item.variant_title || item.product_name || "-"}
+                            </div>
+                            <div className="mt-1 text-xs text-gray-500">
+                              {item.sku ? `SKU: ${item.sku}` : "بدون SKU"}
+                            </div>
+                          </div>
+                          <div className="text-sm font-semibold text-gray-800">
+                            {formatMoney(item.total_cost)}
+                          </div>
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <SupplyInlineStat
+                            label="القماش"
+                            value={item.fabric_name || item.material || "-"}
+                          />
+                          <SupplyInlineStat
+                            label="الوصف"
+                            value={item.material || "-"}
+                          />
+                          <SupplyInlineStat
+                            label="الكمية"
+                            value={formatCount(item.quantity)}
+                          />
+                          <SupplyInlineStat
+                            label="تكلفة الوحدة"
+                            value={formatMoney(item.unit_cost)}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </details>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="mt-6 rounded-xl border border-dashed border-gray-300 bg-gray-50 p-6 text-sm text-gray-500">
+          لا توجد حركات موردين مرتبطة بهذا المنتج حتى الآن.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SupplyMetric({ label, value }) {
+  return (
+    <div className="rounded-xl border border-sky-100 bg-sky-50 p-4">
+      <div className="text-xs font-medium text-sky-700">{label}</div>
+      <div className="mt-2 text-lg font-bold text-sky-900">{value}</div>
+    </div>
+  );
+}
+
+function SupplyInlineStat({ label, value }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+      <div className="text-[11px] text-gray-500">{label}</div>
+      <div className="mt-1 text-sm font-medium text-gray-800">{value}</div>
+    </div>
+  );
+}
+
+function SupplyMiniStat({ label, value }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+      <div className="text-[11px] text-gray-500">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-gray-800">{value}</div>
     </div>
   );
 }

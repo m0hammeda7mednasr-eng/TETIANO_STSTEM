@@ -26,6 +26,7 @@ import { authenticateToken } from "../middleware/auth.js";
 import { supabase as db } from "../supabaseClient.js";
 import { extractCustomerPhone } from "../helpers/customerContact.js";
 import { buildProductsSummaryExportPayload } from "../helpers/orderExport.js";
+import { buildProductSourcingDetail } from "../helpers/suppliers.js";
 
 const router = express.Router();
 
@@ -35,7 +36,8 @@ const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 200;
-const ORDER_LIST_PAGE_LIMIT = 100;
+const ORDER_LIST_PAGE_LIMIT = 4500;
+const ORDER_LIST_MAX_VISIBLE = 4500;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MISSING_ORDER_GRACE_MS = 3 * DAY_MS;
 const MISSING_ORDER_ESCALATION_MS = 6 * DAY_MS;
@@ -256,6 +258,24 @@ const CUSTOMER_LIST_SELECTS = [
     "data",
   ].join(","),
 ];
+const PRODUCT_SOURCING_SUPPLIER_SELECT = [
+  "id",
+  "name",
+  "code",
+  "phone",
+  "is_active",
+].join(",");
+const PRODUCT_SOURCING_ENTRY_SELECT = [
+  "id",
+  "supplier_id",
+  "entry_type",
+  "entry_date",
+  "reference_code",
+  "description",
+  "amount",
+  "items",
+  "created_at",
+].join(",");
 const PRODUCT_SORT_FIELDS = new Set([
   "created_at",
   "updated_at",
@@ -432,6 +452,30 @@ const buildPaginatedCollection = (rows, { limit, offset }) => {
   };
 };
 
+const buildLimitedPaginatedCollection = (
+  rows,
+  { limit, offset },
+  maxVisible,
+) => {
+  const items = Array.isArray(rows) ? rows : [];
+  const count = items.length;
+  const nextOffset = offset + count;
+  const effectiveMaxVisible = Math.max(0, toNonNegativeInteger(maxVisible, 0));
+
+  return {
+    data: items,
+    pagination: {
+      limit,
+      offset,
+      count,
+      max_visible: effectiveMaxVisible,
+      has_more:
+        count > 0 && count === limit && nextOffset < effectiveMaxVisible,
+      next_offset: Math.min(nextOffset, effectiveMaxVisible),
+    },
+  };
+};
+
 const buildSlicedPaginatedCollection = (
   rows,
   { limit, offset },
@@ -477,7 +521,10 @@ const isQueryRetryableError = (error) => {
   return text.includes("statement timeout") || text.includes("timeout");
 };
 
-const getOrderFieldFallbacks = (primaryField, { allowUnordered = false } = {}) => {
+const getOrderFieldFallbacks = (
+  primaryField,
+  { allowUnordered = false } = {},
+) => {
   const candidates = [
     primaryField,
     primaryField !== "created_at" ? "created_at" : null,
@@ -644,10 +691,7 @@ const resolveSyncToken = async ({ userId, requestedStoreId, isAdmin }) => {
   }
 
   if (requestedStoreId) {
-    if (
-      !isAdmin &&
-      !accessibleStoreIds.includes(requestedStoreId)
-    ) {
+    if (!isAdmin && !accessibleStoreIds.includes(requestedStoreId)) {
       return null;
     }
 
@@ -726,10 +770,56 @@ const isSchemaCompatibilityError = (error) => {
 const getSchemaErrorMessage = (error) =>
   String(
     error?.message ||
-    error?.details ||
-    error?.hint ||
-    "Database schema mismatch",
+      error?.details ||
+      error?.hint ||
+      "Database schema mismatch",
   ).trim();
+
+const attachProductSourcingDetail = async (product) => {
+  const storeId = String(product?.store_id || "").trim();
+  if (!product || !storeId) {
+    return product;
+  }
+
+  try {
+    const [
+      { data: suppliers, error: suppliersError },
+      { data: entries, error: entriesError },
+    ] = await Promise.all([
+      db
+        .from("suppliers")
+        .select(PRODUCT_SOURCING_SUPPLIER_SELECT)
+        .eq("store_id", storeId),
+      db
+        .from("supplier_entries")
+        .select(PRODUCT_SOURCING_ENTRY_SELECT)
+        .eq("store_id", storeId)
+        .eq("entry_type", "delivery"),
+    ]);
+
+    if (suppliersError) {
+      throw suppliersError;
+    }
+    if (entriesError) {
+      throw entriesError;
+    }
+
+    return {
+      ...product,
+      supply_chain: buildProductSourcingDetail(
+        product,
+        suppliers || [],
+        entries || [],
+      ),
+    };
+  } catch (error) {
+    if (!isSchemaCompatibilityError(error)) {
+      console.error("Product sourcing detail error:", error);
+    }
+
+    return product;
+  }
+};
 
 const getReadableShopifyError = (error) => {
   const responseData = error?.response?.data;
@@ -1003,7 +1093,11 @@ const getProductPrimaryImageUrl = (product) => {
   return String(parsedData?.image?.src || "").trim();
 };
 
-const resolveVariantImageUrl = (variant, imageRows = [], fallbackImageUrl = "") => {
+const resolveVariantImageUrl = (
+  variant,
+  imageRows = [],
+  fallbackImageUrl = "",
+) => {
   const variantId = String(variant?.id || "").trim();
   const variantImageId = String(variant?.image_id || "").trim();
 
@@ -1017,9 +1111,12 @@ const resolveVariantImageUrl = (variant, imageRows = [], fallbackImageUrl = "") 
   }
 
   if (variantId) {
-    const linkedImage = imageRows.find((image) =>
-      Array.isArray(image?.variant_ids) &&
-      image.variant_ids.some((value) => String(value || "").trim() === variantId),
+    const linkedImage = imageRows.find(
+      (image) =>
+        Array.isArray(image?.variant_ids) &&
+        image.variant_ids.some(
+          (value) => String(value || "").trim() === variantId,
+        ),
     );
     if (linkedImage?.src) {
       return linkedImage.src;
@@ -1065,7 +1162,8 @@ const buildProductVariantSummaries = (product) => {
 
   return variants.map((variant, index) => ({
     id: variant?.id || null,
-    product_id: variant?.product_id || product?.shopify_id || product?.id || null,
+    product_id:
+      variant?.product_id || product?.shopify_id || product?.id || null,
     title: variant?.title || `Variant ${index + 1}`,
     price: variant?.price ?? product?.price ?? 0,
     cost: variant?.cost ?? variant?.cost_price ?? product?.cost_price ?? 0,
@@ -1234,7 +1332,10 @@ const resolveOrderStatusFromData = (data = {}) => {
   }
 
   return String(
-    extractTagValueByPrefixes(parseTagList(data?.tags), TETIANO_STATUS_TAG_PREFIXES),
+    extractTagValueByPrefixes(
+      parseTagList(data?.tags),
+      TETIANO_STATUS_TAG_PREFIXES,
+    ),
   )
     .toLowerCase()
     .trim();
@@ -1250,17 +1351,10 @@ const normalizeSearchValue = (value) =>
     .trim()
     .toLowerCase();
 
-const normalizePhoneSearch = (value) =>
-  String(value || "").replace(/\D/g, "");
+const normalizePhoneSearch = (value) => String(value || "").replace(/\D/g, "");
 
 const splitSearchTokens = (value) =>
-  Array.from(
-    new Set(
-      normalizeSearchValue(value)
-        .split(/\s+/)
-        .filter(Boolean),
-    ),
-  );
+  Array.from(new Set(normalizeSearchValue(value).split(/\s+/).filter(Boolean)));
 
 const findOrderByReferenceForUser = async (userId, orderReference) => {
   const normalizedReference = String(orderReference || "").trim();
@@ -1358,7 +1452,11 @@ const getOrderRefundedAmount = (order) => {
     refundedFromCurrentAmount,
   );
 
-  if (financialStatus === "refunded" && refundedAmount <= 0 && grossAmount > 0) {
+  if (
+    financialStatus === "refunded" &&
+    refundedAmount <= 0 &&
+    grossAmount > 0
+  ) {
     refundedAmount = grossAmount;
   }
 
@@ -1433,7 +1531,9 @@ const getOrderLineItems = (order) => {
 const buildOrderSearchIndex = (order) => {
   const parsedData = parseJsonField(order?.data);
   const lineItems = getOrderLineItems(order);
-  const previewTitles = buildOrderItemPreviews(order).map((item) => item?.title);
+  const previewTitles = buildOrderItemPreviews(order).map(
+    (item) => item?.title,
+  );
   const searchValues = [
     order?.customer_name,
     order?.customer_email,
@@ -1513,7 +1613,9 @@ const matchesOrderSearch = (order, searchTerm) => {
 
 const getOrderLineItemImageUrl = (item) => {
   const propertyImageUrl = Array.isArray(item?.properties)
-    ? item.properties.find((entry) => String(entry?.name || "").trim() === "_image_url")?.value
+    ? item.properties.find(
+        (entry) => String(entry?.name || "").trim() === "_image_url",
+      )?.value
     : "";
 
   return String(
@@ -1543,9 +1645,7 @@ const buildOrderListItem = (order) => {
   const totalPrice = getOrderGrossAmount(order);
   const refundedAmount = getOrderRefundedAmount(order);
   const fulfillmentStatus = String(
-    order?.fulfillment_status ||
-      parsedData?.fulfillment_status ||
-      "",
+    order?.fulfillment_status || parsedData?.fulfillment_status || "",
   )
     .toLowerCase()
     .trim();
@@ -1603,6 +1703,23 @@ const buildOrderListItem = (order) => {
   };
 };
 
+const getOrdersListPagination = (query = {}) => {
+  const pagination = getListPagination(query);
+  const offset = Math.max(
+    0,
+    Math.min(
+      toNonNegativeInteger(pagination.offset, 0),
+      ORDER_LIST_MAX_VISIBLE,
+    ),
+  );
+  const remaining = Math.max(0, ORDER_LIST_MAX_VISIBLE - offset);
+
+  return {
+    limit: Math.min(pagination.limit, remaining),
+    offset,
+  };
+};
+
 const getFallbackOrdersPage = async (req) => {
   const scopedRowsResult = await getScopedEntityRows(req, Order);
   if (scopedRowsResult?.error) {
@@ -1642,9 +1759,7 @@ const applyCustomersQueryFilters = (rows, query = {}) => {
       return (toNumber(a.orders_count) - toNumber(b.orders_count)) * sortDir;
     }
     if (sortBy === "name") {
-      return (
-        String(a.name || "").localeCompare(String(b.name || "")) * sortDir
-      );
+      return String(a.name || "").localeCompare(String(b.name || "")) * sortDir;
     }
     if (sortBy === "email") {
       return (
@@ -1683,7 +1798,9 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
   let filtered = [...(rows || [])];
 
   if (query.search) {
-    filtered = filtered.filter((order) => matchesOrderSearch(order, query.search));
+    filtered = filtered.filter((order) =>
+      matchesOrderSearch(order, query.search),
+    );
   }
 
   if (query.date_from) {
@@ -1836,6 +1953,8 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
     );
   });
 
+  filtered = filtered.slice(0, ORDER_LIST_MAX_VISIBLE);
+
   const offset = Math.max(0, parseInt(query.offset, 10) || 0);
   const limitValue = parseInt(query.limit, 10);
   const limit =
@@ -1916,7 +2035,9 @@ const getLatestOrderActionMap = async (orderIds = []) => {
 const isOrderOperationallyHandled = (order) => {
   const financialStatus = getOrderFinancialStatus(order);
   const fulfillmentStatus = String(
-    order?.fulfillment_status || parseJsonField(order?.data)?.fulfillment_status || "",
+    order?.fulfillment_status ||
+      parseJsonField(order?.data)?.fulfillment_status ||
+      "",
   )
     .toLowerCase()
     .trim();
@@ -1930,7 +2051,11 @@ const isOrderOperationallyHandled = (order) => {
   );
 };
 
-const buildMissingOrderRecord = (order, latestActionMap, nowTimestamp = Date.now()) => {
+const buildMissingOrderRecord = (
+  order,
+  latestActionMap,
+  nowTimestamp = Date.now(),
+) => {
   if (!order || isOrderOperationallyHandled(order)) {
     return null;
   }
@@ -1957,7 +2082,9 @@ const buildMissingOrderRecord = (order, latestActionMap, nowTimestamp = Date.now
   }
 
   const isEscalated = elapsedMs >= MISSING_ORDER_ESCALATION_MS;
-  const missingSince = new Date(lastActionTimestamp + MISSING_ORDER_GRACE_MS).toISOString();
+  const missingSince = new Date(
+    lastActionTimestamp + MISSING_ORDER_GRACE_MS,
+  ).toISOString();
   const escalatedSince = isEscalated
     ? new Date(lastActionTimestamp + MISSING_ORDER_ESCALATION_MS).toISOString()
     : null;
@@ -1968,10 +2095,7 @@ const buildMissingOrderRecord = (order, latestActionMap, nowTimestamp = Date.now
     missing_since: missingSince,
     escalated_since: escalatedSince,
     missing_state: isEscalated ? "escalated" : "missing",
-    days_without_action: Math.max(
-      3,
-      Math.floor(elapsedMs / DAY_MS),
-    ),
+    days_without_action: Math.max(3, Math.floor(elapsedMs / DAY_MS)),
     requires_attention: true,
   };
 };
@@ -1983,9 +2107,7 @@ const buildCustomerListItem = (customer) => {
     ...customer,
     phone: extractCustomerPhone(customer),
     default_address:
-      customer?.default_address ||
-      parsedData?.default_address?.address1 ||
-      "",
+      customer?.default_address || parsedData?.default_address?.address1 || "",
     city: customer?.city || parsedData?.default_address?.city || "",
     country: customer?.country || parsedData?.default_address?.country || "",
   };
@@ -2079,13 +2201,15 @@ const sortMissingOrders = (orders = []) =>
     }
 
     const dayGap =
-      toNumber(right?.days_without_action) - toNumber(left?.days_without_action);
+      toNumber(right?.days_without_action) -
+      toNumber(left?.days_without_action);
     if (dayGap !== 0) {
       return dayGap;
     }
 
     return (
-      parseTimestampValue(left?.created_at) - parseTimestampValue(right?.created_at)
+      parseTimestampValue(left?.created_at) -
+      parseTimestampValue(right?.created_at)
     );
   });
 
@@ -2150,7 +2274,11 @@ const getMissingOrderRecipients = async () => {
 
   return activeUsers
     .filter((user) => {
-      if (String(user?.role || "").trim().toLowerCase() === "admin") {
+      if (
+        String(user?.role || "")
+          .trim()
+          .toLowerCase() === "admin"
+      ) {
         return true;
       }
 
@@ -2181,7 +2309,8 @@ const buildMissingOrderNotificationDraft = (order, userId) => {
   const notificationType = isEscalated
     ? "order_missing_escalated"
     : "order_missing";
-  const orderLabel = order?.order_number || order?.shopify_id || order?.id || "Unknown";
+  const orderLabel =
+    order?.order_number || order?.shopify_id || order?.id || "Unknown";
   const title = isEscalated
     ? `طلب #${orderLabel} متأخر بشكل خطير`
     : `طلب #${orderLabel} دخل الطلبات المفقودة`;
@@ -2560,36 +2689,36 @@ router.post(
   authenticateToken,
   requirePermission("can_manage_settings"),
   async (req, res) => {
-  try {
-    const inputShop = normalizeShopDomain(req.body?.shop);
-    const userId = req.user.id; // Changed from req.user.userId
+    try {
+      const inputShop = normalizeShopDomain(req.body?.shop);
+      const userId = req.user.id; // Changed from req.user.userId
 
-    if (!inputShop || !SHOP_DOMAIN_REGEX.test(inputShop)) {
-      return res.status(400).json({
-        error: "Invalid shop domain. Use format: your-store.myshopify.com",
+      if (!inputShop || !SHOP_DOMAIN_REGEX.test(inputShop)) {
+        return res.status(400).json({
+          error: "Invalid shop domain. Use format: your-store.myshopify.com",
+        });
+      }
+
+      const { apiKey } = await getShopifyCredentials(userId);
+      const scopes =
+        "read_products,write_products,read_orders,read_customers,write_orders";
+      const redirectUri = getRedirectUri(req);
+
+      const authParams = new URLSearchParams({
+        client_id: apiKey,
+        scope: scopes,
+        redirect_uri: redirectUri,
+        state: String(userId || ""),
       });
+      const authUrl = `https://${inputShop}/admin/oauth/authorize?${authParams.toString()}`;
+
+      res.json({ authUrl });
+    } catch (error) {
+      console.error("Error getting auth URL:", error);
+      res
+        .status(500)
+        .json({ error: "Failed to create Shopify authorization URL." });
     }
-
-    const { apiKey } = await getShopifyCredentials(userId);
-    const scopes =
-      "read_products,write_products,read_orders,read_customers,write_orders";
-    const redirectUri = getRedirectUri(req);
-
-    const authParams = new URLSearchParams({
-      client_id: apiKey,
-      scope: scopes,
-      redirect_uri: redirectUri,
-      state: String(userId || ""),
-    });
-    const authUrl = `https://${inputShop}/admin/oauth/authorize?${authParams.toString()}`;
-
-    res.json({ authUrl });
-  } catch (error) {
-    console.error("Error getting auth URL:", error);
-    res
-      .status(500)
-      .json({ error: "Failed to create Shopify authorization URL." });
-  }
   },
 );
 
@@ -2868,53 +2997,53 @@ router.get(
   authenticateToken,
   requirePermission("can_manage_settings"),
   async (req, res) => {
-  try {
-    const requestedStoreId = getRequestedStoreId(req);
-    const isAdmin = await resolveIsAdmin(req);
-    const { supabase } = await import("../supabaseClient.js");
-    const tokenData = await resolveSyncToken({
-      userId: req.user.id,
-      requestedStoreId,
-      isAdmin,
-    });
+    try {
+      const requestedStoreId = getRequestedStoreId(req);
+      const isAdmin = await resolveIsAdmin(req);
+      const { supabase } = await import("../supabaseClient.js");
+      const tokenData = await resolveSyncToken({
+        userId: req.user.id,
+        requestedStoreId,
+        isAdmin,
+      });
 
-    const redirectUri = getRedirectUri(req);
-    const resolvedStoreId =
-      tokenData?.store_id ||
-      requestedStoreId ||
-      (await findExistingStoreIdByShop({
-        supabase,
-        shop: tokenData?.shop || "",
-      }));
+      const redirectUri = getRedirectUri(req);
+      const resolvedStoreId =
+        tokenData?.store_id ||
+        requestedStoreId ||
+        (await findExistingStoreIdByShop({
+          supabase,
+          shop: tokenData?.shop || "",
+        }));
 
-    const validation = tokenData?.access_token
-      ? await validateShopifyConnection({
-        shop: tokenData.shop,
-        accessToken: tokenData.access_token,
-      })
-      : {
-        valid: false,
-        requiresReconnect: false,
-        message: null,
-      };
+      const validation = tokenData?.access_token
+        ? await validateShopifyConnection({
+            shop: tokenData.shop,
+            accessToken: tokenData.access_token,
+          })
+        : {
+            valid: false,
+            requiresReconnect: false,
+            message: null,
+          };
 
-    res.json({
-      connected: Boolean(tokenData?.access_token && validation.valid),
-      shop: tokenData?.shop || null,
-      store_id: resolvedStoreId || null,
-      redirectUri: redirectUri,
-      webhookAddress: getWebhookAddress(req),
-      requires_reconnect: validation.requiresReconnect,
-      connection_error: validation.valid ? null : validation.message,
-    });
-  } catch (error) {
-    res.json({
-      connected: false,
-      shop: null,
-      redirectUri: getRedirectUri(req),
-      webhookAddress: getWebhookAddress(req),
-    });
-  }
+      res.json({
+        connected: Boolean(tokenData?.access_token && validation.valid),
+        shop: tokenData?.shop || null,
+        store_id: resolvedStoreId || null,
+        redirectUri: redirectUri,
+        webhookAddress: getWebhookAddress(req),
+        requires_reconnect: validation.requiresReconnect,
+        connection_error: validation.valid ? null : validation.message,
+      });
+    } catch (error) {
+      res.json({
+        connected: false,
+        shop: null,
+        redirectUri: getRedirectUri(req),
+        webhookAddress: getWebhookAddress(req),
+      });
+    }
   },
 );
 
@@ -3009,46 +3138,50 @@ router.post(
   verifyToken,
   requirePermission("can_manage_settings"),
   async (req, res) => {
-  try {
-    const userId = req.user.id; // Changed from req.user.userId
-    const { apiKey, apiSecret } = req.body;
+    try {
+      const userId = req.user.id; // Changed from req.user.userId
+      const { apiKey, apiSecret } = req.body;
 
-    if (!apiKey || !apiSecret) {
-      return res
-        .status(400)
-        .json({ error: "API Key and API Secret are required." });
-    }
+      if (!apiKey || !apiSecret) {
+        return res
+          .status(400)
+          .json({ error: "API Key and API Secret are required." });
+      }
 
-    const { supabase } = await import("../supabaseClient.js");
-    const { data: existing } = await supabase
-      .from("shopify_credentials")
-      .select("id")
-      .eq("user_id", userId)
-      .single();
-
-    const payload = { user_id: userId, api_key: apiKey, api_secret: apiSecret };
-    let error;
-
-    if (existing) {
-      const result = await supabase
+      const { supabase } = await import("../supabaseClient.js");
+      const { data: existing } = await supabase
         .from("shopify_credentials")
-        .update({ api_key: apiKey, api_secret: apiSecret })
-        .eq("user_id", userId);
-      error = result.error;
-    } else {
-      const result = await supabase
-        .from("shopify_credentials")
-        .insert([payload]);
-      error = result.error;
+        .select("id")
+        .eq("user_id", userId)
+        .single();
+
+      const payload = {
+        user_id: userId,
+        api_key: apiKey,
+        api_secret: apiSecret,
+      };
+      let error;
+
+      if (existing) {
+        const result = await supabase
+          .from("shopify_credentials")
+          .update({ api_key: apiKey, api_secret: apiSecret })
+          .eq("user_id", userId);
+        error = result.error;
+      } else {
+        const result = await supabase
+          .from("shopify_credentials")
+          .insert([payload]);
+        error = result.error;
+      }
+
+      if (error) throw error;
+
+      res.json({ success: true, message: "Credentials saved successfully." });
+    } catch (error) {
+      console.error("Save credentials error:", error);
+      res.status(500).json({ error: "Failed to save credentials." });
     }
-
-    if (error) throw error;
-
-    res.json({ success: true, message: "Credentials saved successfully." });
-  } catch (error) {
-    console.error("Save credentials error:", error);
-    res.status(500).json({ error: "Failed to save credentials." });
-  }
   },
 );
 
@@ -3058,12 +3191,12 @@ router.get(
   verifyToken,
   requirePermission("can_manage_settings"),
   async (req, res) => {
-  try {
-    const { apiKey } = await getShopifyCredentials(req.user.id); // Changed from req.user.userId
-    res.json({ hasCredentials: true, apiKey });
-  } catch (error) {
-    res.json({ hasCredentials: false });
-  }
+    try {
+      const { apiKey } = await getShopifyCredentials(req.user.id); // Changed from req.user.userId
+      res.json({ hasCredentials: true, apiKey });
+    } catch (error) {
+      res.json({ hasCredentials: false });
+    }
   },
 );
 
@@ -3093,7 +3226,9 @@ router.get(
         try {
           const fallbackProducts = await getFallbackProductsPage(req);
           res.setHeader("X-Products-Fallback", "scoped_rows");
-          return res.json(buildPaginatedCollection(fallbackProducts, pagination));
+          return res.json(
+            buildPaginatedCollection(fallbackProducts, pagination),
+          );
         } catch (fallbackError) {
           console.error("Fallback products query failed:", fallbackError);
         }
@@ -3119,7 +3254,7 @@ router.get(
   requirePermission("can_view_orders"),
   async (req, res) => {
     try {
-      const pagination = getListPagination(req.query);
+      const pagination = getOrdersListPagination(req.query);
       pagination.limit = Math.min(pagination.limit, ORDER_LIST_PAGE_LIMIT);
       const sortOptions = getListSortOptions(
         req.query,
@@ -3127,6 +3262,15 @@ router.get(
         "created_at",
         "desc",
       );
+      if (pagination.limit <= 0) {
+        return res.json(
+          buildLimitedPaginatedCollection(
+            [],
+            pagination,
+            ORDER_LIST_MAX_VISIBLE,
+          ),
+        );
+      }
       const requestedStoreId = getRequestedStoreId(req);
       const isAdmin = await resolveIsAdmin(req);
 
@@ -3185,7 +3329,13 @@ router.get(
             );
           }
           res.setHeader("X-Orders-Fallback", "scoped_rows");
-          return res.json(buildPaginatedCollection(fallbackOrders, pagination));
+          return res.json(
+            buildLimitedPaginatedCollection(
+              fallbackOrders,
+              pagination,
+              ORDER_LIST_MAX_VISIBLE,
+            ),
+          );
         } catch (fallbackError) {
           console.error("Fallback orders query failed:", fallbackError);
         }
@@ -3205,7 +3355,13 @@ router.get(
           liveSyncResult.reason || "attempted",
         );
       }
-      res.json(buildPaginatedCollection(normalizedOrders, pagination));
+      res.json(
+        buildLimitedPaginatedCollection(
+          normalizedOrders,
+          pagination,
+          ORDER_LIST_MAX_VISIBLE,
+        ),
+      );
     } catch (e) {
       console.error("Exception fetching orders:", e);
       res.status(500).json({ error: e.message });
@@ -3242,10 +3398,14 @@ router.get(
         ).length,
       };
 
-      res.json(buildSlicedPaginatedCollection(missingOrders, pagination, { summary }));
+      res.json(
+        buildSlicedPaginatedCollection(missingOrders, pagination, { summary }),
+      );
     } catch (error) {
       console.error("Error fetching missing orders:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch missing orders" });
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to fetch missing orders" });
     }
   },
 );
@@ -3274,7 +3434,9 @@ router.get(
         try {
           const fallbackCustomers = await getFallbackCustomersPage(req);
           res.setHeader("X-Customers-Fallback", "scoped_rows");
-          return res.json(buildPaginatedCollection(fallbackCustomers, pagination));
+          return res.json(
+            buildPaginatedCollection(fallbackCustomers, pagination),
+          );
         } catch (fallbackError) {
           console.error("Fallback customers query failed:", fallbackError);
         }
@@ -3334,8 +3496,9 @@ router.get(
         userId,
         productId,
       );
+      const productWithSourcing = await attachProductSourcingDetail(product);
 
-      res.json(sanitizeProductForRole(product, isAdmin));
+      res.json(sanitizeProductForRole(productWithSourcing, isAdmin));
     } catch (error) {
       console.error("Get product details error:", error);
       res.status(500).json({ error: error.message });
@@ -3406,7 +3569,9 @@ router.post(
       const matchedOrders = orderIds
         .map((orderId) => orderMap.get(orderId))
         .filter(Boolean);
-      const missingOrderIds = orderIds.filter((orderId) => !orderMap.has(orderId));
+      const missingOrderIds = orderIds.filter(
+        (orderId) => !orderMap.has(orderId),
+      );
 
       if (matchedOrders.length === 0) {
         return res.status(404).json({
@@ -3425,7 +3590,9 @@ router.post(
       });
     } catch (error) {
       console.error("Orders products summary export error:", error);
-      res.status(500).json({ error: error.message || "Failed to export orders" });
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to export orders" });
     }
   },
 );
@@ -3497,7 +3664,15 @@ router.post(
   async (req, res) => {
     try {
       const isAdmin = await resolveIsAdmin(req);
-      const { price, cost_price, inventory, sku, variant_updates } = req.body;
+      const {
+        price,
+        cost_price,
+        inventory,
+        sku,
+        supplier_phone,
+        supplier_location,
+        variant_updates,
+      } = req.body;
       const productId = req.params.id;
       const userId = req.user.id;
 
@@ -3516,6 +3691,12 @@ router.post(
         updates.inventory = parseInt(inventory);
       if (Object.prototype.hasOwnProperty.call(req.body, "sku")) {
         updates.sku = String(sku ?? "").trim();
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body, "supplier_phone")) {
+        updates.supplier_phone = String(supplier_phone ?? "").trim();
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body, "supplier_location")) {
+        updates.supplier_location = String(supplier_location ?? "").trim();
       }
       if (Array.isArray(variant_updates) && variant_updates.length > 0) {
         updates.variant_updates = variant_updates.map((variantUpdate) => {
@@ -3809,7 +3990,9 @@ router.post(
       const userId = req.user.id;
 
       if (!fulfillment_status) {
-        return res.status(400).json({ error: "Fulfillment status is required" });
+        return res
+          .status(400)
+          .json({ error: "Fulfillment status is required" });
       }
 
       const result = await OrderManagementService.updateOrderFulfillment(
@@ -3865,13 +4048,13 @@ router.get(
         profitData && profitData.length > 0
           ? profitData[0]
           : {
-            total_revenue: 0,
-            total_cost: 0,
-            total_operational_costs: 0,
-            gross_profit: 0,
-            net_profit: 0,
-            profit_margin: 0,
-          };
+              total_revenue: 0,
+              total_cost: 0,
+              total_operational_costs: 0,
+              gross_profit: 0,
+              net_profit: 0,
+              profit_margin: 0,
+            };
 
       res.json({
         total_revenue: result.total_revenue || 0,

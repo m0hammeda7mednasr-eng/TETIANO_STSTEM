@@ -1,4 +1,11 @@
-import { beforeEach, afterEach, describe, expect, it, jest } from "@jest/globals";
+import {
+  beforeEach,
+  afterEach,
+  describe,
+  expect,
+  it,
+  jest,
+} from "@jest/globals";
 
 import { ProductUpdateService } from "./productUpdateService.js";
 import { Product } from "../models/index.js";
@@ -181,6 +188,80 @@ describe("ProductUpdateService", () => {
       "product-2",
       expect.objectContaining({
         variant_updates: variantUpdates,
+      }),
+    );
+  });
+
+  it("stores supplier phone and location locally without triggering Shopify sync", async () => {
+    const product = {
+      id: "product-3",
+      title: "Soft Linen Shirt",
+      price: 180,
+      cost_price: 95,
+      inventory_quantity: 6,
+      sku: "LINEN-001",
+      data: {
+        variants: [
+          {
+            id: "variant-3",
+            price: "180",
+            sku: "LINEN-001",
+            inventory_quantity: 6,
+          },
+        ],
+      },
+    };
+
+    const updateSpy = jest
+      .spyOn(Product, "update")
+      .mockResolvedValue({ error: null });
+
+    jest.spyOn(Product, "findByIdForUser").mockResolvedValue({
+      data: product,
+      error: null,
+    });
+    jest
+      .spyOn(ProductUpdateService, "syncToShopify")
+      .mockResolvedValue({ success: true });
+    jest
+      .spyOn(ProductUpdateService, "logSyncOperation")
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(ProductUpdateService, "logActivity")
+      .mockImplementation(() => {});
+
+    const result = await ProductUpdateService.updateProduct(
+      "user-1",
+      "product-3",
+      {
+        supplier_phone: "01012345678",
+        supplier_location: "Nasr City Warehouse",
+      },
+    );
+
+    expect(updateSpy).toHaveBeenCalledWith(
+      "product-3",
+      expect.objectContaining({
+        pending_sync: false,
+        sync_error: null,
+        data: expect.objectContaining({
+          _tetiano_local_product: expect.objectContaining({
+            supplier_phone: "01012345678",
+            supplier_location: "Nasr City Warehouse",
+          }),
+        }),
+      }),
+    );
+
+    expect(ProductUpdateService.syncToShopify).not.toHaveBeenCalled();
+    expect(ProductUpdateService.logSyncOperation).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        shopifySync: "not_needed",
+        localOnlyFields: expect.arrayContaining([
+          "supplier_phone",
+          "supplier_location",
+        ]),
       }),
     );
   });

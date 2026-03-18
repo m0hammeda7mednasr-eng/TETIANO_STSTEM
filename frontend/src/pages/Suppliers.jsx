@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import {
   AlertCircle,
   Building2,
@@ -40,6 +41,24 @@ const PAYMENT_METHOD_LABELS = {
   instapay: "إنستاباي",
   other: "أخرى",
 };
+const DELIVERY_ITEM_TYPE_OPTIONS = [
+  { value: "model", label: "موديل" },
+  { value: "fabric", label: "قماش" },
+];
+const DELIVERY_ITEM_TYPE_LABELS = {
+  model: "موديل",
+  fabric: "قماش",
+};
+const DELIVERY_MEASUREMENT_UNIT_OPTIONS = [
+  { value: "piece", label: "قطعة" },
+  { value: "meter", label: "متر" },
+  { value: "kilo", label: "كيلو" },
+];
+const DELIVERY_MEASUREMENT_UNIT_LABELS = {
+  piece: "قطعة",
+  meter: "متر",
+  kilo: "كيلو",
+};
 const PRODUCTS_PAGE_SIZE = 200;
 const DEFAULT_VARIANT_TITLES = new Set(["default", "default title"]);
 const normalizeText = (value) => String(value || "").trim();
@@ -59,6 +78,18 @@ const buildCatalogOptionValue = (productId, variantId = "") =>
   `${normalizeText(productId)}::${normalizeText(variantId)}`;
 const getDeliveryItemSelectionValue = (item) =>
   buildCatalogOptionValue(item?.product_id, item?.variant_id);
+const normalizeDeliveryItemType = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  return DELIVERY_ITEM_TYPE_LABELS[normalized] ? normalized : "model";
+};
+const normalizeDeliveryMeasurementUnit = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  return DELIVERY_MEASUREMENT_UNIT_LABELS[normalized] ? normalized : "piece";
+};
+const formatDeliveryItemTypeLabel = (value) =>
+  DELIVERY_ITEM_TYPE_LABELS[normalizeDeliveryItemType(value)] || "موديل";
+const formatDeliveryMeasurementUnitLabel = (value) =>
+  DELIVERY_MEASUREMENT_UNIT_LABELS[normalizeDeliveryMeasurementUnit(value)] || "قطعة";
 
 const createEmptySupplierForm = () => ({
   code: "",
@@ -72,6 +103,7 @@ const createEmptySupplierForm = () => ({
 });
 
 const createEmptyDeliveryItem = () => ({
+  item_type: "model",
   product_id: "",
   variant_id: "",
   variant_title: "",
@@ -79,6 +111,16 @@ const createEmptyDeliveryItem = () => ({
   sku: "",
   catalog_query: "",
   material: "",
+  color: "",
+  piece_label: "",
+  fabric_name: "",
+  measurement_unit: "piece",
+  pieces_per_unit: "",
+  price_per_meter: "",
+  price_per_kilo: "",
+  piece_cost: "",
+  manufacturing_cost: "",
+  factory_service_cost: "",
   quantity: "1",
   unit_cost: "",
   total_cost: "",
@@ -109,7 +151,60 @@ const getDeliveryItemTotal = (item) => {
     return explicitTotal;
   }
 
-  return toNumber(item?.quantity) * toNumber(item?.unit_cost);
+  return toNumber(item?.quantity) * getDeliveryItemSuggestedUnitCost(item);
+};
+
+const getDeliveryItemMaterialUnitPrice = (item) => {
+  const measurementUnit = normalizeDeliveryMeasurementUnit(item?.measurement_unit);
+  if (measurementUnit === "meter") {
+    return toNumber(item?.price_per_meter);
+  }
+
+  if (measurementUnit === "kilo") {
+    return toNumber(item?.price_per_kilo);
+  }
+
+  return toNumber(item?.piece_cost);
+};
+
+const getDeliveryItemPieceCost = (item) => {
+  const explicitPieceCost = toNumber(item?.piece_cost);
+  if (explicitPieceCost > 0) {
+    return explicitPieceCost;
+  }
+
+  const measurementUnit = normalizeDeliveryMeasurementUnit(item?.measurement_unit);
+  if (measurementUnit !== "meter" && measurementUnit !== "kilo") {
+    return 0;
+  }
+
+  const piecesPerUnit = toNumber(item?.pieces_per_unit);
+  if (piecesPerUnit <= 0) {
+    return 0;
+  }
+
+  return getDeliveryItemMaterialUnitPrice(item) / piecesPerUnit;
+};
+
+const getDeliveryItemSuggestedUnitCost = (item) => {
+  const explicitUnitCost = toNumber(item?.unit_cost);
+  if (explicitUnitCost > 0) {
+    return explicitUnitCost;
+  }
+
+  const itemType = normalizeDeliveryItemType(item?.item_type);
+  const materialUnitPrice = getDeliveryItemMaterialUnitPrice(item);
+  const pieceCost = getDeliveryItemPieceCost(item);
+
+  if (itemType === "fabric") {
+    return materialUnitPrice > 0 ? materialUnitPrice : pieceCost;
+  }
+
+  return (
+    (pieceCost > 0 ? pieceCost : materialUnitPrice) +
+    toNumber(item?.manufacturing_cost) +
+    toNumber(item?.factory_service_cost)
+  );
 };
 
 const buildSupplierFormFromRecord = (supplier) => ({
@@ -138,10 +233,21 @@ const buildProductCatalogOptions = (products = []) => {
   for (const product of products) {
     const productId = normalizeText(product?.id || product?.shopify_id);
     const productTitle = normalizeText(product?.title) || "منتج بدون اسم";
-    const variants =
-      Array.isArray(product?.variants) && product.variants.length > 0
-        ? product.variants
-        : [{ id: "", sku: product?.sku || "", inventory_quantity: product?.inventory_quantity ?? 0 }];
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+
+    options.push({
+      value: buildCatalogOptionValue(productId, ""),
+      product_id: productId,
+      variant_id: "",
+      variant_title: "",
+      product_name: productTitle,
+      sku: normalizeText(product?.sku),
+      inventory_quantity: toNumber(product?.inventory_quantity),
+      label: `${productTitle} | المنتج الأساسي`,
+      searchText: [productTitle, product?.vendor, product?.product_type, product?.sku]
+        .join(" ")
+        .toLowerCase(),
+    });
 
     for (const variant of variants) {
       const variantId = normalizeText(variant?.id);
@@ -176,11 +282,29 @@ const filterCatalogOptions = (options, query, limit = 80) => {
     : options;
   return filtered.slice(0, limit);
 };
+const toArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
+const formatTextList = (values, fallback = "-") => {
+  const list = toArray(values).map(normalizeText).filter(Boolean);
+  return list.length > 0 ? list.join("، ") : fallback;
+};
+const buildProductDetailsPath = (productId) => {
+  const normalized = normalizeText(productId);
+  return normalized ? `/products/${encodeURIComponent(normalized)}` : "";
+};
 const isDeliveryItemDirty = (item) =>
   Boolean(
     normalizeText(item?.product_name) ||
       normalizeText(item?.catalog_query) ||
       normalizeText(item?.material) ||
+      normalizeText(item?.color) ||
+      normalizeText(item?.piece_label) ||
+      normalizeText(item?.fabric_name) ||
+      normalizeText(item?.pieces_per_unit) ||
+      normalizeText(item?.price_per_meter) ||
+      normalizeText(item?.price_per_kilo) ||
+      normalizeText(item?.piece_cost) ||
+      normalizeText(item?.manufacturing_cost) ||
+      normalizeText(item?.factory_service_cost) ||
       normalizeText(item?.unit_cost) ||
       normalizeText(item?.total_cost) ||
       normalizeText(item?.notes) ||
@@ -190,6 +314,7 @@ const isDeliveryItemDirty = (item) =>
 
 export default function Suppliers() {
   const { hasPermission } = useAuth();
+  const location = useLocation();
   const canManageSuppliers = hasPermission("can_edit_products");
 
   const [suppliers, setSuppliers] = useState([]);
@@ -324,6 +449,23 @@ export default function Suppliers() {
   useEffect(() => {
     loadProductCatalog();
   }, [loadProductCatalog]);
+
+  useEffect(() => {
+    const requestedSupplierId = normalizeText(
+      new URLSearchParams(location.search).get("supplier"),
+    );
+    if (!requestedSupplierId) {
+      return;
+    }
+
+    if (!suppliers.some((supplier) => supplier.id === requestedSupplierId)) {
+      return;
+    }
+
+    setSelectedSupplierId((current) =>
+      current === requestedSupplierId ? current : requestedSupplierId,
+    );
+  }, [location.search, suppliers]);
 
   useEffect(() => {
     const unsubscribe = subscribeToSharedDataUpdates((event) => {
@@ -522,7 +664,7 @@ export default function Suppliers() {
     if (normalizedItems.length === 0) {
       setMessage({
         type: "error",
-        text: "أضف منتجًا واحدًا على الأقل داخل الوارد",
+        text: "أضف موديلًا أو قماشًا واحدًا على الأقل داخل الوارد",
       });
       return;
     }
@@ -530,7 +672,7 @@ export default function Suppliers() {
     if (normalizedItems.some((item) => !normalizeText(item?.product_name))) {
       setMessage({
         type: "error",
-        text: "اختر منتجًا من القائمة لكل صنف قبل حفظ الوارد",
+        text: "اكتب اسم الموديل أو القماشة أو اخترها من الكتالوج قبل حفظ الوارد",
       });
       return;
     }
@@ -551,6 +693,8 @@ export default function Suppliers() {
         ...deliveryForm,
         items: normalizedItems.map((item) => ({
           ...item,
+          piece_cost: item.piece_cost || getDeliveryItemPieceCost(item),
+          unit_cost: item.unit_cost || getDeliveryItemSuggestedUnitCost(item),
           total_cost: item.total_cost || getDeliveryItemTotal(item),
         })),
       });
@@ -749,11 +893,13 @@ export default function Suppliers() {
                             </span>
                           </div>
 
-                          <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600">
+                          <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600 sm:grid-cols-3">
                             <KeyValueCompact label="الوارد" value={formatCurrency(supplier.total_deliveries)} />
                             <KeyValueCompact label="المدفوع" value={formatCurrency(supplier.total_payments)} />
                             <KeyValueCompact label="الرصيد" value={formatCurrency(supplier.outstanding_balance)} />
                             <KeyValueCompact label="الكمية" value={formatCount(supplier.received_quantity)} />
+                            <KeyValueCompact label="الموديلات" value={formatCount(supplier.products_count)} />
+                            <KeyValueCompact label="الأقمشة" value={formatCount(supplier.fabrics_count)} />
                           </div>
                         </button>
                       );
@@ -980,9 +1126,19 @@ function renderDetails({
               label="إجمالي المدفوع"
               value={formatCurrency(selectedSupplier.total_payments)}
             />
+            <DetailLine
+              label="عدد الموديلات"
+              value={formatCount(selectedSupplier.products_count)}
+            />
+            <DetailLine
+              label="عدد الأقمشة"
+              value={formatCount(selectedSupplier.fabrics_count)}
+            />
           </div>
         </SectionCard>
       </div>
+
+      <SupplierCatalogExplorer supplier={selectedSupplier} />
 
       {canEditProducts ? (
         <div className="grid gap-6 lg:grid-cols-2">
@@ -1093,6 +1249,11 @@ function DeliveryForm({
           {form.items.map((item, index) => {
             const filteredOptions = filterCatalogOptions(catalogOptions, item.catalog_query);
             const selectedOption = catalogByValue.get(getDeliveryItemSelectionValue(item));
+            const itemType = normalizeDeliveryItemType(item?.item_type);
+            const measurementUnit = normalizeDeliveryMeasurementUnit(item?.measurement_unit);
+            const materialUnitPrice = getDeliveryItemMaterialUnitPrice(item);
+            const pieceCost = getDeliveryItemPieceCost(item);
+            const suggestedUnitCost = getDeliveryItemSuggestedUnitCost(item);
 
             return (
               <div key={`delivery-item-${index}`} className="rounded-2xl border border-slate-200 bg-white p-3">
@@ -1104,7 +1265,18 @@ function DeliveryForm({
                     </button>
                   ) : null}
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <SelectInput
+                    label="نوع الصنف"
+                    value={item.item_type}
+                    options={DELIVERY_ITEM_TYPE_OPTIONS}
+                    onChange={(value) => updateItem(index, "item_type", value)}
+                  />
+                  <TextInput
+                    label="اسم الموديل / القماش"
+                    value={item.product_name}
+                    onChange={(value) => updateItem(index, "product_name", value)}
+                  />
                   <TextInput label="ابحث بالاسم أو SKU" value={item.catalog_query} onChange={(value) => updateItem(index, "catalog_query", value)} />
                   <SelectInput
                     label="اختر المنتج"
@@ -1126,6 +1298,26 @@ function DeliveryForm({
                     ]}
                     onChange={(value) => selectProduct(index, value)}
                   />
+                  <TextInput label="اللون" value={item.color} onChange={(value) => updateItem(index, "color", value)} />
+                  <TextInput label="اسم القماش" value={item.fabric_name} onChange={(value) => updateItem(index, "fabric_name", value)} />
+                  <TextInput label="القطعة / الرولة" value={item.piece_label} onChange={(value) => updateItem(index, "piece_label", value)} />
+                  <SelectInput
+                    label="وحدة الخامة"
+                    value={item.measurement_unit}
+                    options={DELIVERY_MEASUREMENT_UNIT_OPTIONS}
+                    onChange={(value) => updateItem(index, "measurement_unit", value)}
+                  />
+                  <TextInput
+                    label="ينتج كام قطعة من المتر / الكيلو"
+                    type="number"
+                    value={item.pieces_per_unit}
+                    onChange={(value) => updateItem(index, "pieces_per_unit", value)}
+                  />
+                  <TextInput label="سعر المتر" type="number" value={item.price_per_meter} onChange={(value) => updateItem(index, "price_per_meter", value)} />
+                  <TextInput label="سعر الكيلو" type="number" value={item.price_per_kilo} onChange={(value) => updateItem(index, "price_per_kilo", value)} />
+                  <TextInput label="سعر القطعة" type="number" value={item.piece_cost} onChange={(value) => updateItem(index, "piece_cost", value)} />
+                  <TextInput label="تكلفة التصنيع" type="number" value={item.manufacturing_cost} onChange={(value) => updateItem(index, "manufacturing_cost", value)} />
+                  <TextInput label="خدمة المصنع" type="number" value={item.factory_service_cost} onChange={(value) => updateItem(index, "factory_service_cost", value)} />
                   <TextInput label="الخامة أو الوصف الفني" value={item.material} onChange={(value) => updateItem(index, "material", value)} />
                   <TextInput label="الكمية" type="number" value={item.quantity} onChange={(value) => updateItem(index, "quantity", value)} />
                   <TextInput label="سعر الوحدة" type="number" value={item.unit_cost} onChange={(value) => updateItem(index, "unit_cost", value)} />
@@ -1139,6 +1331,16 @@ function DeliveryForm({
                     {item.sku ? ` | SKU: ${item.sku}` : ""}
                     {selectedOption ? ` | المخزون الحالي: ${formatCount(selectedOption.inventory_quantity)}` : ""}
                   </div>
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <DetailStat label="النوع" value={formatDeliveryItemTypeLabel(itemType)} />
+                  <DetailStat label="الوحدة" value={formatDeliveryMeasurementUnitLabel(measurementUnit)} />
+                  <DetailStat label="سعر المادة" value={formatCurrency(materialUnitPrice)} />
+                  <DetailStat label="سعر القطعة" value={formatCurrency(pieceCost)} />
+                  <DetailStat label="التصنيع" value={formatCurrency(item.manufacturing_cost)} />
+                  <DetailStat label="خدمة المصنع" value={formatCurrency(item.factory_service_cost)} />
+                  <DetailStat label="تكلفة الوحدة" value={formatCurrency(item.unit_cost || suggestedUnitCost)} />
+                  <DetailStat label="الإجمالي" value={formatCurrency(getDeliveryItemTotal(item))} />
                 </div>
                 <TextInput label="ملاحظات الصنف" value={item.notes} onChange={(value) => updateItem(index, "notes", value)} />
                 <div className="mt-2 text-xs text-slate-500">
@@ -1203,6 +1405,254 @@ function PaymentForm({ form, setForm, onSave, saving }) {
     );
   }
 
+function SupplierCatalogExplorer({ supplier }) {
+  const productCatalog = toArray(supplier?.product_catalog);
+  const fabricCatalog = toArray(supplier?.fabric_catalog);
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-2">
+      <SectionCard
+        title="خريطة الموديلات"
+        subtitle="عرض خارجي سريع، وافتح كل موديل لرؤية المورد والخامة والواردات المرتبطة به"
+      >
+        {productCatalog.length > 0 ? (
+          <div className="space-y-3">
+            {productCatalog.map((group) => (
+              <details
+                key={group.key}
+                className="rounded-2xl border border-slate-200 bg-slate-50"
+              >
+                <summary className="cursor-pointer list-none p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900">
+                        {group.product_name || "-"}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {group.variant_title || "بدون متغير"}
+                        {group.sku ? ` | SKU: ${group.sku}` : ""}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-left text-xs sm:min-w-[220px]">
+                      <KeyValueCompact
+                        label="الكمية"
+                        value={formatCount(group.total_quantity)}
+                      />
+                      <KeyValueCompact
+                        label="الإجمالي"
+                        value={formatCurrency(group.total_cost)}
+                      />
+                      <KeyValueCompact
+                        label="الواردات"
+                        value={formatCount(group.deliveries_count)}
+                      />
+                      <KeyValueCompact
+                        label="الأقمشة"
+                        value={formatCount(toArray(group.fabrics).length)}
+                      />
+                    </div>
+                  </div>
+                </summary>
+
+                <div className="border-t border-slate-200 bg-white p-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <DetailLineCompact
+                      label="آخر وارد"
+                      value={formatDateTime(group.last_delivery_at)}
+                    />
+                    <DetailLineCompact
+                      label="الوحدات"
+                      value={formatTextList(group.measurement_units)}
+                    />
+                    <DetailLineCompact
+                      label="الأقمشة"
+                      value={formatTextList(group.fabrics)}
+                    />
+                    <DetailLineCompact
+                      label="الخامات"
+                      value={formatTextList(group.materials)}
+                    />
+                    <DetailLineCompact
+                      label="الألوان"
+                      value={formatTextList(group.colors)}
+                    />
+                    <DetailLineCompact
+                      label="نوع الصنف"
+                      value={formatTextList(
+                        toArray(group.item_types).map(formatDeliveryItemTypeLabel),
+                      )}
+                    />
+                  </div>
+
+                  {group.product_id ? (
+                    <div className="mt-4">
+                      <Link
+                        to={buildProductDetailsPath(group.product_id)}
+                        className="inline-flex rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100"
+                      >
+                        فتح صفحة المنتج
+                      </Link>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 space-y-3">
+                    {toArray(group.items).map((item, index) => (
+                      <div
+                        key={`${group.key}-${item.delivery_id || "row"}-${index}`}
+                        className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-slate-900">
+                              {item.product_name || "-"}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {formatDateTime(item.entry_date)}
+                              {item.reference_code ? ` | مرجع: ${item.reference_code}` : ""}
+                            </div>
+                          </div>
+                          <div className="text-sm font-semibold text-slate-800">
+                            {formatCurrency(item.total_cost)}
+                          </div>
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <DetailLineCompact
+                            label="القماش"
+                            value={item.fabric_name || item.material || "-"}
+                          />
+                          <DetailLineCompact
+                            label="الوصف"
+                            value={item.material || "-"}
+                          />
+                          <DetailLineCompact
+                            label="الكمية"
+                            value={formatCount(item.quantity)}
+                          />
+                          <DetailLineCompact
+                            label="تكلفة الوحدة"
+                            value={formatCurrency(item.unit_cost)}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </details>
+            ))}
+          </div>
+        ) : (
+          <EmptyState text="لا توجد موديلات مرتبطة بحركات المورد الحالي حتى الآن." />
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="فهرس الأقمشة"
+        subtitle="كل قماش وتابعه أي موديلات وكمياته ووارداته"
+      >
+        {fabricCatalog.length > 0 ? (
+          <div className="space-y-3">
+            {fabricCatalog.map((group) => (
+              <details
+                key={group.key}
+                className="rounded-2xl border border-slate-200 bg-slate-50"
+              >
+                <summary className="cursor-pointer list-none p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900">
+                        {group.fabric_name || "-"}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {formatTextList(
+                          toArray(group.measurement_units).map(
+                            formatDeliveryMeasurementUnitLabel,
+                          ),
+                        )}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-left text-xs sm:min-w-[220px]">
+                      <KeyValueCompact
+                        label="الكمية"
+                        value={formatCount(group.total_quantity)}
+                      />
+                      <KeyValueCompact
+                        label="الإجمالي"
+                        value={formatCurrency(group.total_cost)}
+                      />
+                      <KeyValueCompact
+                        label="الواردات"
+                        value={formatCount(group.deliveries_count)}
+                      />
+                      <KeyValueCompact
+                        label="الموديلات"
+                        value={formatCount(toArray(group.products).length)}
+                      />
+                    </div>
+                  </div>
+                </summary>
+
+                <div className="border-t border-slate-200 bg-white p-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <DetailLineCompact
+                      label="آخر وارد"
+                      value={formatDateTime(group.last_delivery_at)}
+                    />
+                    <DetailLineCompact
+                      label="الخامات"
+                      value={formatTextList(group.materials)}
+                    />
+                    <DetailLineCompact
+                      label="الألوان"
+                      value={formatTextList(group.colors)}
+                    />
+                    <DetailLineCompact
+                      label="الموديلات المرتبطة"
+                      value={formatTextList(
+                        toArray(group.products).map((product) => product.product_name),
+                      )}
+                    />
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    {toArray(group.products).map((product) => (
+                      <div
+                        key={`${group.key}-${product.key}`}
+                        className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-slate-900">
+                              {product.product_name || "-"}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {product.variant_title || "بدون متغير"}
+                              {product.sku ? ` | SKU: ${product.sku}` : ""}
+                            </div>
+                          </div>
+                          {product.product_id ? (
+                            <Link
+                              to={buildProductDetailsPath(product.product_id)}
+                              className="text-sm font-medium text-sky-700 hover:text-sky-800"
+                            >
+                              فتح المنتج
+                            </Link>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </details>
+            ))}
+          </div>
+        ) : (
+          <EmptyState text="لا توجد أقمشة مرتبطة بحركات المورد الحالي حتى الآن." />
+        )}
+      </SectionCard>
+    </div>
+  );
+}
+
 
 function ReceivedItemsTable({ items }) {
   return (
@@ -1213,11 +1663,11 @@ function ReceivedItemsTable({ items }) {
             <thead>
               <tr className="border-b border-slate-200 text-slate-600">
                 <th className="px-3 py-2 font-semibold">التاريخ</th>
-                <th className="px-3 py-2 font-semibold">المنتج</th>
+                <th className="px-3 py-2 font-semibold">المنتج / النوع</th>
                 <th className="px-3 py-2 font-semibold">SKU</th>
-                <th className="px-3 py-2 font-semibold">الخامة</th>
+                <th className="px-3 py-2 font-semibold">التفاصيل</th>
                 <th className="px-3 py-2 font-semibold">الكمية</th>
-                <th className="px-3 py-2 font-semibold">سعر الوحدة</th>
+                <th className="px-3 py-2 font-semibold">الأسعار</th>
                 <th className="px-3 py-2 font-semibold">الإجمالي</th>
                 <th className="px-3 py-2 font-semibold">المرجع</th>
               </tr>
@@ -1227,13 +1677,72 @@ function ReceivedItemsTable({ items }) {
                 <tr key={`${item.delivery_id}-${item.sku}-${index}`} className="border-b border-slate-100 text-slate-700">
                   <td className="px-3 py-3">{formatDateTime(item.entry_date)}</td>
                   <td className="px-3 py-3 font-medium text-slate-900">
-                    <div>{item.product_name}</div>
-                    <div className="mt-1 text-xs text-slate-500">{item.variant_title || "-"}</div>
+                    <div>
+                      {item.product_id ? (
+                        <Link
+                          to={buildProductDetailsPath(item.product_id)}
+                          className="text-sky-700 hover:text-sky-800 hover:underline"
+                        >
+                          {item.product_name}
+                        </Link>
+                      ) : (
+                        item.product_name
+                      )}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {item.variant_title || "-"} | {formatDeliveryItemTypeLabel(item.item_type)}
+                    </div>
+                    {item.color ? (
+                      <div className="mt-1 text-xs text-slate-500">اللون: {item.color}</div>
+                    ) : null}
+                    {item.fabric_name ? (
+                      <div className="mt-1 text-xs text-slate-500">القماش: {item.fabric_name}</div>
+                    ) : null}
                   </td>
                   <td className="px-3 py-3">{item.sku || "-"}</td>
-                  <td className="px-3 py-3">{item.material || "-"}</td>
+                  <td className="px-3 py-3">
+                    <div>{item.material || "-"}</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      الوحدة: {formatDeliveryMeasurementUnitLabel(item.measurement_unit)}
+                    </div>
+                    {item.piece_label ? (
+                      <div className="mt-1 text-xs text-slate-500">القطعة: {item.piece_label}</div>
+                    ) : null}
+                    {toNumber(item.pieces_per_unit) > 0 ? (
+                      <div className="mt-1 text-xs text-slate-500">
+                        الناتج: {formatCount(item.pieces_per_unit)} قطعة
+                      </div>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-3">{formatCount(item.quantity)}</td>
-                  <td className="px-3 py-3">{formatCurrency(item.unit_cost)}</td>
+                  <td className="px-3 py-3">
+                    <div>{formatCurrency(item.unit_cost)}</div>
+                    {toNumber(item.price_per_meter) > 0 ? (
+                      <div className="mt-1 text-xs text-slate-500">
+                        سعر المتر: {formatCurrency(item.price_per_meter)}
+                      </div>
+                    ) : null}
+                    {toNumber(item.price_per_kilo) > 0 ? (
+                      <div className="mt-1 text-xs text-slate-500">
+                        سعر الكيلو: {formatCurrency(item.price_per_kilo)}
+                      </div>
+                    ) : null}
+                    {toNumber(item.piece_cost) > 0 ? (
+                      <div className="mt-1 text-xs text-slate-500">
+                        سعر القطعة: {formatCurrency(item.piece_cost)}
+                      </div>
+                    ) : null}
+                    {toNumber(item.manufacturing_cost) > 0 ? (
+                      <div className="mt-1 text-xs text-slate-500">
+                        تصنيع: {formatCurrency(item.manufacturing_cost)}
+                      </div>
+                    ) : null}
+                    {toNumber(item.factory_service_cost) > 0 ? (
+                      <div className="mt-1 text-xs text-slate-500">
+                        خدمة المصنع: {formatCurrency(item.factory_service_cost)}
+                      </div>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-3">{formatCurrency(item.total_cost)}</td>
                   <td className="px-3 py-3">{item.reference_code || "-"}</td>
                 </tr>
@@ -1399,6 +1908,15 @@ function SelectInput({ label, value, options, onChange, disabled = false }) {
         ))}
       </select>
     </label>
+  );
+}
+
+function DetailStat({ label, value }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-slate-900">{value || "-"}</div>
+    </div>
   );
 }
 

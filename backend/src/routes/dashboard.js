@@ -50,14 +50,9 @@ const DASHBOARD_ORDER_STATS_SELECT = [
   "created_at",
 ].join(",");
 const DASHBOARD_ORDER_STATS_SELECTS = [
-  [
-    "id",
-    "store_id",
-    "user_id",
-    "total_price",
-    "status",
-    "created_at",
-  ].join(","),
+  ["id", "store_id", "user_id", "total_price", "status", "created_at"].join(
+    ",",
+  ),
   [
     "id",
     "store_id",
@@ -202,7 +197,10 @@ const isQueryRetryableError = (error) => {
   return text.includes("statement timeout") || text.includes("timeout");
 };
 
-const getOrderFieldFallbacks = (primaryField, { allowUnordered = false } = {}) => {
+const getOrderFieldFallbacks = (
+  primaryField,
+  { allowUnordered = false } = {},
+) => {
   const candidates = [
     primaryField,
     primaryField !== "created_at" ? "created_at" : null,
@@ -359,7 +357,10 @@ const getTetianoStatus = (data = {}) => {
   }
 
   return String(
-    extractTagValueByPrefixes(parseTagList(data?.tags), TETIANO_STATUS_TAG_PREFIXES),
+    extractTagValueByPrefixes(
+      parseTagList(data?.tags),
+      TETIANO_STATUS_TAG_PREFIXES,
+    ),
   )
     .toLowerCase()
     .trim();
@@ -394,7 +395,9 @@ const getOrderCustomerKey = (order) => {
     return `id:${directCustomerId}`;
   }
 
-  const email = String(order?.customer_email || data?.email || data?.customer?.email || "")
+  const email = String(
+    order?.customer_email || data?.email || data?.customer?.email || "",
+  )
     .trim()
     .toLowerCase();
   if (email) {
@@ -754,25 +757,6 @@ const getOperationalCostsByProduct = async (productIds, userId) => {
   return data || [];
 };
 
-const getGlobalOperationalCosts = async (userId) => {
-  let query = supabase
-    .from("operational_costs")
-    .select("*")
-    .is("product_id", null)
-    .eq("is_active", true);
-
-  if (userId) {
-    query = query.eq("user_id", userId);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    throw error;
-  }
-
-  return data || [];
-};
-
 // Dashboard summary cards
 router.get("/stats", authenticateToken, async (req, res) => {
   const cacheKey = getDashboardCacheKey(req);
@@ -819,9 +803,9 @@ router.get("/stats", authenticateToken, async (req, res) => {
     const filteredEntitySummary = hasScopedOrderFilters
       ? buildFilteredOrderEntitySummary(filteredOrders)
       : {
-        totalProducts: products.length,
-        totalCustomers: customers.length,
-      };
+          totalProducts: products.length,
+          totalCustomers: customers.length,
+        };
 
     const payload = {
       total_sales: parseFloat(totalSales.toFixed(2)),
@@ -1046,20 +1030,20 @@ router.get(
           successRate:
             totalOrders > 0
               ? parseFloat(
-                ((ordersByStatus.paid / totalOrders) * 100).toFixed(2),
-              )
+                  ((ordersByStatus.paid / totalOrders) * 100).toFixed(2),
+                )
               : 0,
           cancellationRate:
             totalOrders > 0
               ? parseFloat(
-                ((ordersByStatus.cancelled / totalOrders) * 100).toFixed(2),
-              )
+                  ((ordersByStatus.cancelled / totalOrders) * 100).toFixed(2),
+                )
               : 0,
           refundRate:
             totalOrders > 0
               ? parseFloat(
-                ((ordersByStatus.refunded / totalOrders) * 100).toFixed(2),
-              )
+                  ((ordersByStatus.refunded / totalOrders) * 100).toFixed(2),
+                )
               : 0,
         },
       };
@@ -1171,10 +1155,10 @@ router.get(
 
       const productIds = products.map((p) => p.id);
       const scopedUserId = req.user?.role === "admin" ? null : req.user?.id;
-      const [productCosts, globalCosts] = await Promise.all([
-        getOperationalCostsByProduct(productIds, scopedUserId),
-        getGlobalOperationalCosts(scopedUserId),
-      ]);
+      const productCosts = await getOperationalCostsByProduct(
+        productIds,
+        scopedUserId,
+      );
 
       const costsByProductId = new Map();
       productCosts.forEach((cost) => {
@@ -1182,15 +1166,6 @@ router.get(
         list.push(cost);
         costsByProductId.set(cost.product_id, list);
       });
-
-      const totalFixedCosts = globalCosts.reduce((sum, cost) => {
-        if (String(cost.apply_to || "") === "fixed") {
-          return sum + toNumber(cost.amount);
-        }
-        return sum;
-      }, 0);
-      const fixedSharePerProduct =
-        products.length > 0 ? totalFixedCosts / products.length : 0;
 
       const metrics = products.map((product) => {
         const productKeys = [
@@ -1232,9 +1207,7 @@ router.get(
           perOrderCosts * ordersCount +
           fixedProductCosts;
 
-        const fixedShare = totalFixedCosts > 0 ? fixedSharePerProduct : 0;
-
-        const netProfit = grossProfit - operationalCostsTotal - fixedShare;
+        const netProfit = grossProfit - operationalCostsTotal;
         const profitPerUnit = soldQuantity > 0 ? netProfit / soldQuantity : 0;
         const avgSellingPrice =
           soldQuantity > 0
@@ -1251,7 +1224,7 @@ router.get(
           total_cost: parseFloat(totalCost.toFixed(2)),
           gross_profit: parseFloat(grossProfit.toFixed(2)),
           operational_costs_total: parseFloat(operationalCostsTotal.toFixed(2)),
-          fixed_cost_share: parseFloat(fixedShare.toFixed(2)),
+          fixed_cost_share: 0,
           net_profit: parseFloat(netProfit.toFixed(2)),
           profit_per_unit: parseFloat(profitPerUnit.toFixed(2)),
           avg_selling_price: parseFloat(avgSellingPrice.toFixed(2)),
@@ -1266,9 +1239,7 @@ router.get(
         (acc, item) => {
           acc.total_revenue += toNumber(item.total_revenue);
           acc.total_cost += toNumber(item.total_cost);
-          acc.total_operational_costs +=
-            toNumber(item.operational_costs_total) +
-            toNumber(item.fixed_cost_share);
+          acc.total_operational_costs += toNumber(item.operational_costs_total);
           acc.total_net_profit += toNumber(item.net_profit);
           acc.total_sold_units += toNumber(item.sold_quantity);
           return acc;
@@ -1285,11 +1256,11 @@ router.get(
       summary.profit_margin =
         summary.total_revenue > 0
           ? parseFloat(
-            (
-              (summary.total_net_profit / summary.total_revenue) *
-              100
-            ).toFixed(2),
-          )
+              (
+                (summary.total_net_profit / summary.total_revenue) *
+                100
+              ).toFixed(2),
+            )
           : 0;
 
       res.json({

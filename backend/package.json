@@ -10,7 +10,8 @@
     "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest",
     "build": "echo 'No build step required'",
     "migrate": "node-pg-migrate",
-    "db:repair": "node scripts/repair-shopify-data-links.js"
+    "db:repair": "node scripts/repair-shopify-data-links.js",
+    "db:reset-orders": "node scripts/reset-orders-data.js"
   },
   "jest": {
     "transform": {}

@@ -117,6 +117,24 @@ const buildOpenRate = (record) => {
       )
     : 0;
 };
+const hasVariantResult = (entry) =>
+  toNumber(entry?.ordered_quantity) > 0 ||
+  toNumber(entry?.delivered_quantity) > 0 ||
+  toNumber(entry?.net_delivered_quantity) > 0 ||
+  toNumber(entry?.returned_quantity) > 0 ||
+  toNumber(entry?.pending_quantity) > 0 ||
+  toNumber(entry?.cancelled_quantity) > 0 ||
+  toNumber(entry?.net_sales) > 0 ||
+  toNumber(entry?.gross_sales) > 0 ||
+  toNumber(entry?.related_tasks_count) > 0;
+const countRelevantVariants = (variants = []) => {
+  const list = Array.isArray(variants) ? variants : [];
+  const activeCount = list.reduce(
+    (total, variant) => total + (hasVariantResult(variant) ? 1 : 0),
+    0,
+  );
+  return activeCount > 0 ? activeCount : list.length;
+};
 const getVariantDisplayTitle = (product, variant) => {
   const title = String(variant?.title || "").trim();
   return !title || title === "Default Title" || title === product?.title
@@ -204,7 +222,7 @@ export default function ProductAnalysis() {
       filteredProducts.reduce(
         (acc, product) => {
           acc.total_products += 1;
-          acc.total_variants += (product?.variants || []).length;
+          acc.total_variants += countRelevantVariants(product?.variants);
           acc.ordered_quantity += toNumber(product?.ordered_quantity);
           acc.delivered_quantity += toNumber(product?.delivered_quantity);
           acc.net_delivered_quantity += toNumber(product?.net_delivered_quantity);
@@ -358,7 +376,7 @@ export default function ProductAnalysis() {
                             <button onClick={() => navigate(`/products/${product.id}`)} className="text-right text-xl font-semibold text-slate-900 hover:text-sky-700">
                               {product.title}
                             </button>
-                            <Badge>{`${formatCount(product.variants_count || sortedVariants.length)} فاريانت`}</Badge>
+                            <Badge>{`${formatCount(countRelevantVariants(sortedVariants))} فاريانت`}</Badge>
                             {toNumber(product.returned_quantity) > 0 ? <Badge tone="rose">{`مرتجع ${formatCount(product.returned_quantity)}`}</Badge> : null}
                             {toNumber(product.pending_quantity) > 0 ? <Badge tone="amber">{`معلق ${formatCount(product.pending_quantity)}`}</Badge> : null}
                           </div>

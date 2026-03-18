@@ -55,7 +55,7 @@ app.use(
   express.raw({ type: "application/json" }),
   shopifyWebhooksRoutes,
 );
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // Export supabase for any legacy imports, but it's now initialized elsewhere

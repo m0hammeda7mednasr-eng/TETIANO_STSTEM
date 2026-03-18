@@ -73,6 +73,50 @@ const toPositiveNumber = (value) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 };
 
+const normalizeText = (value) => String(value || "").trim();
+
+const createOrderContactForm = (orderValue) => ({
+  customer_phone: normalizeText(
+    orderValue?.customer_phone || orderValue?.shipping_address?.phone,
+  ),
+  shipping_address: {
+    address1: normalizeText(orderValue?.shipping_address?.address1),
+    address2: normalizeText(orderValue?.shipping_address?.address2),
+    city: normalizeText(orderValue?.shipping_address?.city),
+    province: normalizeText(orderValue?.shipping_address?.province),
+    country: normalizeText(orderValue?.shipping_address?.country),
+    zip: normalizeText(orderValue?.shipping_address?.zip),
+  },
+});
+
+const buildAddressLines = (address = {}) => {
+  const lines = [];
+  const primaryLine = [address?.address1, address?.address2]
+    .map(normalizeText)
+    .filter(Boolean)
+    .join(" - ");
+  const localityLine = [address?.city, address?.zip]
+    .map(normalizeText)
+    .filter(Boolean)
+    .join(", ");
+  const regionLine = [address?.province, address?.country]
+    .map(normalizeText)
+    .filter(Boolean)
+    .join(", ");
+
+  if (primaryLine) {
+    lines.push(primaryLine);
+  }
+  if (localityLine) {
+    lines.push(localityLine);
+  }
+  if (regionLine) {
+    lines.push(regionLine);
+  }
+
+  return lines;
+};
+
 export default function OrderDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -85,6 +129,9 @@ export default function OrderDetails() {
   const [updatingFulfillment, setUpdatingFulfillment] = useState(false);
   const [profitData, setProfitData] = useState(null);
   const [selectedLineItemIds, setSelectedLineItemIds] = useState([]);
+  const [editingContact, setEditingContact] = useState(false);
+  const [savingContact, setSavingContact] = useState(false);
+  const [contactForm, setContactForm] = useState(createOrderContactForm(null));
   const canEditOrders = hasPermission("can_edit_orders");
 
   useEffect(() => {
@@ -96,6 +143,10 @@ export default function OrderDetails() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isAdmin]);
+
+  useEffect(() => {
+    setContactForm(createOrderContactForm(order));
+  }, [order]);
 
   const fetchOrderDetails = async () => {
     setLoading(true);
@@ -432,6 +483,58 @@ export default function OrderDetails() {
     }
   };
 
+  const handleContactFieldChange = (field, value) => {
+    setContactForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const handleShippingAddressFieldChange = (field, value) => {
+    setContactForm((current) => ({
+      ...current,
+      shipping_address: {
+        ...current.shipping_address,
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleCancelContactEdit = () => {
+    setEditingContact(false);
+    setContactForm(createOrderContactForm(order));
+  };
+
+  const handleSaveContactDetails = async () => {
+    if (!order || !canEditOrders) return;
+
+    setSavingContact(true);
+    try {
+      const response = await api.post(`/shopify/orders/${id}/update-contact`, {
+        customer_phone: contactForm.customer_phone,
+        shipping_address: contactForm.shipping_address,
+      });
+
+      if (response?.data?.order) {
+        setOrder(response.data.order);
+      } else {
+        await fetchOrderDetails();
+      }
+
+      setEditingContact(false);
+      markSharedDataUpdated();
+      showNotification("تم حفظ تعديل الهاتف والعنوان", "success");
+    } catch (error) {
+      console.error("Error updating contact details:", error);
+      showNotification(
+        error?.response?.data?.error || "فشل حفظ تعديل الهاتف والعنوان",
+        "error",
+      );
+    } finally {
+      setSavingContact(false);
+    }
+  };
+
   const showNotification = (message, type = "info") => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 5000);
@@ -508,6 +611,14 @@ export default function OrderDetails() {
     }
     return null;
   };
+
+  const phoneEditAudit = order?.contact_edits?.customer_phone || null;
+  const shippingAddressEditAudit = order?.contact_edits?.shipping_address || null;
+  const currentShippingAddressLines = buildAddressLines(order?.shipping_address);
+  const originalShippingAddressLines = buildAddressLines(
+    shippingAddressEditAudit?.original,
+  );
+  const hasContactEdits = Boolean(phoneEditAudit || shippingAddressEditAudit);
 
   if (loading) {
     return (
@@ -1142,6 +1253,255 @@ export default function OrderDetails() {
                   </div>
                 </div>
               )}
+
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800">
+                      تعديل الهاتف والعنوان
+                    </h2>
+                    <p className="mt-1 text-xs text-gray-500">
+                      التعديل هنا محلي داخل النظام مع الاحتفاظ بالأصل والمعدل.
+                    </p>
+                  </div>
+                  {canEditOrders && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        editingContact
+                          ? handleCancelContactEdit()
+                          : setEditingContact(true)
+                      }
+                      className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      {editingContact ? "إلغاء" : "تعديل"}
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-slate-700">
+                        الهاتف الحالي
+                      </p>
+                      {phoneEditAudit && (
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                          تم التعديل
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {order.customer_phone || "-"}
+                    </p>
+                    {phoneEditAudit?.original && (
+                      <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2">
+                        <p className="text-xs text-slate-500">الرقم الأصلي</p>
+                        <p className="mt-1 text-sm text-slate-700">
+                          {phoneEditAudit.original}
+                        </p>
+                        {(phoneEditAudit.updated_by_name ||
+                          phoneEditAudit.updated_at) && (
+                          <p className="mt-2 text-[11px] text-slate-400">
+                            {phoneEditAudit.updated_by_name || "System"}
+                            {phoneEditAudit.updated_at
+                              ? ` | ${formatDate(phoneEditAudit.updated_at)}`
+                              : ""}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-slate-700">
+                        العنوان الحالي
+                      </p>
+                      {shippingAddressEditAudit && (
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                          تم التعديل
+                        </span>
+                      )}
+                    </div>
+                    {currentShippingAddressLines.length > 0 ? (
+                      <div className="mt-2 space-y-1 text-sm text-slate-800">
+                        {currentShippingAddressLines.map((line) => (
+                          <p key={line}>{line}</p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-slate-500">لا يوجد عنوان</p>
+                    )}
+                    {shippingAddressEditAudit && originalShippingAddressLines.length > 0 && (
+                      <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2">
+                        <p className="text-xs text-slate-500">العنوان الأصلي</p>
+                        <div className="mt-1 space-y-1 text-sm text-slate-700">
+                          {originalShippingAddressLines.map((line) => (
+                            <p key={line}>{line}</p>
+                          ))}
+                        </div>
+                        {(shippingAddressEditAudit.updated_by_name ||
+                          shippingAddressEditAudit.updated_at) && (
+                          <p className="mt-2 text-[11px] text-slate-400">
+                            {shippingAddressEditAudit.updated_by_name || "System"}
+                            {shippingAddressEditAudit.updated_at
+                              ? ` | ${formatDate(shippingAddressEditAudit.updated_at)}`
+                              : ""}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {!hasContactEdits && !editingContact && (
+                    <p className="text-sm text-slate-500">
+                      لا توجد تعديلات محلية مسجلة على بيانات التواصل لهذا الطلب.
+                    </p>
+                  )}
+
+                  {editingContact && (
+                    <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50 p-4">
+                      <div className="grid gap-3">
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-medium text-slate-600">
+                            رقم الهاتف
+                          </span>
+                          <input
+                            type="text"
+                            value={contactForm.customer_phone}
+                            onChange={(event) =>
+                              handleContactFieldChange(
+                                "customer_phone",
+                                event.target.value,
+                              )
+                            }
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                          />
+                        </label>
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="block sm:col-span-2">
+                            <span className="mb-1 block text-xs font-medium text-slate-600">
+                              العنوان 1
+                            </span>
+                            <input
+                              type="text"
+                              value={contactForm.shipping_address.address1}
+                              onChange={(event) =>
+                                handleShippingAddressFieldChange(
+                                  "address1",
+                                  event.target.value,
+                                )
+                              }
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            />
+                          </label>
+                          <label className="block sm:col-span-2">
+                            <span className="mb-1 block text-xs font-medium text-slate-600">
+                              العنوان 2
+                            </span>
+                            <input
+                              type="text"
+                              value={contactForm.shipping_address.address2}
+                              onChange={(event) =>
+                                handleShippingAddressFieldChange(
+                                  "address2",
+                                  event.target.value,
+                                )
+                              }
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-xs font-medium text-slate-600">
+                              المدينة
+                            </span>
+                            <input
+                              type="text"
+                              value={contactForm.shipping_address.city}
+                              onChange={(event) =>
+                                handleShippingAddressFieldChange(
+                                  "city",
+                                  event.target.value,
+                                )
+                              }
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-xs font-medium text-slate-600">
+                              المحافظة
+                            </span>
+                            <input
+                              type="text"
+                              value={contactForm.shipping_address.province}
+                              onChange={(event) =>
+                                handleShippingAddressFieldChange(
+                                  "province",
+                                  event.target.value,
+                                )
+                              }
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-xs font-medium text-slate-600">
+                              الدولة
+                            </span>
+                            <input
+                              type="text"
+                              value={contactForm.shipping_address.country}
+                              onChange={(event) =>
+                                handleShippingAddressFieldChange(
+                                  "country",
+                                  event.target.value,
+                                )
+                              }
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-xs font-medium text-slate-600">
+                              الكود البريدي
+                            </span>
+                            <input
+                              type="text"
+                              value={contactForm.shipping_address.zip}
+                              onChange={(event) =>
+                                handleShippingAddressFieldChange(
+                                  "zip",
+                                  event.target.value,
+                                )
+                              }
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            />
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSaveContactDetails}
+                          disabled={savingContact}
+                          className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {savingContact ? "جارٍ الحفظ..." : "حفظ التعديل"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelContactEdit}
+                          disabled={savingContact}
+                          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          إلغاء
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {/* Billing Address */}
               {order.billing_address && (

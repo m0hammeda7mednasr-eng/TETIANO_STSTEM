@@ -1,3 +1,5 @@
+const DEFAULT_LOCALE = "en";
+
 export const INITIAL_ORDER_SCOPE_FILTERS = {
   dateFrom: "",
   dateTo: "",
@@ -6,17 +8,15 @@ export const INITIAL_ORDER_SCOPE_FILTERS = {
   refundFilter: "all",
 };
 
-export const ORDER_SCOPE_PRESETS = [
+const ORDER_SCOPE_PRESET_DEFINITIONS = [
   {
     id: "all",
-    label: "كل الطلبات",
-    description: "عرض كامل بدون أي تقييد.",
+    labelKey: "all",
     filters: { ...INITIAL_ORDER_SCOPE_FILTERS },
   },
   {
     id: "paid",
-    label: "المبيعات المدفوعة",
-    description: "الطلبات المدفوعة أو المدفوعة جزئيًا.",
+    labelKey: "paid",
     filters: {
       ...INITIAL_ORDER_SCOPE_FILTERS,
       paymentFilter: "paid_or_partial",
@@ -24,8 +24,7 @@ export const ORDER_SCOPE_PRESETS = [
   },
   {
     id: "pending",
-    label: "قيد التحصيل",
-    description: "الطلبات المعلقة أو المصرح بها.",
+    labelKey: "pending",
     filters: {
       ...INITIAL_ORDER_SCOPE_FILTERS,
       paymentFilter: "pending_or_authorized",
@@ -33,8 +32,7 @@ export const ORDER_SCOPE_PRESETS = [
   },
   {
     id: "fulfilled",
-    label: "تم تسليمه",
-    description: "الطلبات التي تم تسليمها فعليًا.",
+    labelKey: "fulfilled",
     filters: {
       ...INITIAL_ORDER_SCOPE_FILTERS,
       fulfillmentFilter: "fulfilled",
@@ -42,14 +40,124 @@ export const ORDER_SCOPE_PRESETS = [
   },
   {
     id: "refunds",
-    label: "مرتجعات",
-    description: "أي طلب يحتوي على استرجاع.",
+    labelKey: "refunds",
     filters: {
       ...INITIAL_ORDER_SCOPE_FILTERS,
       refundFilter: "any",
     },
   },
 ];
+
+const ORDER_SCOPE_TRANSLATIONS = {
+  ar: {
+    presets: {
+      all: {
+        label: "كل الطلبات",
+        description: "عرض كامل بدون أي تقييد.",
+      },
+      paid: {
+        label: "المبيعات المدفوعة",
+        description: "الطلبات المدفوعة أو المدفوعة جزئيًا.",
+      },
+      pending: {
+        label: "قيد التحصيل",
+        description: "الطلبات المعلقة أو المصرح بها.",
+      },
+      fulfilled: {
+        label: "تم تسليمه",
+        description: "الطلبات التي تم تسليمها فعليًا.",
+      },
+      refunds: {
+        label: "مرتجعات",
+        description: "أي طلب يحتوي على استرجاع.",
+      },
+    },
+    labels: {
+      start: "البداية",
+      now: "الآن",
+      period: "الفترة",
+      payment: "الدفع",
+      fulfillment: "التسليم",
+      refund: "الاسترجاع",
+      paid_or_partial: "مدفوع + مدفوع جزئيًا",
+      pending_or_authorized: "معلق + مصرح به",
+      paid: "مدفوع",
+      partially_paid: "مدفوع جزئيًا",
+      pending: "معلق",
+      authorized: "مصرح به",
+      refunded: "مسترد",
+      partially_refunded: "استرداد جزئي",
+      voided: "ملغي",
+      fulfilled: "تم التسليم",
+      partial: "تسليم جزئي",
+      unfulfilled: "غير مسلّم",
+      any: "يوجد استرجاع",
+      full: "استرجاع كامل",
+      none: "بدون استرجاع",
+    },
+  },
+  en: {
+    presets: {
+      all: {
+        label: "All Orders",
+        description: "Full view with no restrictions.",
+      },
+      paid: {
+        label: "Paid Sales",
+        description: "Paid and partially paid orders.",
+      },
+      pending: {
+        label: "Pending Collection",
+        description: "Pending and authorized orders.",
+      },
+      fulfilled: {
+        label: "Fulfilled",
+        description: "Orders that have been fulfilled.",
+      },
+      refunds: {
+        label: "Refunds",
+        description: "Any order containing a refund.",
+      },
+    },
+    labels: {
+      start: "Start",
+      now: "Now",
+      period: "Period",
+      payment: "Payment",
+      fulfillment: "Fulfillment",
+      refund: "Refund",
+      paid_or_partial: "Paid + Partially Paid",
+      pending_or_authorized: "Pending + Authorized",
+      paid: "Paid",
+      partially_paid: "Partially Paid",
+      pending: "Pending",
+      authorized: "Authorized",
+      refunded: "Refunded",
+      partially_refunded: "Partially Refunded",
+      voided: "Voided",
+      fulfilled: "Fulfilled",
+      partial: "Partially Fulfilled",
+      unfulfilled: "Unfulfilled",
+      any: "Has refund",
+      full: "Full refund",
+      none: "No refund",
+    },
+  },
+};
+
+const getOrderScopeTranslations = (locale = DEFAULT_LOCALE) =>
+  ORDER_SCOPE_TRANSLATIONS[locale] || ORDER_SCOPE_TRANSLATIONS.en;
+
+export const getOrderScopePresets = (locale = DEFAULT_LOCALE) => {
+  const translations = getOrderScopeTranslations(locale);
+
+  return ORDER_SCOPE_PRESET_DEFINITIONS.map((preset) => ({
+    id: preset.id,
+    filters: { ...preset.filters },
+    label: translations.presets[preset.labelKey].label,
+    description: translations.presets[preset.labelKey].description,
+  }));
+};
 
 const hasValue = (value) => String(value || "").trim().length > 0;
 
@@ -93,56 +201,48 @@ export const getActiveOrderScopePresetId = (filters = {}) => {
     ...filters,
   };
 
-  const matchingPreset = ORDER_SCOPE_PRESETS.find((preset) =>
+  const matchingPreset = ORDER_SCOPE_PRESET_DEFINITIONS.find((preset) =>
     shallowMatch(normalized, preset.filters),
   );
 
   return matchingPreset?.id || null;
 };
 
-export const getOrderScopeSummary = (filters = {}) => {
+export const getOrderScopeSummary = (
+  filters = {},
+  locale = DEFAULT_LOCALE,
+) => {
   const parts = [];
+  const translations = getOrderScopeTranslations(locale).labels;
 
   if (hasValue(filters.dateFrom) || hasValue(filters.dateTo)) {
-    const from = filters.dateFrom || "البداية";
-    const to = filters.dateTo || "الآن";
-    parts.push(`الفترة: ${from} إلى ${to}`);
+    const from = filters.dateFrom || translations.start;
+    const to = filters.dateTo || translations.now;
+    parts.push(`${translations.period}: ${from} → ${to}`);
   }
 
   if (String(filters.paymentFilter || "all") !== "all") {
-    const labelMap = {
-      paid_or_partial: "مدفوع + مدفوع جزئيًا",
-      pending_or_authorized: "معلق + مصرح به",
-      paid: "مدفوع",
-      partially_paid: "مدفوع جزئيًا",
-      pending: "معلق",
-      authorized: "مصرح به",
-      refunded: "مسترد",
-      partially_refunded: "استرداد جزئي",
-      voided: "ملغي",
-    };
-    parts.push(`الدفع: ${labelMap[filters.paymentFilter] || filters.paymentFilter}`);
+    parts.push(
+      `${translations.payment}: ${
+        translations[filters.paymentFilter] || filters.paymentFilter
+      }`,
+    );
   }
 
   if (String(filters.fulfillmentFilter || "all") !== "all") {
-    const labelMap = {
-      fulfilled: "تم التسليم",
-      partial: "تسليم جزئي",
-      unfulfilled: "غير مسلّم",
-    };
     parts.push(
-      `التسليم: ${labelMap[filters.fulfillmentFilter] || filters.fulfillmentFilter}`,
+      `${translations.fulfillment}: ${
+        translations[filters.fulfillmentFilter] || filters.fulfillmentFilter
+      }`,
     );
   }
 
   if (String(filters.refundFilter || "all") !== "all") {
-    const labelMap = {
-      any: "يوجد استرجاع",
-      partial: "استرجاع جزئي",
-      full: "استرجاع كامل",
-      none: "بدون استرجاع",
-    };
-    parts.push(`الاسترجاع: ${labelMap[filters.refundFilter] || filters.refundFilter}`);
+    parts.push(
+      `${translations.refund}: ${
+        translations[filters.refundFilter] || filters.refundFilter
+      }`,
+    );
   }
 
   return parts;

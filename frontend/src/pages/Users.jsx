@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { getErrorMessage } from "../utils/api";
+import { useLocale } from "../context/LocaleContext";
 import {
   getPermissionDescription,
   getPermissionLabel,
@@ -71,11 +72,29 @@ const normalizePermissions = (rawPermissions) => {
   }, {});
 };
 
-const formatPermissionLabel = (key) => getPermissionLabel(key);
-const formatPermissionDescription = (key) => getPermissionDescription(key);
+const formatRoleLabel = (role, locale) =>
+  role === "admin"
+    ? locale === "ar"
+      ? "مدير"
+      : "Admin"
+    : locale === "ar"
+      ? "مستخدم"
+      : "User";
+
+const formatRequestStatusLabel = (status, locale) => {
+  const normalized = String(status || "").toLowerCase();
+  const labels = {
+    pending: locale === "ar" ? "قيد المراجعة" : "Pending Review",
+    approved: locale === "ar" ? "موافق عليه" : "Approved",
+    rejected: locale === "ar" ? "مرفوض" : "Rejected",
+  };
+
+  return labels[normalized] || status;
+};
 
 export default function Users() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { locale, isRTL, select } = useLocale();
   const [users, setUsers] = useState([]);
   const [accessRequests, setAccessRequests] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
@@ -149,7 +168,9 @@ export default function Users() {
       console.error("Error fetching users:", err);
       setMessage({
         type: "error",
-        text: "فشل تحميل المستخدمين: " + getErrorMessage(err),
+        text:
+          select("فشل تحميل المستخدمين: ", "Failed to load users: ") +
+          getErrorMessage(err),
       });
     } finally {
       setLoading(false);
@@ -184,7 +205,10 @@ export default function Users() {
       });
       setMessage({
         type: "success",
-        text: status === "approved" ? "تم الموافقة على الطلب" : "تم رفض الطلب",
+        text:
+          status === "approved"
+            ? select("تم الموافقة على الطلب", "Request approved")
+            : select("تم رفض الطلب", "Request rejected"),
       });
       fetchAccessRequests();
       fetchUsers();
@@ -200,7 +224,10 @@ export default function Users() {
     e.preventDefault();
     try {
       await api.post("/users/create", { ...newUser, permissions });
-      setMessage({ type: "success", text: "تم إضافة المستخدم بنجاح" });
+      setMessage({
+        type: "success",
+        text: select("تم إضافة المستخدم بنجاح", "User added successfully"),
+      });
       setShowAddModal(false);
       setNewUser({ email: "", password: "", name: "", role: "user" });
       setPermissions({ ...DEFAULT_PERMISSION_STATE });
@@ -220,7 +247,10 @@ export default function Users() {
         permissions,
         role: editRole,
       });
-      setMessage({ type: "success", text: "تم تحديث المستخدم بنجاح" });
+      setMessage({
+        type: "success",
+        text: select("تم تحديث المستخدم بنجاح", "User updated successfully"),
+      });
       setShowEditModal(false);
       fetchUsers();
     } catch (err) {
@@ -232,11 +262,22 @@ export default function Users() {
   };
 
   const handleDeleteUser = async (userId) => {
-    if (!window.confirm("هل أنت متأكد من حذف هذا المستخدم؟")) return;
+    if (
+      !window.confirm(
+        select(
+          "هل أنت متأكد من حذف هذا المستخدم؟",
+          "Are you sure you want to delete this user?",
+        ),
+      )
+    )
+      return;
 
     try {
       await api.delete(`/users/${userId}`);
-      setMessage({ type: "success", text: "تم حذف المستخدم بنجاح" });
+      setMessage({
+        type: "success",
+        text: select("تم حذف المستخدم بنجاح", "User deleted successfully"),
+      });
       fetchUsers();
     } catch (err) {
       setMessage({
@@ -258,7 +299,7 @@ export default function Users() {
       <div className="flex h-screen bg-gray-100">
         <Sidebar />
         <main className="flex-1 overflow-auto p-8">
-          <div className="text-center">جاري التحميل...</div>
+          <div className="text-center">{select("جاري التحميل...", "Loading...")}</div>
         </main>
       </div>
     );
@@ -272,18 +313,23 @@ export default function Users() {
         <div className="p-8">
           {/* Header */}
           <div className="flex justify-between items-center mb-8">
-            <div>
+            <div className={isRTL ? "text-right" : "text-left"}>
               <h1 className="text-3xl font-bold text-gray-800">
-                إدارة المستخدمين
+                {select("إدارة المستخدمين", "User Management")}
               </h1>
-              <p className="text-gray-600">إضافة وإدارة صلاحيات المستخدمين</p>
+              <p className="text-gray-600">
+                {select(
+                  "إضافة وإدارة صلاحيات المستخدمين",
+                  "Add users and manage their permissions",
+                )}
+              </p>
             </div>
             <button
               onClick={() => setShowAddModal(true)}
               className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition"
             >
               <UserPlus size={20} />
-              إضافة مستخدم جديد
+              {select("إضافة مستخدم جديد", "Add New User")}
             </button>
           </div>
 
@@ -314,7 +360,7 @@ export default function Users() {
                 >
                   <div className="flex items-center gap-2">
                     <UsersIcon size={18} />
-                    المستخدمين ({users.length})
+                    {select("المستخدمين", "Users")} ({users.length})
                   </div>
                 </button>
                 <button
@@ -327,7 +373,7 @@ export default function Users() {
                 >
                   <div className="flex items-center gap-2">
                     <Shield size={18} />
-                    طلبات الصلاحيات (
+                    {select("طلبات الصلاحيات", "Access Requests")} (
                     {
                       accessRequests.filter((r) => r.status === "pending")
                         .length
@@ -345,7 +391,7 @@ export default function Users() {
                 >
                   <div className="flex items-center gap-2">
                     <FileText size={18} />
-                    التقارير اليومية ({dailyReports.length})
+                    {select("التقارير اليومية", "Daily Reports")} ({dailyReports.length})
                   </div>
                 </button>
               </nav>
@@ -359,19 +405,19 @@ export default function Users() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      الاسم
+                      {select("الاسم", "Name")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      البريد الإلكتروني
+                      {select("البريد الإلكتروني", "Email")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      الدور
+                      {select("الدور", "Role")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      الحالة
+                      {select("الحالة", "Status")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      الإجراءات
+                      {select("الإجراءات", "Actions")}
                     </th>
                   </tr>
                 </thead>
@@ -393,7 +439,7 @@ export default function Users() {
                               : "bg-blue-100 text-blue-800"
                           }`}
                         >
-                          {user.role === "admin" ? "مدير" : "مستخدم"}
+                          {formatRoleLabel(user.role, locale)}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -435,22 +481,22 @@ export default function Users() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      المستخدم
+                      {select("المستخدم", "User")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      الصلاحية المطلوبة
+                      {select("الصلاحية المطلوبة", "Requested Permission")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      السبب
+                      {select("السبب", "Reason")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      التاريخ
+                      {select("التاريخ", "Date")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      الحالة
+                      {select("الحالة", "Status")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      الإجراءات
+                      {select("الإجراءات", "Actions")}
                     </th>
                   </tr>
                 </thead>
@@ -465,7 +511,7 @@ export default function Users() {
                           size={48}
                           className="mx-auto mb-4 text-gray-300"
                         />
-                        <p>لا توجد طلبات صلاحيات</p>
+                        <p>{select("لا توجد طلبات صلاحيات", "No access requests")}</p>
                       </td>
                     </tr>
                   ) : (
@@ -474,7 +520,7 @@ export default function Users() {
                         <td className="px-6 py-4">
                           <div>
                             <p className="font-medium">
-                              {request.users?.name || "غير معروف"}
+                              {request.users?.name || select("غير معروف", "Unknown")}
                             </p>
                             <p className="text-sm text-gray-500">
                               {request.users?.email}
@@ -484,11 +530,12 @@ export default function Users() {
                         <td className="px-6 py-4">
                           <div className="space-y-2">
                             <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm text-blue-800">
-                              {formatPermissionLabel(request.permission_requested)}
+                              {getPermissionLabel(request.permission_requested, locale)}
                             </span>
                             <p className="max-w-sm text-xs leading-5 text-gray-500">
-                              {formatPermissionDescription(
+                              {getPermissionDescription(
                                 request.permission_requested,
+                                locale,
                               )}
                             </p>
                           </div>
@@ -498,7 +545,7 @@ export default function Users() {
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">
                           {new Date(request.created_at).toLocaleDateString(
-                            "ar-EG",
+                            locale === "ar" ? "ar-EG" : "en-US",
                           )}
                         </td>
                         <td className="px-6 py-4">
@@ -511,11 +558,7 @@ export default function Users() {
                                   : "bg-red-100 text-red-800"
                             }`}
                           >
-                            {request.status === "pending"
-                              ? "قيد المراجعة"
-                              : request.status === "approved"
-                                ? "موافق عليه"
-                                : "مرفوض"}
+                            {formatRequestStatusLabel(request.status, locale)}
                           </span>
                         </td>
                         <td className="px-6 py-4">
@@ -526,7 +569,7 @@ export default function Users() {
                                   handleApproveRequest(request.id, "approved")
                                 }
                                 className="text-green-600 hover:text-green-800 p-2 hover:bg-green-50 rounded flex items-center gap-1"
-                                title="موافقة"
+                                title={select("موافقة", "Approve")}
                               >
                                 <CheckCircle size={18} />
                               </button>
@@ -535,7 +578,7 @@ export default function Users() {
                                   handleApproveRequest(request.id, "rejected")
                                 }
                                 className="text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded flex items-center gap-1"
-                                title="رفض"
+                                title={select("رفض", "Reject")}
                               >
                                 <XCircle size={18} />
                               </button>
@@ -557,16 +600,16 @@ export default function Users() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      المستخدم
+                      {select("المستخدم", "User")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      العنوان
+                      {select("العنوان", "Title")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      المحتوى
+                      {select("المحتوى", "Content")}
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      التاريخ
+                      {select("التاريخ", "Date")}
                     </th>
                   </tr>
                 </thead>
@@ -581,7 +624,7 @@ export default function Users() {
                           size={48}
                           className="mx-auto mb-4 text-gray-300"
                         />
-                        <p>لا توجد تقارير يومية</p>
+                        <p>{select("لا توجد تقارير يومية", "No daily reports")}</p>
                       </td>
                     </tr>
                   ) : (
@@ -590,7 +633,7 @@ export default function Users() {
                         <td className="px-6 py-4">
                           <div>
                             <p className="font-medium">
-                              {report.users?.name || "غير معروف"}
+                              {report.users?.name || select("غير معروف", "Unknown")}
                             </p>
                             <p className="text-sm text-gray-500">
                               {report.users?.email}
@@ -622,7 +665,7 @@ export default function Users() {
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">
                           {new Date(report.created_at).toLocaleDateString(
-                            "ar-EG",
+                            locale === "ar" ? "ar-EG" : "en-US",
                             {
                               year: "numeric",
                               month: "long",
@@ -645,7 +688,9 @@ export default function Users() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold">إضافة مستخدم جديد</h2>
+              <h2 className="text-2xl font-bold">
+                {select("إضافة مستخدم جديد", "Add New User")}
+              </h2>
               <button
                 onClick={() => setShowAddModal(false)}
                 className="text-gray-500 hover:text-gray-700"
@@ -656,7 +701,9 @@ export default function Users() {
 
             <form onSubmit={handleAddUser} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-2">الاسم</label>
+                <label className="block text-sm font-medium mb-2">
+                  {select("الاسم", "Name")}
+                </label>
                 <input
                   type="text"
                   value={newUser.name}
@@ -670,7 +717,7 @@ export default function Users() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  البريد الإلكتروني
+                  {select("البريد الإلكتروني", "Email")}
                 </label>
                 <input
                   type="email"
@@ -686,7 +733,7 @@ export default function Users() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  كلمة المرور
+                  {select("كلمة المرور", "Password")}
                 </label>
                 <input
                   type="password"
@@ -701,7 +748,9 @@ export default function Users() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">الدور</label>
+                <label className="block text-sm font-medium mb-2">
+                  {select("الدور", "Role")}
+                </label>
                 <select
                   value={newUser.role}
                   onChange={(e) =>
@@ -709,19 +758,21 @@ export default function Users() {
                   }
                   className="w-full px-4 py-2 border rounded-lg"
                 >
-                  <option value="user">مستخدم</option>
-                  <option value="admin">مدير</option>
+                  <option value="user">{select("مستخدم", "User")}</option>
+                  <option value="admin">{select("مدير", "Admin")}</option>
                 </select>
               </div>
 
               <div className="border-t pt-4">
-                <h3 className="font-semibold mb-4">الصلاحيات</h3>
+                <h3 className="font-semibold mb-4">
+                  {select("الصلاحيات", "Permissions")}
+                </h3>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {Object.keys(permissions).map((key) => (
                     <PermissionToggleCard
                       key={key}
-                      label={formatPermissionLabel(key)}
-                      description={formatPermissionDescription(key)}
+                      label={getPermissionLabel(key, locale)}
+                      description={getPermissionDescription(key, locale)}
                       checked={permissions[key]}
                       onChange={(checked) =>
                         setPermissions({
@@ -740,14 +791,14 @@ export default function Users() {
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg flex items-center justify-center gap-2"
                 >
                   <Save size={20} />
-                  حفظ
+                  {select("حفظ", "Save")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
                   className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-3 rounded-lg"
                 >
-                  إلغاء
+                  {select("إلغاء", "Cancel")}
                 </button>
               </div>
             </form>
@@ -761,7 +812,7 @@ export default function Users() {
           <div className="bg-white rounded-lg p-8 max-w-2xl w-full">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold">
-                تعديل صلاحيات: {selectedUser.name}
+                {select("تعديل صلاحيات", "Edit Permissions")}: {selectedUser.name}
               </h2>
               <button
                 onClick={() => setShowEditModal(false)}
@@ -773,25 +824,29 @@ export default function Users() {
 
             <form onSubmit={handleEditUser} className="space-y-4">
               <div className="mb-4">
-                <label className="block text-sm font-medium mb-2">الدور</label>
+                <label className="block text-sm font-medium mb-2">
+                  {select("الدور", "Role")}
+                </label>
                 <select
                   value={editRole}
                   onChange={(e) => setEditRole(e.target.value)}
                   className="w-full px-4 py-2 border rounded-lg"
                 >
-                  <option value="user">مستخدم</option>
-                  <option value="admin">مدير</option>
+                  <option value="user">{select("مستخدم", "User")}</option>
+                  <option value="admin">{select("مدير", "Admin")}</option>
                 </select>
               </div>
 
               <div className="border-t pt-4">
-                <h3 className="font-semibold mb-4">الصلاحيات</h3>
+                <h3 className="font-semibold mb-4">
+                  {select("الصلاحيات", "Permissions")}
+                </h3>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {Object.keys(permissions).map((key) => (
                     <PermissionToggleCard
                       key={key}
-                      label={formatPermissionLabel(key)}
-                      description={formatPermissionDescription(key)}
+                      label={getPermissionLabel(key, locale)}
+                      description={getPermissionDescription(key, locale)}
                       checked={permissions[key]}
                       onChange={(checked) =>
                         setPermissions({
@@ -810,14 +865,14 @@ export default function Users() {
                   className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg flex items-center justify-center gap-2"
                 >
                   <Save size={20} />
-                  حفظ التغييرات
+                  {select("حفظ التغييرات", "Save Changes")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
                   className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-3 rounded-lg"
                 >
-                  إلغاء
+                  {select("إلغاء", "Cancel")}
                 </button>
               </div>
             </form>

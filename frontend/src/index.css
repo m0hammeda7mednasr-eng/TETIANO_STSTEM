@@ -39,8 +39,27 @@ body {
     "Segoe UI",
     sans-serif;
   background-color: #f3f4f6;
+  direction: ltr;
 }
 
 html {
   scroll-behavior: smooth;
+}
+
+html[dir="rtl"] body {
+  direction: rtl;
+}
+
+html[dir="ltr"] body {
+  direction: ltr;
+}
+
+html[dir="rtl"] .data-table th,
+html[dir="rtl"] .data-table td {
+  text-align: right;
+}
+
+html[dir="ltr"] .data-table th,
+html[dir="ltr"] .data-table td {
+  text-align: left;
 }

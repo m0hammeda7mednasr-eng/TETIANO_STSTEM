@@ -24,6 +24,7 @@ import OrdersExportPanel from "../components/OrdersExportPanel";
 import api from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
+import { useLocale } from "../context/LocaleContext";
 import {
   HEAVY_VIEW_CACHE_FRESH_MS,
   shouldAutoRefreshView,
@@ -73,6 +74,54 @@ const normalizeSearchValue = (value) =>
 const normalizePhoneSearch = (value) =>
   String(value || "").replace(/\D/g, "");
 
+const normalizeOrderNumberSearch = (value) =>
+  String(value || "").replace(/[^\d]/g, "");
+
+const parseLocalDateInput = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day));
+};
+
+const parseOrderDate = (value) => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getNormalizedDateRange = (dateFrom, dateTo) => {
+  const from = dateFrom ? startOfDay(dateFrom) : null;
+  const to = dateTo ? endOfDay(dateTo) : null;
+
+  if (from && to && from.getTime() > to.getTime()) {
+    return {
+      from: startOfDay(dateTo),
+      to: endOfDay(dateFrom),
+      wasSwapped: true,
+    };
+  }
+
+  return {
+    from,
+    to,
+    wasSwapped: false,
+  };
+};
+
+const isNumericSearchToken = (value) => /^\d+$/.test(String(value || "").trim());
+
+const isLikelyOrderNumberToken = (value) =>
+  /^#?\d{3,6}$/.test(String(value || "").trim());
+
 const splitSearchTokens = (value) =>
   Array.from(
     new Set(
@@ -105,11 +154,31 @@ const buildOrderSearchIndex = (order) => {
   const itemPreviewTitles = Array.isArray(order?.item_previews)
     ? order.item_previews.map((item) => item?.title)
     : [];
+  const phoneValues = [
+    order?.customer_phone,
+    parsedData?.customer?.phone,
+    parsedData?.shipping_address?.phone,
+    parsedData?.billing_address?.phone,
+  ]
+    .map(normalizePhoneSearch)
+    .filter(Boolean);
+  const orderNumberTextValues = [
+    order?.order_number,
+    parsedData?.order_number,
+    parsedData?.name,
+  ]
+    .map(normalizeSearchValue)
+    .filter(Boolean);
+  const orderNumberValues = [
+    order?.order_number,
+    parsedData?.order_number,
+    parsedData?.name,
+  ]
+    .map(normalizeOrderNumberSearch)
+    .filter(Boolean);
   const searchValues = [
     order?.customer_name,
     order?.customer_email,
-    order?.customer_phone,
-    order?.order_number,
     order?.shopify_id,
     order?.financial_status,
     order?.fulfillment_status,
@@ -121,9 +190,7 @@ const buildOrderSearchIndex = (order) => {
     parsedData?.customer?.first_name,
     parsedData?.customer?.last_name,
     parsedData?.customer?.email,
-    parsedData?.customer?.phone,
     parsedData?.shipping_address?.name,
-    parsedData?.shipping_address?.phone,
     parsedData?.shipping_address?.address1,
     parsedData?.shipping_address?.address2,
     parsedData?.shipping_address?.city,
@@ -131,7 +198,6 @@ const buildOrderSearchIndex = (order) => {
     parsedData?.shipping_address?.country,
     parsedData?.shipping_address?.zip,
     parsedData?.billing_address?.name,
-    parsedData?.billing_address?.phone,
     parsedData?.billing_address?.address1,
     parsedData?.billing_address?.address2,
     parsedData?.billing_address?.city,
@@ -152,10 +218,9 @@ const buildOrderSearchIndex = (order) => {
     .filter(Boolean);
 
   return {
-    textValues: searchValues,
-    numericValues: Array.from(
-      new Set(searchValues.map(normalizePhoneSearch).filter(Boolean)),
-    ),
+    textValues: Array.from(new Set([...searchValues, ...orderNumberTextValues])),
+    phoneValues: Array.from(new Set(phoneValues)),
+    orderNumberValues: Array.from(new Set(orderNumberValues)),
   };
 };
 
@@ -167,11 +232,35 @@ const matchesOrderSearch = (searchIndex, searchTerm) => {
 
   return tokens.every((token) => {
     const normalizedPhoneToken = normalizePhoneSearch(token);
+    const normalizedOrderToken = normalizeOrderNumberSearch(token);
+
+    if (isLikelyOrderNumberToken(token)) {
+      return searchIndex.orderNumberValues.some((value) =>
+        value.includes(normalizedOrderToken),
+      );
+    }
+
+    if (isNumericSearchToken(token) && normalizedPhoneToken.length >= 7) {
+      return (
+        searchIndex.phoneValues.some((value) =>
+          value.includes(normalizedPhoneToken),
+        ) ||
+        searchIndex.orderNumberValues.some((value) =>
+          value.includes(normalizedPhoneToken),
+        )
+      );
+    }
+
     return (
       searchIndex.textValues.some((value) => value.includes(token)) ||
-      (normalizedPhoneToken &&
-        searchIndex.numericValues.some((value) =>
+      (normalizedPhoneToken.length >= 7 &&
+        searchIndex.phoneValues.some((value) =>
           value.includes(normalizedPhoneToken),
+        )) ||
+      (token.startsWith("#") &&
+        normalizedOrderToken &&
+        searchIndex.orderNumberValues.some((value) =>
+          value.includes(normalizedOrderToken),
         ))
     );
   });
@@ -255,24 +344,33 @@ const getOrderMeta = (order) => {
     paymentMethod,
     netSalesAmount,
     orderNumberNumeric: toNumber(order.order_number),
-    createdAtDate: new Date(order.created_at),
+    createdAtDate: parseOrderDate(order.created_at),
   };
 };
 
 const startOfDay = (dateString) => {
-  const date = new Date(dateString);
+  const date = parseLocalDateInput(dateString);
+  if (!date) {
+    return null;
+  }
+
   date.setHours(0, 0, 0, 0);
   return date;
 };
 
 const endOfDay = (dateString) => {
-  const date = new Date(dateString);
+  const date = parseLocalDateInput(dateString);
+  if (!date) {
+    return null;
+  }
+
   date.setHours(23, 59, 59, 999);
   return date;
 };
 
 export default function Orders() {
   const navigate = useNavigate();
+  const { locale, select, isRTL } = useLocale();
   const cacheKey = useMemo(() => buildStoreScopedCacheKey("orders:list"), []);
   const initialCachedSnapshot = useMemo(() => {
     const cached = peekCachedView(cacheKey);
@@ -554,6 +652,11 @@ export default function Orders() {
     [orders],
   );
 
+  const normalizedDateRange = useMemo(
+    () => getNormalizedDateRange(filters.dateFrom, filters.dateTo),
+    [filters.dateFrom, filters.dateTo],
+  );
+
   const filteredOrders = useMemo(() => {
     let result = ordersWithMeta.filter(
       (order) => !missingOrderIdSet.has(String(order?.id || "").trim()),
@@ -565,14 +668,18 @@ export default function Orders() {
       });
     }
 
-    if (filters.dateFrom) {
-      const from = startOfDay(filters.dateFrom);
-      result = result.filter((order) => order._meta.createdAtDate >= from);
+    if (normalizedDateRange.from) {
+      result = result.filter((order) => {
+        const orderDate = order._meta.createdAtDate;
+        return orderDate && orderDate >= normalizedDateRange.from;
+      });
     }
 
-    if (filters.dateTo) {
-      const to = endOfDay(filters.dateTo);
-      result = result.filter((order) => order._meta.createdAtDate <= to);
+    if (normalizedDateRange.to) {
+      result = result.filter((order) => {
+        const orderDate = order._meta.createdAtDate;
+        return orderDate && orderDate <= normalizedDateRange.to;
+      });
     }
 
     if (filters.orderNumberFrom) {
@@ -673,7 +780,7 @@ export default function Orders() {
     });
 
     return result;
-  }, [deferredSearchTerm, filters, missingOrderIdSet, ordersWithMeta]);
+  }, [deferredSearchTerm, filters, missingOrderIdSet, normalizedDateRange, ordersWithMeta]);
 
   const selectableOrders = useMemo(
     () =>
@@ -902,12 +1009,18 @@ export default function Orders() {
                   {lastUpdatedAt && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
                       <Clock3 size={12} />
-                      Last refresh {lastUpdatedAt.toLocaleTimeString("ar-EG")}
+                      {select("آخر تحديث", "Last refresh")}{" "}
+                      {lastUpdatedAt.toLocaleTimeString(
+                        locale === "ar" ? "ar-EG" : "en-US",
+                      )}
                     </span>
                   )}
                   {lastLiveEventAt && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-sky-50 text-sky-700 border border-sky-200">
-                      Event {lastLiveEventAt.toLocaleTimeString("ar-EG")}
+                      {select("آخر حدث", "Event")}{" "}
+                      {lastLiveEventAt.toLocaleTimeString(
+                        locale === "ar" ? "ar-EG" : "en-US",
+                      )}
                     </span>
                   )}
                 </div>
@@ -951,11 +1064,16 @@ export default function Orders() {
                 <AlertCircle size={18} className="mt-0.5 text-amber-600" />
                 <div>
                   <p className="font-semibold">
-                    {missingOrderIds.length.toLocaleString()} طلب خارج قائمة الطلبات الآن
+                    {select(
+                      `${missingOrderIds.length.toLocaleString()} طلب خارج قائمة الطلبات الآن`,
+                      `${missingOrderIds.length.toLocaleString()} orders are now outside the main orders list`,
+                    )}
                   </p>
                   <p className="text-sm text-amber-800">
-                    هذه الطلبات انتقلت إلى صفحة الطلبات المفقودة لأنها لم تحصل على أي أكشن
-                    خلال آخر 3 أيام.
+                    {select(
+                      "هذه الطلبات انتقلت إلى صفحة الطلبات المفقودة لأنها لم تحصل على أي أكشن خلال آخر 3 أيام.",
+                      "These orders moved to the Missing Orders page because they had no real action during the last 3 days.",
+                    )}
                   </p>
                 </div>
               </div>
@@ -963,7 +1081,7 @@ export default function Orders() {
                 onClick={() => navigate("/orders/missing")}
                 className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium"
               >
-                فتح الطلبات المفقودة
+                {select("فتح الطلبات المفقودة", "Open Missing Orders")}
               </button>
             </div>
           )}
@@ -1025,22 +1143,38 @@ export default function Orders() {
               <div className="xl:col-span-2">
                 <label className="block text-xs text-slate-500 mb-1">Search</label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                  <Search
+                    className={`absolute top-2.5 text-slate-400 ${
+                      isRTL ? "right-3" : "left-3"
+                    }`}
+                    size={16}
+                  />
                   <input
                     type="text"
-                    placeholder="Customer, phone, email, product, SKU, order #..."
+                    placeholder="Order #, phone, customer, email, product, SKU..."
                     value={filters.searchTerm}
                     onChange={(event) =>
                       handleFilterChange("searchTerm", event.target.value)
                     }
-                    className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    className={`w-full py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                      isRTL ? "pr-8 pl-3" : "pl-8 pr-3"
+                    }`}
                   />
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  Showing the latest {ORDERS_VISIBLE_LIMIT.toLocaleString()} orders only.
-                  Search supports customer name, phone digits, email, product title,
-                  SKU, payment, fulfillment, and order number.
+                  {select(
+                    `يعرض آخر ${ORDERS_VISIBLE_LIMIT.toLocaleString()} طلب فقط. لو كتبت رقم أوردر من 3 إلى 6 أرقام هيتفهم كرقم أوردر أولًا. وما زال البحث يدعم أيضًا الفون، الاسم، الإيميل، المنتج، SKU، الدفع، والتنفيذ.`,
+                    `Showing the latest ${ORDERS_VISIBLE_LIMIT.toLocaleString()} orders only. If you type a 3 to 6 digit number, it will be treated as an order number first. Search still supports phone, customer name, email, product, SKU, payment, and fulfillment.`,
+                  )}
                 </p>
+                {normalizedDateRange.wasSwapped && (
+                  <p className="mt-1 text-xs text-amber-700">
+                    {select(
+                      "تم تصحيح مدى التاريخ تلقائيًا لأن من تاريخ كان بعد إلى تاريخ.",
+                      "Date range was auto-corrected because From Date was later than To Date.",
+                    )}
+                  </p>
+                )}
               </div>
 
               <div>

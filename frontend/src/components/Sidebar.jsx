@@ -22,60 +22,35 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
 import NotificationBell from "./NotificationBell";
+import LanguageToggle from "./LanguageToggle";
 import tetianoLogo from "../assets/tetiano-logo.jpeg";
 
-const AR = {
-  dashboard: "\u0644\u0648\u062D\u0629 \u0627\u0644\u062A\u062D\u0643\u0645",
-  orders: "\u0627\u0644\u0637\u0644\u0628\u0627\u062A",
-  missingOrders: "\u0627\u0644\u0637\u0644\u0628\u0627\u062A \u0627\u0644\u0645\u0641\u0642\u0648\u062F\u0629",
-  products: "\u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A",
-  suppliers: "\u0627\u0644\u0645\u0648\u0631\u062F\u064A\u0646",
-  productAnalysis: "\u062A\u062D\u0644\u064A\u0644 \u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A",
-  warehouse: "\u0627\u0644\u0645\u062E\u0632\u0646",
-  scanner: "\u0627\u0644\u0633\u0643\u0627\u0646\u0631",
-  customers: "\u0627\u0644\u0639\u0645\u0644\u0627\u0621",
-  netProfit: "\u0635\u0627\u0641\u064A \u0627\u0644\u0631\u0628\u062D",
-  myTasks: "\u0645\u0647\u0627\u0645\u064A",
-  myReports: "\u062A\u0642\u0627\u0631\u064A\u0631\u064A",
-  accessRequests: "\u0637\u0644\u0628\u0627\u062A \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A",
-  analytics: "\u0627\u0644\u062A\u062D\u0644\u064A\u0644\u0627\u062A",
-  adminPanel: "\u0644\u0648\u062D\u0629 \u0627\u0644\u0623\u062F\u0645\u0646",
-  taskManagement: "\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u0647\u0627\u0645",
-  employeeReports: "\u062A\u0642\u0627\u0631\u064A\u0631 \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646",
-  userManagement: "\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645\u064A\u0646",
-  activityLog: "\u0633\u062C\u0644 \u0627\u0644\u0646\u0634\u0627\u0637",
-  mySection: "\u0645\u0647\u0627\u0645\u064A \u0648\u062A\u0642\u0627\u0631\u064A\u0631\u064A",
-  systemSection: "\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0646\u0638\u0627\u0645",
-  settings: "\u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A",
-  logout: "\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062E\u0631\u0648\u062C",
-  user: "\u0645\u0633\u062A\u062E\u062F\u0645",
-};
-
-const SHARED_NAV = [
+const buildSharedNav = (t) => [
   {
     type: "item",
     icon: Home,
-    label: AR.dashboard,
+    label: t("sidebar.dashboard", "Dashboard"),
     path: "/dashboard",
-    subtitle: "نظرة سريعة على الأداء اليومي",
+    subtitle: t("sidebar.dashboardSubtitle", "Quick view of daily performance"),
   },
   {
     type: "group",
     id: "orders",
     icon: ShoppingCart,
-    label: "الطلبات والمتابعة",
-    subtitle: "الطلبات النشطة والتنبيهات",
+    label: t("sidebar.ordersSection", "Orders & Follow-up"),
+    subtitle: t("sidebar.ordersSectionSubtitle", "Active orders and alerts"),
     items: [
       {
         icon: ShoppingCart,
-        label: AR.orders,
+        label: t("sidebar.orders", "Orders"),
         path: "/orders",
         permission: "can_view_orders",
       },
       {
         icon: AlertTriangle,
-        label: AR.missingOrders,
+        label: t("sidebar.missingOrders", "Missing Orders"),
         path: "/orders/missing",
         permission: "can_view_orders",
       },
@@ -85,24 +60,27 @@ const SHARED_NAV = [
     type: "group",
     id: "catalog",
     icon: Package,
-    label: "المنتجات والتحليل",
-    subtitle: "المنتجات وفهم الأداء",
+    label: t("sidebar.catalogSection", "Catalog & Analysis"),
+    subtitle: t(
+      "sidebar.catalogSectionSubtitle",
+      "Products and performance insights",
+    ),
     items: [
       {
         icon: Package,
-        label: AR.products,
+        label: t("sidebar.products", "Products"),
         path: "/products",
         permission: "can_view_products",
       },
       {
         icon: Truck,
-        label: AR.suppliers,
+        label: t("sidebar.suppliers", "Suppliers"),
         path: "/suppliers",
         permission: "can_view_products",
       },
       {
         icon: BarChart3,
-        label: AR.productAnalysis,
+        label: t("sidebar.productAnalysis", "Product Analysis"),
         path: "/products/analysis",
         permission: "can_view_products",
       },
@@ -112,18 +90,21 @@ const SHARED_NAV = [
     type: "group",
     id: "inventory",
     icon: Server,
-    label: "المخزون والحركة",
-    subtitle: "المخزن والسكانر والحركات",
+    label: t("sidebar.inventorySection", "Inventory & Movement"),
+    subtitle: t(
+      "sidebar.inventorySectionSubtitle",
+      "Warehouse, scanner, and movements",
+    ),
     items: [
       {
         icon: Server,
-        label: AR.warehouse,
+        label: t("sidebar.warehouse", "Warehouse"),
         path: "/warehouse",
         permission: "can_view_products",
       },
       {
         icon: Activity,
-        label: AR.scanner,
+        label: t("sidebar.scanner", "Scanner"),
         path: "/warehouse/scanner",
         permission: "can_view_products",
       },
@@ -132,73 +113,73 @@ const SHARED_NAV = [
   {
     type: "item",
     icon: Users,
-    label: AR.customers,
+    label: t("sidebar.customers", "Customers"),
     path: "/customers",
-    subtitle: "بيانات العملاء والمتابعة",
+    subtitle: t("sidebar.customersSubtitle", "Customer data and follow-up"),
     permission: "can_view_customers",
   },
   {
     type: "item",
     icon: DollarSign,
-    label: AR.netProfit,
+    label: t("sidebar.netProfit", "Net Profit"),
     path: "/net-profit",
-    subtitle: "الأرباح الصافية والمؤشرات",
+    subtitle: t("sidebar.netProfitSubtitle", "Net profit and indicators"),
     adminOnly: true,
   },
 ];
 
-const EMPLOYEE_NAV = [
+const buildEmployeeNav = (t) => [
   {
     icon: ClipboardList,
-    label: AR.myTasks,
+    label: t("sidebar.myTasks", "My Tasks"),
     path: "/my-tasks",
   },
   {
     icon: FileText,
-    label: AR.myReports,
+    label: t("sidebar.myReports", "My Reports"),
     path: "/my-reports",
   },
   {
     icon: UserPlus,
-    label: AR.accessRequests,
+    label: t("sidebar.accessRequests", "Access Requests"),
     path: "/request-access",
   },
 ];
 
-const ADMIN_NAV = [
+const buildAdminNav = (t) => [
   {
     icon: BarChart3,
-    label: AR.analytics,
+    label: t("sidebar.analytics", "Analytics"),
     path: "/analytics",
     adminOnly: true,
   },
   {
     icon: Server,
-    label: AR.adminPanel,
+    label: t("sidebar.adminPanel", "Admin Panel"),
     path: "/admin",
     adminOnly: true,
   },
   {
     icon: ClipboardList,
-    label: AR.taskManagement,
+    label: t("sidebar.taskManagement", "Task Management"),
     path: "/tasks",
     permission: "can_manage_tasks",
   },
   {
     icon: FileText,
-    label: AR.employeeReports,
+    label: t("sidebar.employeeReports", "Employee Reports"),
     path: "/reports",
     permission: "can_view_all_reports",
   },
   {
     icon: Shield,
-    label: AR.userManagement,
+    label: t("sidebar.userManagement", "User Management"),
     path: "/users",
     permission: "can_manage_users",
   },
   {
     icon: Activity,
-    label: AR.activityLog,
+    label: t("sidebar.activityLog", "Activity Log"),
     path: "/activity-log",
     permission: "can_view_activity_log",
   },
@@ -236,9 +217,14 @@ export default function Sidebar() {
     getAutoExpandedGroups(window.location.pathname),
   );
   const { user, logout, hasPermission, isAdmin } = useAuth();
+  const { isRTL, t } = useLocale();
   const canManageSettings = hasPermission("can_manage_settings");
   const navigate = useNavigate();
   const location = useLocation();
+
+  const sharedNav = useMemo(() => buildSharedNav(t), [t]);
+  const employeeNav = useMemo(() => buildEmployeeNav(t), [t]);
+  const adminNav = useMemo(() => buildAdminNav(t), [t]);
 
   useEffect(() => {
     setExpandedGroups((current) => {
@@ -257,37 +243,42 @@ export default function Sidebar() {
     });
   }, [location.pathname]);
 
-  const canSeeItem = useCallback((item) => {
-    if (item.adminOnly && !isAdmin) return false;
-    if (item.permission && !hasPermission(item.permission)) return false;
-    return true;
-  }, [hasPermission, isAdmin]);
+  const canSeeItem = useCallback(
+    (item) => {
+      if (item.adminOnly && !isAdmin) return false;
+      if (item.permission && !hasPermission(item.permission)) return false;
+      return true;
+    },
+    [hasPermission, isAdmin],
+  );
 
   const visibleSharedEntries = useMemo(
     () =>
-      SHARED_NAV.map((entry) => {
-        if (entry.type !== "group") {
-          return entry;
-        }
+      sharedNav
+        .map((entry) => {
+          if (entry.type !== "group") {
+            return entry;
+          }
 
-        return {
-          ...entry,
-          items: entry.items.filter(canSeeItem),
-        };
-      }).filter((entry) =>
-        entry.type === "group" ? entry.items.length > 0 : canSeeItem(entry),
-      ),
-    [canSeeItem],
+          return {
+            ...entry,
+            items: entry.items.filter(canSeeItem),
+          };
+        })
+        .filter((entry) =>
+          entry.type === "group" ? entry.items.length > 0 : canSeeItem(entry),
+        ),
+    [canSeeItem, sharedNav],
   );
 
   const visibleEmployeeItems = useMemo(
-    () => (isAdmin ? [] : EMPLOYEE_NAV.filter(canSeeItem)),
-    [canSeeItem, isAdmin],
+    () => (isAdmin ? [] : employeeNav.filter(canSeeItem)),
+    [canSeeItem, employeeNav, isAdmin],
   );
 
   const visibleAdminItems = useMemo(
-    () => (isAdmin ? ADMIN_NAV.filter(canSeeItem) : []),
-    [canSeeItem, isAdmin],
+    () => (isAdmin ? adminNav.filter(canSeeItem) : []),
+    [adminNav, canSeeItem, isAdmin],
   );
 
   const handleLogout = () => {
@@ -318,6 +309,7 @@ export default function Sidebar() {
           group={entry}
           expanded={Boolean(expandedGroups[entry.id])}
           isActive={isGroupActive}
+          isRTL={isRTL}
           locationPath={location.pathname}
           onToggle={() => toggleGroup(entry.id)}
           onItemClick={handleItemClick}
@@ -335,26 +327,33 @@ export default function Sidebar() {
     );
   };
 
+  const mobileButtonPosition = isRTL ? "right-4" : "left-4";
+  const sidePositionClass = isRTL ? "right-0" : "left-0";
+  const hiddenTransformClass = isRTL ? "translate-x-full" : "-translate-x-full";
+  const headerTextAlignClass = isRTL ? "text-right" : "text-left";
+  const settingsTextAlignClass = isRTL ? "text-right" : "text-left";
+  const logoRowClass = isRTL ? "flex-row" : "flex-row-reverse";
+
   return (
     <>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="lg:hidden fixed top-4 right-4 z-50 bg-sky-700 text-white p-2 rounded-lg hover:bg-sky-800 shadow-lg"
+        className={`lg:hidden fixed top-4 ${mobileButtonPosition} z-50 rounded-lg bg-sky-700 p-2 text-white shadow-lg hover:bg-sky-800`}
       >
         {isOpen ? <X size={22} /> : <Menu size={22} />}
       </button>
 
       <aside
-        className={`fixed lg:static top-0 right-0 h-screen ${
-          isOpen ? "translate-x-0" : "translate-x-full"
+        className={`fixed lg:static top-0 ${sidePositionClass} h-screen ${
+          isOpen ? "translate-x-0" : hiddenTransformClass
         } lg:translate-x-0 w-72 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white transition-transform duration-300 z-40 flex flex-col overflow-visible shadow-2xl`}
       >
-        <div className="p-6 border-b border-slate-800 bg-slate-950/70 backdrop-blur shrink-0 relative z-40">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-right min-w-0">
+        <div className="relative z-40 border-b border-slate-800 bg-slate-950/70 p-6 backdrop-blur shrink-0">
+          <div className={`flex items-center justify-between gap-3 ${logoRowClass}`}>
+            <div className={`${headerTextAlignClass} min-w-0`}>
               <h1 className="text-xl font-bold tracking-wide text-white">Tetiano</h1>
-              <p className="text-slate-300 text-sm mt-1 truncate">
-                {user?.name || AR.user}
+              <p className="mt-1 truncate text-sm text-slate-300">
+                {user?.name || t("sidebar.userFallback", "User")}
               </p>
             </div>
             <img
@@ -364,13 +363,22 @@ export default function Sidebar() {
               loading="lazy"
             />
           </div>
-          <div className="mt-4 flex items-center justify-end gap-2">
+
+          <div
+            className={`mt-4 flex items-center gap-2 ${
+              isRTL ? "justify-end" : "justify-start"
+            }`}
+          >
             <NotificationBell />
             {isAdmin && (
-              <span className="inline-block bg-sky-600 text-white px-3 py-1 rounded-full text-xs font-semibold">
-                Admin
+              <span className="inline-block rounded-full bg-sky-600 px-3 py-1 text-xs font-semibold text-white">
+                {t("sidebar.adminBadge", "Admin")}
               </span>
             )}
+          </div>
+
+          <div className={`mt-4 flex ${isRTL ? "justify-end" : "justify-start"}`}>
+            <LanguageToggle className="border-slate-700 bg-slate-900/70 text-white shadow-none" />
           </div>
         </div>
 
@@ -378,7 +386,7 @@ export default function Sidebar() {
           <div className="space-y-2">{visibleSharedEntries.map(renderNavEntry)}</div>
 
           {visibleEmployeeItems.length > 0 && (
-            <NavSection title={AR.mySection}>
+            <NavSection title={t("sidebar.mySection", "My Work")} isRTL={isRTL}>
               {visibleEmployeeItems.map((item) => (
                 <SidebarListItem
                   key={item.path}
@@ -391,7 +399,10 @@ export default function Sidebar() {
           )}
 
           {visibleAdminItems.length > 0 && (
-            <NavSection title={AR.systemSection}>
+            <NavSection
+              title={t("sidebar.systemSection", "System Management")}
+              isRTL={isRTL}
+            >
               {visibleAdminItems.map((item) => (
                 <SidebarListItem
                   key={item.path}
@@ -404,24 +415,24 @@ export default function Sidebar() {
           )}
         </nav>
 
-        <div className="mt-auto p-4 border-t border-slate-800 bg-slate-950/70 backdrop-blur shrink-0 space-y-2">
+        <div className="mt-auto space-y-2 border-t border-slate-800 bg-slate-950/70 p-4 backdrop-blur shrink-0">
           {canManageSettings && (
             <Link
               to="/settings"
               onClick={handleItemClick}
-              className="w-full flex items-center gap-3 bg-slate-800 hover:bg-slate-700 px-4 py-3 rounded-xl transition text-right border border-slate-700"
+              className={`w-full flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 transition hover:bg-slate-700 ${settingsTextAlignClass}`}
             >
               <Settings size={18} />
-              <span>{AR.settings}</span>
+              <span>{t("sidebar.settings", "Settings")}</span>
             </Link>
           )}
 
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 bg-red-600 hover:bg-red-700 px-4 py-3 rounded-xl transition border border-red-500/70"
+            className="w-full flex items-center gap-3 rounded-xl border border-red-500/70 bg-red-600 px-4 py-3 transition hover:bg-red-700"
           >
             <LogOut size={18} />
-            <span>{AR.logout}</span>
+            <span>{t("sidebar.logout", "Log out")}</span>
           </button>
         </div>
       </aside>
@@ -447,7 +458,7 @@ function SidebarPrimaryItem({ item, isActive, onClick }) {
           : "border-slate-800 bg-slate-900/70 hover:bg-slate-800/90"
       }`}
     >
-      <div className="flex items-center gap-3 min-w-0">
+      <div className="flex min-w-0 items-center gap-3">
         <div
           className={`flex h-10 w-10 items-center justify-center rounded-xl ${
             isActive ? "bg-sky-500/20 text-sky-100" : "bg-slate-800 text-slate-200"
@@ -456,9 +467,9 @@ function SidebarPrimaryItem({ item, isActive, onClick }) {
           <item.icon size={18} />
         </div>
         <div className="min-w-0">
-          <p className="font-medium text-white truncate">{item.label}</p>
+          <p className="truncate font-medium text-white">{item.label}</p>
           {item.subtitle && (
-            <p className="text-xs text-slate-400 truncate">{item.subtitle}</p>
+            <p className="truncate text-xs text-slate-400">{item.subtitle}</p>
           )}
         </div>
       </div>
@@ -475,6 +486,7 @@ function SidebarGroup({
   group,
   expanded,
   isActive,
+  isRTL,
   locationPath,
   onToggle,
   onItemClick,
@@ -490,9 +502,11 @@ function SidebarGroup({
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-right"
+        className={`w-full flex items-center justify-between gap-3 px-4 py-3 ${
+          isRTL ? "text-right" : "text-left"
+        }`}
       >
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex min-w-0 items-center gap-3">
           <div
             className={`flex h-10 w-10 items-center justify-center rounded-xl ${
               isActive ? "bg-sky-500/20 text-sky-100" : "bg-slate-800 text-slate-200"
@@ -501,8 +515,8 @@ function SidebarGroup({
             <group.icon size={18} />
           </div>
           <div className="min-w-0">
-            <p className="font-medium text-white truncate">{group.label}</p>
-            <p className="text-xs text-slate-400 truncate">{group.subtitle}</p>
+            <p className="truncate font-medium text-white">{group.label}</p>
+            <p className="truncate text-xs text-slate-400">{group.subtitle}</p>
           </div>
         </div>
         <ChevronDown
@@ -513,7 +527,13 @@ function SidebarGroup({
 
       {expanded && (
         <div className="px-3 pb-3">
-          <div className="border-r border-slate-800/90 pr-3 space-y-1">
+          <div
+            className={`space-y-1 ${
+              isRTL
+                ? "border-r border-slate-800/90 pr-3"
+                : "border-l border-slate-800/90 pl-3"
+            }`}
+          >
             {group.items.map((item) => (
               <SidebarSubItem
                 key={item.path}
@@ -559,15 +579,19 @@ function SidebarListItem({ item, isActive, onClick }) {
   );
 }
 
-function NavSection({ title, children }) {
+function NavSection({ title, isRTL, children }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/70 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-800">
-        <p className="text-slate-400 text-xs font-semibold uppercase tracking-[0.2em]">
+    <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
+      <div className="border-b border-slate-800 px-4 py-3">
+        <p
+          className={`text-xs font-semibold tracking-[0.2em] text-slate-400 ${
+            isRTL ? "" : "uppercase"
+          }`}
+        >
           {title}
         </p>
       </div>
-      <div className="p-2 space-y-1">{children}</div>
+      <div className="space-y-1 p-2">{children}</div>
     </div>
   );
 }

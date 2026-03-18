@@ -47,6 +47,7 @@ const MISSING_ORDER_ACTION_TYPES = new Set([
   "order_status_update",
   "update_fulfillment_status",
   "order_payment_method_update",
+  "order_contact_update",
 ]);
 const MISSING_ORDER_NOTIFICATION_TYPES = new Set([
   "order_missing",
@@ -1794,8 +1795,70 @@ const getFallbackCustomersPage = async (req) => {
   return await enrichCustomersWithOrderPhones(req, normalizedCustomers);
 };
 
+const parseLocalDateInput = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    const parsed = new Date(normalized);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day));
+};
+
+const parseOrderDate = (value) => {
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+};
+
+const startOfLocalDay = (value) => {
+  const date = parseLocalDateInput(value);
+  if (!date) {
+    return null;
+  }
+
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const endOfLocalDay = (value) => {
+  const date = parseLocalDateInput(value);
+  if (!date) {
+    return null;
+  }
+
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
+
+const getNormalizedQueryDateRange = (dateFrom, dateTo) => {
+  const from = dateFrom ? startOfLocalDay(dateFrom) : null;
+  const to = dateTo ? endOfLocalDay(dateTo) : null;
+
+  if (from && to && from.getTime() > to.getTime()) {
+    return {
+      from: startOfLocalDay(dateTo),
+      to: endOfLocalDay(dateFrom),
+    };
+  }
+
+  return {
+    from,
+    to,
+  };
+};
+
 const applyOrdersQueryFilters = (rows, query = {}) => {
   let filtered = [...(rows || [])];
+  const normalizedDateRange = getNormalizedQueryDateRange(
+    query.date_from,
+    query.date_to,
+  );
 
   if (query.search) {
     filtered = filtered.filter((order) =>
@@ -1803,16 +1866,18 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
     );
   }
 
-  if (query.date_from) {
-    const from = new Date(String(query.date_from));
-    from.setHours(0, 0, 0, 0);
-    filtered = filtered.filter((order) => new Date(order.created_at) >= from);
+  if (normalizedDateRange.from) {
+    filtered = filtered.filter((order) => {
+      const orderDate = parseOrderDate(order.created_at);
+      return orderDate && orderDate >= normalizedDateRange.from;
+    });
   }
 
-  if (query.date_to) {
-    const to = new Date(String(query.date_to));
-    to.setHours(23, 59, 59, 999);
-    filtered = filtered.filter((order) => new Date(order.created_at) <= to);
+  if (normalizedDateRange.to) {
+    filtered = filtered.filter((order) => {
+      const orderDate = parseOrderDate(order.created_at);
+      return orderDate && orderDate <= normalizedDateRange.to;
+    });
   }
 
   if (query.order_number_from !== undefined) {
@@ -4011,6 +4076,48 @@ router.post(
       res.json(result);
     } catch (error) {
       console.error("Update order fulfillment error:", error);
+      res
+        .status(resolveUpdateErrorStatusCode(error.message))
+        .json({ error: error.message });
+    }
+  },
+);
+
+router.post(
+  "/orders/:id/update-contact",
+  verifyToken,
+  requirePermission("can_edit_orders"),
+  async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const userId = req.user.id;
+      const updates = {};
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "customer_phone")) {
+        updates.customer_phone = String(req.body?.customer_phone ?? "").trim();
+      }
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "shipping_address")) {
+        updates.shipping_address =
+          req.body?.shipping_address &&
+          typeof req.body.shipping_address === "object" &&
+          !Array.isArray(req.body.shipping_address)
+            ? req.body.shipping_address
+            : {};
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No contact updates provided" });
+      }
+
+      const result = await OrderManagementService.updateOrderContactDetails(
+        userId,
+        orderId,
+        updates,
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Update order contact error:", error);
       res
         .status(resolveUpdateErrorStatusCode(error.message))
         .json({ error: error.message });

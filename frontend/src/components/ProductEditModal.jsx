@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Loader, Save, X } from "lucide-react";
+import { useLocale } from "../context/LocaleContext";
 
 const CURRENCY_LABEL = "LE";
 
@@ -9,6 +10,7 @@ export default function ProductEditModal({
   onSave,
   canEditCost = false,
 }) {
+  const { select } = useLocale();
   const hasMultipleVariants = Boolean(product.has_multiple_variants);
   const [price, setPrice] = useState(product.price || "");
   const [sku, setSku] = useState(product.sku || "");
@@ -142,8 +144,10 @@ export default function ProductEditModal({
             />
             {hasMultipleVariants && (
               <p className="mt-2 text-xs text-slate-500">
-                المنتجات متعددة الفاريانتس يتم تعديل مخزونها من صفحة تفاصيل
-                المنتج لكل Variant على حدة.
+                {select(
+                  "المنتجات متعددة الفاريانتس يتم تعديل مخزونها من صفحة تفاصيل المنتج لكل Variant على حدة.",
+                  "Products with multiple variants should have inventory updated from the product details page for each variant separately.",
+                )}
               </p>
             )}
           </div>

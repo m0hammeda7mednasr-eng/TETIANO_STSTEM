@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
 
 let notificationsEndpointUnsupported = false;
 let unreadCountRequestInFlight = false;
@@ -87,6 +88,7 @@ const getNotificationRoute = (item, isAdmin) => {
 export default function NotificationBell() {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
+  const { isRTL, locale, t } = useLocale();
   const containerRef = useRef(null);
   const pollingPausedUntilRef = useRef(0);
 
@@ -288,7 +290,11 @@ export default function NotificationBell() {
         disabled={!notificationsApiAvailable}
         onClick={() => setOpen((prev) => !prev)}
         className="relative p-2 rounded-xl bg-blue-600 hover:bg-blue-500 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
-        title={notificationsApiAvailable ? "Notifications" : "Notifications unavailable"}
+        title={
+          notificationsApiAvailable
+            ? t("notifications.title", "Notifications")
+            : t("notifications.unavailable", "Notifications unavailable")
+        }
       >
         <Bell size={18} className="text-white" />
         {unreadCount > 0 && (
@@ -299,16 +305,22 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 mt-2 w-[18rem] sm:w-[19rem] max-w-[calc(100vw-1rem)] bg-white text-gray-800 rounded-2xl shadow-2xl border border-slate-200 z-[160] overflow-hidden origin-top-right">
+        <div
+          className={`absolute top-full mt-2 w-[18rem] sm:w-[19rem] max-w-[calc(100vw-1rem)] bg-white text-gray-800 rounded-2xl shadow-2xl border border-slate-200 z-[160] overflow-hidden ${
+            isRTL ? "right-0 origin-top-right" : "left-0 origin-top-left"
+          }`}
+        >
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
             <div className="min-w-0">
-              <p className="font-semibold text-sm text-slate-800">Notifications</p>
+              <p className="font-semibold text-sm text-slate-800">
+                {t("notifications.title", "Notifications")}
+              </p>
               <p className="text-[11px] text-slate-500 mt-0.5">
                 {hasTemporaryConnectionIssue
-                  ? "Reconnecting..."
+                  ? t("notifications.reconnecting", "Reconnecting...")
                   : unreadCount > 0
-                    ? `${unreadCount} unread`
-                    : "All caught up"}
+                    ? `${unreadCount} ${t("notifications.unread", "unread")}`
+                    : t("notifications.allCaughtUp", "All caught up")}
               </p>
             </div>
             {unreadNotifications.length > 0 && (
@@ -317,7 +329,7 @@ export default function NotificationBell() {
                 className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 shrink-0"
               >
                 <CheckCheck size={14} />
-                Mark all read
+                {t("notifications.markAllRead", "Mark all read")}
               </button>
             )}
           </div>
@@ -325,21 +337,21 @@ export default function NotificationBell() {
           <div className="max-h-[22rem] overflow-y-auto">
             {loading ? (
               <p className="px-4 py-8 text-sm text-gray-500 text-center">
-                Loading...
+                {t("notifications.loading", "Loading...")}
               </p>
             ) : notifications.length === 0 ? (
               <div className="px-4 py-10 text-center text-sm text-gray-500">
                 <BellOff size={18} className="mx-auto mb-2 text-slate-400" />
-                No notifications
+                {t("notifications.empty", "No notifications")}
               </div>
             ) : (
               notifications.map((item) => (
                 <button
                   key={item.id}
                   onClick={() => handleNotificationClick(item)}
-                  className={`w-full text-left px-4 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors ${
+                  className={`w-full px-4 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors ${
                     item.is_read ? "bg-white" : "bg-blue-50/60"
-                  }`}
+                  } ${isRTL ? "text-right" : "text-left"}`}
                 >
                   <div className="flex items-start gap-2.5">
                     <CircleDot
@@ -351,7 +363,8 @@ export default function NotificationBell() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium text-sm text-slate-800 truncate">
-                          {item.title || "Notification"}
+                          {item.title ||
+                            t("notifications.fallbackTitle", "Notification")}
                         </p>
                         <span className="px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-medium text-slate-600">
                           {getTypeLabel(item.type)}
@@ -376,7 +389,7 @@ export default function NotificationBell() {
                         </p>
                         {getNotificationRoute(item, isAdmin) && (
                           <span className="text-[11px] text-blue-600 font-medium">
-                            Open details
+                            {t("notifications.openDetails", "Open details")}
                           </span>
                         )}
                       </div>

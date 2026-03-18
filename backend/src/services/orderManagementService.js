@@ -1,5 +1,11 @@
 import { Order } from "../models/index.js";
 import axios from "axios";
+import {
+  applyOrderLocalMetadata,
+  extractOrderLocalMetadata,
+  getEditableShippingAddressFromOrderData,
+  mergeOrderLocalMetadata,
+} from "../helpers/orderLocalMetadata.js";
 
 const getShopifyTokenForStore = async (storeId, fallbackUserId) => {
   const { supabase } = await import("../supabaseClient.js");
@@ -779,6 +785,9 @@ export class OrderManagementService {
         }
       }
 
+      const localOrderMetadata = extractOrderLocalMetadata(orderData);
+      orderData = applyOrderLocalMetadata(orderData, localOrderMetadata);
+
       // Extract ALL line items details from data
       const lineItems = orderData?.line_items || [];
       order.line_items = lineItems.map((item) => ({
@@ -863,6 +872,13 @@ export class OrderManagementService {
         };
         order.customer_phone = orderData.customer.phone || order.customer_phone;
       }
+
+      order.contact_edits = {
+        customer_phone:
+          localOrderMetadata?.contact_overrides?.customer_phone || null,
+        shipping_address:
+          localOrderMetadata?.contact_overrides?.shipping_address || null,
+      };
 
       // Extract shipping lines (shipping methods)
       order.shipping_lines = orderData?.shipping_lines || [];
@@ -1122,6 +1138,121 @@ export class OrderManagementService {
       };
     } catch (error) {
       console.error("Add order note error:", error);
+      throw error;
+    }
+  }
+
+  static async updateOrderContactDetails(userId, orderId, updates = {}) {
+    try {
+      const { data: order, error } = await Order.findByIdForUser(
+        userId,
+        orderId,
+      );
+
+      if (error || !order) {
+        throw new Error("Order not found");
+      }
+
+      const currentOrderData = applyOrderLocalMetadata(parseOrderData(order));
+      const nextCustomerPhone = Object.prototype.hasOwnProperty.call(
+        updates || {},
+        "customer_phone",
+      )
+        ? String(updates?.customer_phone ?? "").trim()
+        : String(
+            currentOrderData?.customer?.phone ||
+              currentOrderData?.shipping_address?.phone ||
+              "",
+          ).trim();
+      const nextShippingAddress = Object.prototype.hasOwnProperty.call(
+        updates || {},
+        "shipping_address",
+      )
+        ? updates?.shipping_address || {}
+        : getEditableShippingAddressFromOrderData(currentOrderData);
+
+      const currentCustomerPhone = String(
+        currentOrderData?.customer?.phone ||
+          currentOrderData?.shipping_address?.phone ||
+          "",
+      ).trim();
+      const currentShippingAddress =
+        getEditableShippingAddressFromOrderData(currentOrderData);
+
+      const shippingAddressChanged =
+        JSON.stringify(currentShippingAddress) !==
+        JSON.stringify(getEditableShippingAddressFromOrderData({
+          shipping_address: nextShippingAddress,
+        }));
+
+      if (
+        nextCustomerPhone === currentCustomerPhone &&
+        !shippingAddressChanged
+      ) {
+        return {
+          success: true,
+          localOnly: true,
+          order: await this.getOrderDetails(userId, order.id),
+        };
+      }
+
+      const { supabase } = await import("../supabaseClient.js");
+      const { data: userInfo } = await supabase
+        .from("users")
+        .select("name,email")
+        .eq("id", userId)
+        .maybeSingle();
+
+      const nextOrderData = mergeOrderLocalMetadata(
+        currentOrderData,
+        {
+          customer_phone: nextCustomerPhone,
+          shipping_address: nextShippingAddress,
+        },
+        {
+          updatedBy: userId,
+          updatedByName:
+            String(userInfo?.name || "").trim() ||
+            String(userInfo?.email || "").trim(),
+        },
+      );
+
+      const persistedCustomerPhone = String(
+        nextOrderData?.customer?.phone ||
+          nextOrderData?.shipping_address?.phone ||
+          "",
+      ).trim();
+
+      const { error: updateError } = await supabase
+        .from("orders")
+        .update({
+          customer_phone: persistedCustomerPhone || null,
+          data: nextOrderData,
+          local_updated_at: new Date().toISOString(),
+        })
+        .eq("id", order.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      await this.logSyncOperation(userId, order.id, "order_contact_update", {
+        local_only: true,
+        old_customer_phone: currentCustomerPhone,
+        new_customer_phone: persistedCustomerPhone,
+        old_shipping_address: currentShippingAddress,
+        new_shipping_address: getEditableShippingAddressFromOrderData(
+          nextOrderData,
+        ),
+      });
+
+      return {
+        success: true,
+        localOnly: true,
+        order: await this.getOrderDetails(userId, order.id),
+      };
+    } catch (error) {
+      console.error("Update order contact details error:", error);
       throw error;
     }
   }

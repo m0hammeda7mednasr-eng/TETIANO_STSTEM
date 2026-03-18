@@ -16,6 +16,7 @@ import api, { getErrorMessage, shopifyAPI } from "../utils/api";
 import Sidebar from "../components/Sidebar";
 import OrderInsightsFilterBar from "../components/OrderInsightsFilterBar";
 import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
 import { extractArray, extractObject } from "../utils/response";
 import {
   markSharedDataUpdated,
@@ -109,6 +110,7 @@ const getPaymentStatusClassName = (status) => {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, hasPermission, loading: authLoading } = useAuth();
+  const { locale, select } = useLocale();
 
   const isAdmin = user?.role === "admin";
   const canManageSettings = hasPermission("can_manage_settings");
@@ -528,7 +530,10 @@ export default function Dashboard() {
               {lastUpdatedAt && (
                 <p className="text-xs text-slate-500 mt-2 flex items-center gap-1">
                   <Clock3 size={12} />
-                  Last refresh: {lastUpdatedAt.toLocaleTimeString("ar-EG")}
+                  {select("آخر تحديث", "Last refresh")}:{" "}
+                  {lastUpdatedAt.toLocaleTimeString(
+                    locale === "ar" ? "ar-EG" : "en-US",
+                  )}
                 </p>
               )}
             </div>
@@ -559,8 +564,11 @@ export default function Dashboard() {
             filters={scopeFilters}
             onChange={setScopeFilters}
             onReset={() => setScopeFilters(INITIAL_ORDER_SCOPE_FILTERS)}
-            title="فلترة مؤشرات لوحة التحكم"
-            description="الأرقام وأحدث الطلبات سيعتمدوا على نفس نطاق الحالات والتواريخ المختار هنا."
+            title={select("فلترة مؤشرات لوحة التحكم", "Dashboard Metrics Filter")}
+            description={select(
+              "الأرقام وأحدث الطلبات سيعتمدوا على نفس نطاق الحالات والتواريخ المختار هنا.",
+              "The figures and latest orders will use the same scope of statuses and dates selected here.",
+            )}
           />
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">

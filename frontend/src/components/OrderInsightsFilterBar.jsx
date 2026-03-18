@@ -4,23 +4,33 @@ import {
   RotateCcw,
   ShieldCheck,
 } from "lucide-react";
+import { useLocale } from "../context/LocaleContext";
 import {
   getActiveOrderScopePresetId,
+  getOrderScopePresets,
   getOrderScopeSummary,
   hasActiveOrderScopeFilters,
-  ORDER_SCOPE_PRESETS,
 } from "../utils/orderScope";
 
 export default function OrderInsightsFilterBar({
   filters,
   onChange,
   onReset,
-  title = "فلترة التحليل",
-  description = "نفس نطاق الفلترة سيطبق على الأرقام والجداول المعروضة في الصفحة.",
+  title,
+  description,
 }) {
+  const { locale, t } = useLocale();
+  const presets = getOrderScopePresets(locale);
   const activePresetId = getActiveOrderScopePresetId(filters);
-  const activeSummary = getOrderScopeSummary(filters);
+  const activeSummary = getOrderScopeSummary(filters, locale);
   const hasActiveFilters = hasActiveOrderScopeFilters(filters);
+  const resolvedTitle = title || t("orderFilterBar.title", "Analysis Filters");
+  const resolvedDescription =
+    description ||
+    t(
+      "orderFilterBar.description",
+      "The same filter scope will be applied to the figures and tables shown on this page.",
+    );
 
   const updateField = (key, value) => {
     onChange({
@@ -36,9 +46,9 @@ export default function OrderInsightsFilterBar({
           <div>
             <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900">
               <Filter size={18} className="text-sky-700" />
-              {title}
+              {resolvedTitle}
             </h2>
-            <p className="mt-1 text-sm text-slate-500">{description}</p>
+            <p className="mt-1 text-sm text-slate-500">{resolvedDescription}</p>
           </div>
 
           <button
@@ -47,14 +57,14 @@ export default function OrderInsightsFilterBar({
             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             <RotateCcw size={16} />
-            إعادة الضبط
+            {t("orderFilterBar.reset", "Reset")}
           </button>
         </div>
       </div>
 
       <div className="space-y-4 px-5 py-4">
         <div className="flex flex-wrap gap-2">
-          {ORDER_SCOPE_PRESETS.map((preset) => {
+          {presets.map((preset) => {
             const isActive = preset.id === activePresetId;
 
             return (
@@ -76,7 +86,10 @@ export default function OrderInsightsFilterBar({
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <Field label="من تاريخ" icon={CalendarRange}>
+          <Field
+            label={t("orderFilterBar.fromDate", "From Date")}
+            icon={CalendarRange}
+          >
             <input
               type="date"
               value={filters.dateFrom}
@@ -85,7 +98,10 @@ export default function OrderInsightsFilterBar({
             />
           </Field>
 
-          <Field label="إلى تاريخ" icon={CalendarRange}>
+          <Field
+            label={t("orderFilterBar.toDate", "To Date")}
+            icon={CalendarRange}
+          >
             <input
               type="date"
               value={filters.dateTo}
@@ -94,26 +110,50 @@ export default function OrderInsightsFilterBar({
             />
           </Field>
 
-          <Field label="حالة الدفع" icon={ShieldCheck}>
+          <Field
+            label={t("orderFilterBar.paymentStatus", "Payment Status")}
+            icon={ShieldCheck}
+          >
             <select
               value={filters.paymentFilter}
               onChange={(event) => updateField("paymentFilter", event.target.value)}
               className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
             >
-              <option value="all">كل الحالات</option>
-              <option value="paid_or_partial">مدفوع + مدفوع جزئيًا</option>
-              <option value="pending_or_authorized">معلق + مصرح به</option>
-              <option value="paid">مدفوع</option>
-              <option value="partially_paid">مدفوع جزئيًا</option>
-              <option value="pending">معلق</option>
-              <option value="authorized">مصرح به</option>
-              <option value="partially_refunded">استرداد جزئي</option>
-              <option value="refunded">مسترد</option>
-              <option value="voided">ملغي</option>
+              <option value="all">
+                {locale === "ar" ? "كل الحالات" : "All statuses"}
+              </option>
+              <option value="paid_or_partial">
+                {locale === "ar" ? "مدفوع + مدفوع جزئيًا" : "Paid + Partially Paid"}
+              </option>
+              <option value="pending_or_authorized">
+                {locale === "ar" ? "معلق + مصرح به" : "Pending + Authorized"}
+              </option>
+              <option value="paid">{locale === "ar" ? "مدفوع" : "Paid"}</option>
+              <option value="partially_paid">
+                {locale === "ar" ? "مدفوع جزئيًا" : "Partially Paid"}
+              </option>
+              <option value="pending">
+                {locale === "ar" ? "معلق" : "Pending"}
+              </option>
+              <option value="authorized">
+                {locale === "ar" ? "مصرح به" : "Authorized"}
+              </option>
+              <option value="partially_refunded">
+                {locale === "ar" ? "استرداد جزئي" : "Partially Refunded"}
+              </option>
+              <option value="refunded">
+                {locale === "ar" ? "مسترد" : "Refunded"}
+              </option>
+              <option value="voided">
+                {locale === "ar" ? "ملغي" : "Voided"}
+              </option>
             </select>
           </Field>
 
-          <Field label="حالة التسليم" icon={ShieldCheck}>
+          <Field
+            label={t("orderFilterBar.fulfillmentStatus", "Fulfillment Status")}
+            icon={ShieldCheck}
+          >
             <select
               value={filters.fulfillmentFilter}
               onChange={(event) =>
@@ -121,24 +161,42 @@ export default function OrderInsightsFilterBar({
               }
               className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
             >
-              <option value="all">كل الحالات</option>
-              <option value="fulfilled">تم التسليم</option>
-              <option value="partial">تسليم جزئي</option>
-              <option value="unfulfilled">غير مسلّم</option>
+              <option value="all">
+                {locale === "ar" ? "كل الحالات" : "All statuses"}
+              </option>
+              <option value="fulfilled">
+                {locale === "ar" ? "تم التسليم" : "Fulfilled"}
+              </option>
+              <option value="partial">
+                {locale === "ar" ? "تسليم جزئي" : "Partially Fulfilled"}
+              </option>
+              <option value="unfulfilled">
+                {locale === "ar" ? "غير مسلّم" : "Unfulfilled"}
+              </option>
             </select>
           </Field>
 
-          <Field label="الاسترجاع" icon={ShieldCheck}>
+          <Field label={t("orderFilterBar.refund", "Refund")} icon={ShieldCheck}>
             <select
               value={filters.refundFilter}
               onChange={(event) => updateField("refundFilter", event.target.value)}
               className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
             >
-              <option value="all">كل الحالات</option>
-              <option value="any">يوجد استرجاع</option>
-              <option value="partial">استرجاع جزئي</option>
-              <option value="full">استرجاع كامل</option>
-              <option value="none">بدون استرجاع</option>
+              <option value="all">
+                {locale === "ar" ? "كل الحالات" : "All statuses"}
+              </option>
+              <option value="any">
+                {locale === "ar" ? "يوجد استرجاع" : "Has refund"}
+              </option>
+              <option value="partial">
+                {locale === "ar" ? "استرجاع جزئي" : "Partial refund"}
+              </option>
+              <option value="full">
+                {locale === "ar" ? "استرجاع كامل" : "Full refund"}
+              </option>
+              <option value="none">
+                {locale === "ar" ? "بدون استرجاع" : "No refund"}
+              </option>
             </select>
           </Field>
         </div>
@@ -162,7 +220,10 @@ export default function OrderInsightsFilterBar({
               ))}
             </div>
           ) : (
-            "لا توجد فلترة نشطة الآن. يتم عرض كامل النطاق المتاح للمتجر الحالي."
+            t(
+              "orderFilterBar.noFilters",
+              "No active filters right now. The full available scope for the current store is being shown.",
+            )
           )}
         </div>
       </div>

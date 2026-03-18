@@ -1,5 +1,6 @@
 import { supabase } from "../supabaseClient.js";
 import { preserveProductLocalMetadata } from "../helpers/productLocalMetadata.js";
+import { preserveOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
 
 const sortByCreatedAtDesc = { ascending: false };
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
@@ -506,6 +507,46 @@ const findMatchingProductRow = (existingRows = [], row = {}) => {
   return scopedRows[0];
 };
 
+const findMatchingOrderRow = (existingRows = [], row = {}) => {
+  const normalizedShopifyId = String(row?.shopify_id || "").trim();
+  if (!normalizedShopifyId) {
+    return null;
+  }
+
+  const scopedRows = existingRows.filter(
+    (existingRow) =>
+      String(existingRow?.shopify_id || "").trim() === normalizedShopifyId,
+  );
+
+  if (scopedRows.length === 0) {
+    return null;
+  }
+
+  const normalizedStoreId = String(row?.store_id || "").trim();
+  if (normalizedStoreId) {
+    const byStore = scopedRows.find(
+      (existingRow) =>
+        String(existingRow?.store_id || "").trim() === normalizedStoreId,
+    );
+    if (byStore) {
+      return byStore;
+    }
+  }
+
+  const normalizedUserId = String(row?.user_id || "").trim();
+  if (normalizedUserId) {
+    const byUser = scopedRows.find(
+      (existingRow) =>
+        String(existingRow?.user_id || "").trim() === normalizedUserId,
+    );
+    if (byUser) {
+      return byUser;
+    }
+  }
+
+  return scopedRows[0];
+};
+
 const preserveLocalProductMetadataForUpserts = async (rows = []) => {
   if (!Array.isArray(rows) || rows.length === 0) {
     return rows;
@@ -540,6 +581,44 @@ const preserveLocalProductMetadataForUpserts = async (rows = []) => {
     return {
       ...row,
       data: preserveProductLocalMetadata(row.data, matchingRow.data),
+    };
+  });
+};
+
+const preserveLocalOrderMetadataForUpserts = async (rows = []) => {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return rows;
+  }
+
+  const shopifyIds = Array.from(
+    new Set(
+      rows.map((row) => String(row?.shopify_id || "").trim()).filter(Boolean),
+    ),
+  );
+
+  if (shopifyIds.length === 0) {
+    return rows;
+  }
+
+  const { data: existingRows, error } = await supabase
+    .from("orders")
+    .select("shopify_id, store_id, user_id, data")
+    .in("shopify_id", shopifyIds);
+
+  if (error) {
+    console.warn("Order local metadata preservation skipped:", error.message);
+    return rows;
+  }
+
+  return rows.map((row) => {
+    const matchingRow = findMatchingOrderRow(existingRows || [], row);
+    if (!matchingRow?.data || row?.data === undefined) {
+      return row;
+    }
+
+    return {
+      ...row,
+      data: preserveOrderLocalMetadata(row.data, matchingRow.data),
     };
   });
 };
@@ -814,8 +893,14 @@ export const Order = {
       created_at: o.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }));
+    const upsertsWithPreservedLocalMetadata =
+      await preserveLocalOrderMetadataForUpserts(upserts);
 
-    return await upsertRowsWithManualFallback("orders", upserts, "order");
+    return await upsertRowsWithManualFallback(
+      "orders",
+      upsertsWithPreservedLocalMetadata,
+      "order",
+    );
   },
 };
 

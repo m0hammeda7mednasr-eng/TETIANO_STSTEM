@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
 import api, { getErrorMessage, suppliersAPI } from "../utils/api";
 import { formatCurrency, formatDateTime } from "../utils/helpers";
 import { fetchAllPages } from "../utils/pagination";
@@ -59,6 +60,155 @@ const DELIVERY_MEASUREMENT_UNIT_LABELS = {
   meter: "متر",
   kilo: "كيلو",
 };
+const SUPPLIER_UI_TRANSLATIONS = {
+  en: {
+    "الموردون والحسابات": "Suppliers & Accounts",
+    "ملف المورد يركز على البيانات الأساسية، بينما تفاصيل الواردات والدفعات تُسجل داخل الحركات بكل تفاصيلها.":
+      "Supplier profiles hold the master data, while deliveries and payments are recorded through detailed movements.",
+    "تحديث": "Refresh",
+    "مورد جديد": "New Supplier",
+    "إجمالي الموردين": "Total Suppliers",
+    "مورد نشط": "Active suppliers",
+    "إجمالي الوارد": "Total Deliveries",
+    "قيمة كل الشحنات المسجلة": "Value of all recorded deliveries",
+    "إجمالي المدفوع": "Total Paid",
+    "كل الدفعات المسجلة للموردين": "All recorded supplier payments",
+    "الرصيد المستحق": "Outstanding Balance",
+    "المتبقي على حساب الموردين": "Remaining supplier balance",
+    "تسجيل وارد جديد": "Record New Delivery",
+    "ابدأ بالقماش ثم اختر موديله واربطه بالمنتج بشكل منظم وواضح":
+      "Start with the fabric, then choose its model and link it to the product in a clean structured flow.",
+    "تسجيل دفعة": "Record Payment",
+    "سجل كل دفعة بطريقة السداد والحساب المستخدم وتفاصيل المرجع":
+      "Record every payment with method, account used, and reference details.",
+    "ابدأ باختيار القماش، وبعدها اختر موديله. ولو ربطت على مستوى المنتج الأساسي فالعلاقة هتظهر تلقائيًا على كل الفاريانتات.":
+      "Start by choosing the fabric, then its model. If you link at the base product level, the relationship will appear automatically across all variants.",
+    "كتالوج الموديلات": "Model Catalog",
+    "عرض كل موديل وما تحته من أقمشة وخامات وواردات بشكل منظم":
+      "View each model with its fabrics, materials, and deliveries in a structured layout.",
+    "موديلات القماش": "Fabric Models",
+    "ابدأ بالقماش لترى الموديلات المرتبطة به وكمياتها ووارداتها":
+      "Start from the fabric to see linked models, quantities, and deliveries.",
+    "المنتجات المستلمة من المورد": "Received Products from Supplier",
+    "كل الأصناف المرتبطة بحركات الوارد للمورد الحالي":
+      "All items linked to delivery movements for the current supplier.",
+    "الدفعات المسجلة": "Recorded Payments",
+    "كل المدفوعات المرتبطة بالمورد": "All payments linked to the supplier.",
+    "الحركة المحاسبية": "Ledger Timeline",
+    "Timeline مختصر للواردات والدفعات":
+      "Compact timeline of deliveries and payments.",
+    "حذف": "Remove",
+    "ابحث باسم المورد أو الكود أو الهاتف":
+      "Search by supplier name, code, or phone",
+    "جاري تحميل الموردين...": "Loading suppliers...",
+    "لا يوجد موردون مطابقون للبحث الحالي.":
+      "No suppliers match the current search.",
+    "الكود": "Code",
+    "الوارد": "Deliveries",
+    "المدفوع": "Paid",
+    "الرصيد": "Balance",
+    "الكمية": "Quantity",
+    "الموديلات": "Models",
+    "الأقمشة": "Fabrics",
+    "المسؤول": "Contact",
+    "الهاتف": "Phone",
+    "العنوان": "Address",
+    "الرصيد الافتتاحي": "Opening Balance",
+    "آخر وارد": "Last Delivery",
+    "آخر دفعة": "Last Payment",
+    "إجمالي الأصناف": "Total Items",
+    "النوع": "Type",
+    "الوحدة": "Unit",
+    "سعر المادة": "Material Price",
+    "سعر القطعة": "Piece Cost",
+    "التصنيع": "Manufacturing",
+    "خدمة المصنع": "Factory Service",
+    "تكلفة الوحدة": "Unit Cost",
+    "الإجمالي": "Total",
+    "ملاحظات": "Notes",
+    "ملاحظات الوارد": "Delivery Notes",
+    "ملاحظات الدفعة": "Payment Notes",
+    "الربط الحالي": "Current Link",
+    "المخزون الحالي": "Current Stock",
+    "هذا الربط على مستوى المنتج كله، لذلك سيظهر تلقائيًا على كل الفاريانتات.":
+      "This link is set at the base product level, so it will automatically apply to all variants.",
+    "الإجمالي المحسوب": "Calculated Total",
+    "إضافة صنف جديد": "Add New Item",
+    "جارٍ الحفظ...": "Saving...",
+    "حفظ الوارد": "Save Delivery",
+    "حفظ الدفعة": "Save Payment",
+    "المورد نشط ويظهر في القائمة": "Supplier is active and visible in the list",
+    "حفظ بيانات المورد": "Save Supplier Details",
+    "اسم القماش": "Fabric Name",
+    "اسم المورد": "Supplier Name",
+    "اسم المسؤول": "Contact Name",
+    "تاريخ الوارد": "Delivery Date",
+    "تاريخ الدفعة": "Payment Date",
+    "رقم المرجع": "Reference Number",
+    "المبلغ": "Amount",
+    "طريقة الدفع": "Payment Method",
+    "الحساب المستخدم": "Payment Account",
+    "وصف سريع": "Short Description",
+    "قماش مسجل": "Registered Fabric",
+    "اختر قماشًا مسجلًا": "Choose a registered fabric",
+    "لا توجد أقمشة مسجلة بعد": "No fabrics recorded yet",
+    "اسم الموديل / الصنف": "Model / Item Name",
+    "موديل مرتبط بهذا القماش": "Model linked to this fabric",
+    "اختر القماش أولًا": "Choose the fabric first",
+    "اختر موديلًا مرتبطًا بهذا القماش":
+      "Choose a model linked to this fabric",
+    "لا توجد موديلات مرتبطة بهذا القماش":
+      "No models are linked to this fabric",
+    "ابحث بالاسم أو SKU": "Search by name or SKU",
+    "ربط متقدم بالمنتج / الفاريانت": "Advanced product / variant link",
+    "اختر منتجًا أو فاريانت إذا احتجت":
+      "Choose a product or variant if needed",
+    "لا توجد نتائج مطابقة": "No matching results",
+    "القطعة / الرولة": "Piece / Roll",
+    "وحدة الخامة": "Material Unit",
+    "ينتج كام قطعة من المتر / الكيلو":
+      "How many pieces come from each meter / kilo",
+    "تكلفة التصنيع": "Manufacturing Cost",
+    "الخامة أو الوصف الفني": "Material or Technical Description",
+    "سعر الوحدة": "Unit Price",
+    "اللون": "Color",
+    "القماش": "Fabric",
+    "القطعة": "Piece Label",
+    "الخامات": "Materials",
+    "الألوان": "Colors",
+    "الموديلات المرتبطة": "Linked Models",
+    "الوصف": "Description",
+    "العناصر": "Items",
+    "الحساب": "Account",
+    "المرجع": "Reference",
+    "مرجع": "Ref",
+    "التاريخ": "Date",
+    "المنتج / النوع": "Product / Type",
+    "التفاصيل": "Details",
+    "الأسعار": "Prices",
+    "الناتج": "Output",
+    "سعر المتر": "Meter Price",
+    "سعر الكيلو": "Kilo Price",
+    "المنتج الأساسي - كل الفاريانتات": "Base product - all variants",
+    "غير مربوط": "Not linked",
+    "موديل": "Model",
+    "قماش": "Fabric",
+    "قطعة": "Piece",
+    "متر": "Meter",
+    "كيلو": "Kilogram",
+    "تحويل بنكي": "Bank Transfer",
+    "كاش": "Cash",
+    "محفظة": "Wallet",
+    "إنستاباي": "Instapay",
+    "أخرى": "Other",
+    "وارد": "Delivery",
+    "دفعة": "Payment",
+    "تسوية": "Adjustment",
+    "فتح صفحة المنتج": "Open Product Page",
+    "فتح المنتج": "Open Product",
+    "تصنيع": "Manufacturing",
+  },
+};
 const PRODUCTS_PAGE_SIZE = 200;
 const DEFAULT_VARIANT_TITLES = new Set(["default", "default title"]);
 const normalizeText = (value) => String(value || "").trim();
@@ -90,6 +240,13 @@ const formatDeliveryItemTypeLabel = (value) =>
   DELIVERY_ITEM_TYPE_LABELS[normalizeDeliveryItemType(value)] || "موديل";
 const formatDeliveryMeasurementUnitLabel = (value) =>
   DELIVERY_MEASUREMENT_UNIT_LABELS[normalizeDeliveryMeasurementUnit(value)] || "قطعة";
+const translateSupplierUiText = (value, locale = "ar") => {
+  if (locale !== "en" || typeof value !== "string") {
+    return value;
+  }
+
+  return SUPPLIER_UI_TRANSLATIONS.en[value] || value;
+};
 
 const createEmptySupplierForm = () => ({
   code: "",
@@ -291,6 +448,103 @@ const buildProductDetailsPath = (productId) => {
   const normalized = normalizeText(productId);
   return normalized ? `/products/${encodeURIComponent(normalized)}` : "";
 };
+const PRODUCT_LEVEL_LINK_LABEL = "المنتج الأساسي - كل الفاريانتات";
+const getLinkedScopeLabel = (record = {}) => {
+  const variantTitle = normalizeVariantTitle(record?.variant_title);
+  if (variantTitle) {
+    return variantTitle;
+  }
+
+  if (normalizeText(record?.product_id)) {
+    return PRODUCT_LEVEL_LINK_LABEL;
+  }
+
+  return "غير مربوط";
+};
+const buildSupplierFabricOptions = (supplier) => {
+  const seen = new Set();
+
+  return toArray(supplier?.fabric_catalog)
+    .map((group) => normalizeText(group?.fabric_name))
+    .filter((name) => {
+      const key = name.toLowerCase();
+      if (!key || seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    })
+    .sort((left, right) => left.localeCompare(right, "ar"))
+    .map((fabricName) => ({
+      value: fabricName,
+      label: fabricName,
+    }));
+};
+const buildSupplierFabricModelOptions = (supplier, catalogOptions = []) => {
+  const baseProductOptionsById = new Map(
+    catalogOptions
+      .filter(
+        (option) =>
+          normalizeText(option?.product_id) && !normalizeText(option?.variant_id),
+      )
+      .map((option) => [normalizeText(option.product_id), option]),
+  );
+  const lookup = new Map();
+
+  for (const group of toArray(supplier?.fabric_catalog)) {
+    const fabricName = normalizeText(group?.fabric_name);
+    if (!fabricName) {
+      continue;
+    }
+
+    const suggestions = [];
+    const seenValues = new Set();
+
+    for (const product of toArray(group?.products)) {
+      const productId = normalizeText(product?.product_id);
+      if (!productId) {
+        continue;
+      }
+
+      const fallbackProductName =
+        normalizeText(product?.product_name) || "منتج بدون اسم";
+      const baseOption = baseProductOptionsById.get(productId) || {
+        value: buildCatalogOptionValue(productId, ""),
+        product_id: productId,
+        variant_id: "",
+        variant_title: "",
+        product_name: fallbackProductName,
+        sku: normalizeText(product?.sku),
+        inventory_quantity: 0,
+      };
+
+      if (seenValues.has(baseOption.value)) {
+        continue;
+      }
+
+      seenValues.add(baseOption.value);
+      suggestions.push({
+        ...baseOption,
+        label: baseOption.sku
+          ? `${baseOption.product_name} | ${PRODUCT_LEVEL_LINK_LABEL} | ${baseOption.sku}`
+          : `${baseOption.product_name} | ${PRODUCT_LEVEL_LINK_LABEL}`,
+      });
+    }
+
+    lookup.set(
+      fabricName.toLowerCase(),
+      suggestions.sort((left, right) =>
+        String(left.product_name || "").localeCompare(
+          String(right.product_name || ""),
+          "ar",
+        ),
+      ),
+    );
+  }
+
+  return lookup;
+};
 const isDeliveryItemDirty = (item) =>
   Boolean(
     normalizeText(item?.product_name) ||
@@ -314,6 +568,7 @@ const isDeliveryItemDirty = (item) =>
 
 export default function Suppliers() {
   const { hasPermission } = useAuth();
+  const { locale, isRTL } = useLocale();
   const location = useLocation();
   const canManageSuppliers = hasPermission("can_edit_products");
 
@@ -754,11 +1009,13 @@ export default function Suppliers() {
               <div>
                 <h1 className="flex items-center gap-3 text-3xl font-bold text-slate-900">
                   <Truck className="text-sky-700" size={28} />
-                  الموردون والحسابات
+                  {translateSupplierUiText("الموردون والحسابات", locale)}
                 </h1>
                 <p className="mt-2 text-slate-600">
-                  ملف المورد يركز على البيانات الأساسية، بينما تفاصيل الواردات والدفعات
-                  تُسجل داخل الحركات بكل تفاصيلها.
+                  {translateSupplierUiText(
+                    "ملف المورد يركز على البيانات الأساسية، بينما تفاصيل الواردات والدفعات تُسجل داخل الحركات بكل تفاصيلها.",
+                    locale,
+                  )}
                 </p>
               </div>
 
@@ -768,7 +1025,7 @@ export default function Suppliers() {
                   className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-white hover:bg-slate-950"
                 >
                   <RefreshCw size={18} />
-                  تحديث
+                  {translateSupplierUiText("تحديث", locale)}
                 </button>
                 {canManageSuppliers ? (
                   <button
@@ -776,7 +1033,7 @@ export default function Suppliers() {
                     className="inline-flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-white hover:bg-sky-800"
                   >
                     <Plus size={18} />
-                    مورد جديد
+                    {translateSupplierUiText("مورد جديد", locale)}
                   </button>
                 ) : null}
               </div>
@@ -811,7 +1068,7 @@ export default function Suppliers() {
             <SummaryCard
               title="إجمالي الموردين"
               value={formatCount(summary.total_suppliers)}
-              subtitle={`${formatCount(summary.active_suppliers)} مورد نشط`}
+              subtitle={`${formatCount(summary.active_suppliers)} ${translateSupplierUiText("مورد نشط", locale)}`}
               icon={Building2}
               tone="sky"
             />
@@ -843,14 +1100,21 @@ export default function Suppliers() {
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="relative">
                   <Search
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    className={`absolute top-1/2 -translate-y-1/2 text-slate-400 ${
+                      isRTL ? "right-3" : "left-3"
+                    }`}
                     size={16}
                   />
                   <input
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder="ابحث باسم المورد أو الكود أو الهاتف"
-                    className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-3 focus:border-sky-400 focus:outline-none"
+                    placeholder={translateSupplierUiText(
+                      "ابحث باسم المورد أو الكود أو الهاتف",
+                      locale,
+                    )}
+                    className={`w-full rounded-xl border border-slate-200 py-2 focus:border-sky-400 focus:outline-none ${
+                      isRTL ? "pr-9 pl-3 text-right" : "pl-9 pr-3 text-left"
+                    }`}
                   />
                 </div>
 
@@ -879,7 +1143,7 @@ export default function Suppliers() {
                                 {supplier.name}
                               </div>
                               <div className="mt-1 text-xs text-slate-500">
-                                الكود: {supplier.code || "-"}
+                                {translateSupplierUiText("الكود", locale)}: {supplier.code || "-"}
                               </div>
                             </div>
                             <span
@@ -1143,6 +1407,7 @@ function renderDetails({
       {canEditProducts ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <DeliveryForm
+            supplier={selectedSupplier}
             form={deliveryForm}
             setForm={setDeliveryForm}
             updateItem={updateDeliveryItem}
@@ -1178,6 +1443,7 @@ function renderDetails({
 
 
 function SupplierForm({ form, setForm, saving, onSave }) {
+  const { locale } = useLocale();
   if (typeof window !== "undefined") {
     return (
     <div className="space-y-3">
@@ -1192,7 +1458,7 @@ function SupplierForm({ form, setForm, saving, onSave }) {
       <TextArea label="ملاحظات" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
       <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
         <input type="checkbox" checked={form.is_active} onChange={(event) => setForm((current) => ({ ...current, is_active: event.target.checked }))} />
-        المورد نشط ويظهر في القائمة
+        {translateSupplierUiText("المورد نشط ويظهر في القائمة", locale)}
       </label>
       <button
         onClick={onSave}
@@ -1200,7 +1466,9 @@ function SupplierForm({ form, setForm, saving, onSave }) {
         className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Save size={18} />
-        {saving ? "جارٍ الحفظ..." : "حفظ بيانات المورد"}
+        {saving
+          ? translateSupplierUiText("جارٍ الحفظ...", locale)
+          : translateSupplierUiText("حفظ بيانات المورد", locale)}
       </button>
     </div>
     );
@@ -1209,6 +1477,7 @@ function SupplierForm({ form, setForm, saving, onSave }) {
 }
 
 function DeliveryForm({
+  supplier,
   form,
   setForm,
   updateItem,
@@ -1222,10 +1491,17 @@ function DeliveryForm({
   catalogOptions,
   catalogByValue,
 }) {
+  const { locale } = useLocale();
+  const supplierFabricOptions = buildSupplierFabricOptions(supplier);
+  const fabricModelOptionsByFabric = buildSupplierFabricModelOptions(
+    supplier,
+    catalogOptions,
+  );
+
   return (
     <SectionCard
       title="تسجيل وارد جديد"
-      subtitle="اختر الأصناف من قائمة منتجات المتجر ثم أضف الكمية والتكلفة"
+      subtitle="ابدأ بالقماش ثم اختر موديله واربطه بالمنتج بشكل منظم وواضح"
       action={
         <span className="text-xs text-slate-500">
           {catalogLoading
@@ -1245,15 +1521,31 @@ function DeliveryForm({
             {catalogError}
           </div>
         ) : null}
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-800">
+          ابدأ باختيار القماش، وبعدها اختر موديله. ولو ربطت على مستوى المنتج الأساسي فالعلاقة هتظهر تلقائيًا على كل الفاريانتات.
+        </div>
         <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
           {form.items.map((item, index) => {
             const filteredOptions = filterCatalogOptions(catalogOptions, item.catalog_query);
-            const selectedOption = catalogByValue.get(getDeliveryItemSelectionValue(item));
+            const selectedValue = getDeliveryItemSelectionValue(item);
+            const selectedOption = catalogByValue.get(selectedValue);
             const itemType = normalizeDeliveryItemType(item?.item_type);
             const measurementUnit = normalizeDeliveryMeasurementUnit(item?.measurement_unit);
             const materialUnitPrice = getDeliveryItemMaterialUnitPrice(item);
             const pieceCost = getDeliveryItemPieceCost(item);
             const suggestedUnitCost = getDeliveryItemSuggestedUnitCost(item);
+            const selectedFabricValue = supplierFabricOptions.some(
+              (option) => option.value === item.fabric_name,
+            )
+              ? item.fabric_name
+              : "";
+            const relatedModelOptions =
+              fabricModelOptionsByFabric.get(normalizeText(item.fabric_name).toLowerCase()) || [];
+            const relatedModelValue =
+              !normalizeText(item.variant_id) &&
+              relatedModelOptions.some((option) => option.value === selectedValue)
+                ? selectedValue
+                : "";
 
             return (
               <div key={`delivery-item-${index}`} className="rounded-2xl border border-slate-200 bg-white p-3">
@@ -1272,15 +1564,55 @@ function DeliveryForm({
                     options={DELIVERY_ITEM_TYPE_OPTIONS}
                     onChange={(value) => updateItem(index, "item_type", value)}
                   />
+                  <SelectInput
+                    label="قماش مسجل"
+                    value={selectedFabricValue}
+                    disabled={supplierFabricOptions.length === 0}
+                    options={[
+                      {
+                        value: "",
+                        label:
+                          supplierFabricOptions.length > 0
+                            ? "اختر قماشًا مسجلًا"
+                            : "لا توجد أقمشة مسجلة بعد",
+                      },
+                      ...supplierFabricOptions,
+                    ]}
+                    onChange={(value) => updateItem(index, "fabric_name", value)}
+                  />
                   <TextInput
-                    label="اسم الموديل / القماش"
+                    label="اسم الموديل / الصنف"
                     value={item.product_name}
                     onChange={(value) => updateItem(index, "product_name", value)}
                   />
+                  <SelectInput
+                    label="موديل مرتبط بهذا القماش"
+                    value={relatedModelValue}
+                    disabled={
+                      catalogLoading ||
+                      !item.fabric_name ||
+                      relatedModelOptions.length === 0
+                    }
+                    options={[
+                      {
+                        value: "",
+                        label: !item.fabric_name
+                          ? "اختر القماش أولًا"
+                          : relatedModelOptions.length > 0
+                            ? "اختر موديلًا مرتبطًا بهذا القماش"
+                            : "لا توجد موديلات مرتبطة بهذا القماش",
+                      },
+                      ...relatedModelOptions.map((option) => ({
+                        value: option.value,
+                        label: option.label,
+                      })),
+                    ]}
+                    onChange={(value) => selectProduct(index, value)}
+                  />
                   <TextInput label="ابحث بالاسم أو SKU" value={item.catalog_query} onChange={(value) => updateItem(index, "catalog_query", value)} />
                   <SelectInput
-                    label="اختر المنتج"
-                    value={getDeliveryItemSelectionValue(item)}
+                    label="ربط متقدم بالمنتج / الفاريانت"
+                    value={selectedValue}
                     disabled={catalogLoading}
                     options={[
                       {
@@ -1288,7 +1620,7 @@ function DeliveryForm({
                         label: catalogLoading
                           ? "جاري تحميل المنتجات..."
                           : filteredOptions.length > 0
-                            ? "اختر منتجًا من القائمة"
+                            ? "اختر منتجًا أو فاريانت إذا احتجت"
                             : "لا توجد نتائج مطابقة",
                       },
                       ...filteredOptions.map((option) => ({
@@ -1324,13 +1656,25 @@ function DeliveryForm({
                   <TextInput label="الإجمالي" type="number" value={item.total_cost} onChange={(value) => updateItem(index, "total_cost", value)} />
                 </div>
                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-                  <div className="text-xs text-slate-500">المنتج المختار</div>
+                  <div className="text-xs text-slate-500">
+                    {translateSupplierUiText("الربط الحالي", locale)}
+                  </div>
                   <div className="mt-1 font-medium text-slate-900">{item.product_name || "-"}</div>
                   <div className="mt-1 text-xs text-slate-500">
-                    {item.variant_title || "بدون متغير"}
+                    {translateSupplierUiText(getLinkedScopeLabel(item), locale)}
                     {item.sku ? ` | SKU: ${item.sku}` : ""}
-                    {selectedOption ? ` | المخزون الحالي: ${formatCount(selectedOption.inventory_quantity)}` : ""}
+                    {selectedOption
+                      ? ` | ${translateSupplierUiText("المخزون الحالي", locale)}: ${formatCount(selectedOption.inventory_quantity)}`
+                      : ""}
                   </div>
+                  {normalizeText(item.product_id) && !normalizeText(item.variant_id) ? (
+                    <div className="mt-2 text-xs font-medium text-sky-700">
+                      {translateSupplierUiText(
+                        "هذا الربط على مستوى المنتج كله، لذلك سيظهر تلقائيًا على كل الفاريانتات.",
+                        locale,
+                      )}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <DetailStat label="النوع" value={formatDeliveryItemTypeLabel(itemType)} />
@@ -1344,14 +1688,14 @@ function DeliveryForm({
                 </div>
                 <TextInput label="ملاحظات الصنف" value={item.notes} onChange={(value) => updateItem(index, "notes", value)} />
                 <div className="mt-2 text-xs text-slate-500">
-                  الإجمالي المحسوب: {formatCurrency(getDeliveryItemTotal(item))}
+                  {translateSupplierUiText("الإجمالي المحسوب", locale)}: {formatCurrency(getDeliveryItemTotal(item))}
                 </div>
               </div>
             );
           })}
           <button onClick={addItem} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
             <Plus size={16} />
-            إضافة صنف جديد
+            {translateSupplierUiText("إضافة صنف جديد", locale)}
           </button>
         </div>
         <TextArea label="ملاحظات الوارد" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
@@ -1361,7 +1705,9 @@ function DeliveryForm({
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Save size={18} />
-          {saving ? "جارٍ الحفظ..." : "حفظ الوارد"}
+          {saving
+            ? translateSupplierUiText("جارٍ الحفظ...", locale)
+            : translateSupplierUiText("حفظ الوارد", locale)}
         </button>
       </div>
     </SectionCard>
@@ -1369,6 +1715,7 @@ function DeliveryForm({
   }
 
 function PaymentForm({ form, setForm, onSave, saving }) {
+  const { locale } = useLocale();
   return (
     <SectionCard
       title="تسجيل دفعة"
@@ -1398,7 +1745,9 @@ function PaymentForm({ form, setForm, onSave, saving }) {
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Save size={18} />
-          {saving ? "جارٍ الحفظ..." : "حفظ الدفعة"}
+          {saving
+            ? translateSupplierUiText("جارٍ الحفظ...", locale)
+            : translateSupplierUiText("حفظ الدفعة", locale)}
         </button>
       </div>
     </SectionCard>
@@ -1406,14 +1755,15 @@ function PaymentForm({ form, setForm, onSave, saving }) {
   }
 
 function SupplierCatalogExplorer({ supplier }) {
+  const { locale } = useLocale();
   const productCatalog = toArray(supplier?.product_catalog);
   const fabricCatalog = toArray(supplier?.fabric_catalog);
 
   return (
     <div className="grid gap-6 xl:grid-cols-2">
       <SectionCard
-        title="خريطة الموديلات"
-        subtitle="عرض خارجي سريع، وافتح كل موديل لرؤية المورد والخامة والواردات المرتبطة به"
+        title="كتالوج الموديلات"
+        subtitle="عرض كل موديل وما تحته من أقمشة وخامات وواردات بشكل منظم"
       >
         {productCatalog.length > 0 ? (
           <div className="space-y-3">
@@ -1429,7 +1779,7 @@ function SupplierCatalogExplorer({ supplier }) {
                         {group.product_name || "-"}
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
-                        {group.variant_title || "بدون متغير"}
+                        {translateSupplierUiText(getLinkedScopeLabel(group), locale)}
                         {group.sku ? ` | SKU: ${group.sku}` : ""}
                       </div>
                     </div>
@@ -1490,7 +1840,7 @@ function SupplierCatalogExplorer({ supplier }) {
                         to={buildProductDetailsPath(group.product_id)}
                         className="inline-flex rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100"
                       >
-                        فتح صفحة المنتج
+                        {translateSupplierUiText("فتح صفحة المنتج", locale)}
                       </Link>
                     </div>
                   ) : null}
@@ -1508,7 +1858,9 @@ function SupplierCatalogExplorer({ supplier }) {
                             </div>
                             <div className="mt-1 text-xs text-slate-500">
                               {formatDateTime(item.entry_date)}
-                              {item.reference_code ? ` | مرجع: ${item.reference_code}` : ""}
+                              {item.reference_code
+                                ? ` | ${translateSupplierUiText("مرجع", locale)}: ${item.reference_code}`
+                                : ""}
                             </div>
                           </div>
                           <div className="text-sm font-semibold text-slate-800">
@@ -1546,8 +1898,8 @@ function SupplierCatalogExplorer({ supplier }) {
       </SectionCard>
 
       <SectionCard
-        title="فهرس الأقمشة"
-        subtitle="كل قماش وتابعه أي موديلات وكمياته ووارداته"
+        title="موديلات القماش"
+        subtitle="ابدأ بالقماش لترى الموديلات المرتبطة به وكمياتها ووارداتها"
       >
         {fabricCatalog.length > 0 ? (
           <div className="space-y-3">
@@ -1625,7 +1977,7 @@ function SupplierCatalogExplorer({ supplier }) {
                               {product.product_name || "-"}
                             </div>
                             <div className="mt-1 text-xs text-slate-500">
-                              {product.variant_title || "بدون متغير"}
+                              {translateSupplierUiText(getLinkedScopeLabel(product), locale)}
                               {product.sku ? ` | SKU: ${product.sku}` : ""}
                             </div>
                           </div>
@@ -1634,7 +1986,7 @@ function SupplierCatalogExplorer({ supplier }) {
                               to={buildProductDetailsPath(product.product_id)}
                               className="text-sm font-medium text-sky-700 hover:text-sky-800"
                             >
-                              فتح المنتج
+                              {translateSupplierUiText("فتح المنتج", locale)}
                             </Link>
                           ) : null}
                         </div>
@@ -1655,6 +2007,7 @@ function SupplierCatalogExplorer({ supplier }) {
 
 
 function ReceivedItemsTable({ items }) {
+  const { locale } = useLocale();
   return (
     <SectionCard title="المنتجات المستلمة من المورد" subtitle="كل الأصناف المرتبطة بحركات الوارد للمورد الحالي">
       {items.length > 0 ? (
@@ -1662,14 +2015,14 @@ function ReceivedItemsTable({ items }) {
           <table className="min-w-full text-right text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-slate-600">
-                <th className="px-3 py-2 font-semibold">التاريخ</th>
-                <th className="px-3 py-2 font-semibold">المنتج / النوع</th>
+                <th className="px-3 py-2 font-semibold">{translateSupplierUiText("التاريخ", locale)}</th>
+                <th className="px-3 py-2 font-semibold">{translateSupplierUiText("المنتج / النوع", locale)}</th>
                 <th className="px-3 py-2 font-semibold">SKU</th>
-                <th className="px-3 py-2 font-semibold">التفاصيل</th>
-                <th className="px-3 py-2 font-semibold">الكمية</th>
-                <th className="px-3 py-2 font-semibold">الأسعار</th>
-                <th className="px-3 py-2 font-semibold">الإجمالي</th>
-                <th className="px-3 py-2 font-semibold">المرجع</th>
+                <th className="px-3 py-2 font-semibold">{translateSupplierUiText("التفاصيل", locale)}</th>
+                <th className="px-3 py-2 font-semibold">{translateSupplierUiText("الكمية", locale)}</th>
+                <th className="px-3 py-2 font-semibold">{translateSupplierUiText("الأسعار", locale)}</th>
+                <th className="px-3 py-2 font-semibold">{translateSupplierUiText("الإجمالي", locale)}</th>
+                <th className="px-3 py-2 font-semibold">{translateSupplierUiText("المرجع", locale)}</th>
               </tr>
             </thead>
             <tbody>
@@ -1690,27 +2043,27 @@ function ReceivedItemsTable({ items }) {
                       )}
                     </div>
                     <div className="mt-1 text-xs text-slate-500">
-                      {item.variant_title || "-"} | {formatDeliveryItemTypeLabel(item.item_type)}
+                      {translateSupplierUiText(getLinkedScopeLabel(item), locale)} | {translateSupplierUiText(formatDeliveryItemTypeLabel(item.item_type), locale)}
                     </div>
                     {item.color ? (
-                      <div className="mt-1 text-xs text-slate-500">اللون: {item.color}</div>
+                      <div className="mt-1 text-xs text-slate-500">{translateSupplierUiText("اللون", locale)}: {item.color}</div>
                     ) : null}
                     {item.fabric_name ? (
-                      <div className="mt-1 text-xs text-slate-500">القماش: {item.fabric_name}</div>
+                      <div className="mt-1 text-xs text-slate-500">{translateSupplierUiText("القماش", locale)}: {item.fabric_name}</div>
                     ) : null}
                   </td>
                   <td className="px-3 py-3">{item.sku || "-"}</td>
                   <td className="px-3 py-3">
                     <div>{item.material || "-"}</div>
                     <div className="mt-1 text-xs text-slate-500">
-                      الوحدة: {formatDeliveryMeasurementUnitLabel(item.measurement_unit)}
+                      {translateSupplierUiText("الوحدة", locale)}: {translateSupplierUiText(formatDeliveryMeasurementUnitLabel(item.measurement_unit), locale)}
                     </div>
                     {item.piece_label ? (
-                      <div className="mt-1 text-xs text-slate-500">القطعة: {item.piece_label}</div>
+                      <div className="mt-1 text-xs text-slate-500">{translateSupplierUiText("القطعة", locale)}: {item.piece_label}</div>
                     ) : null}
                     {toNumber(item.pieces_per_unit) > 0 ? (
                       <div className="mt-1 text-xs text-slate-500">
-                        الناتج: {formatCount(item.pieces_per_unit)} قطعة
+                        {translateSupplierUiText("الناتج", locale)}: {formatCount(item.pieces_per_unit)} {translateSupplierUiText("قطعة", locale)}
                       </div>
                     ) : null}
                   </td>
@@ -1719,27 +2072,27 @@ function ReceivedItemsTable({ items }) {
                     <div>{formatCurrency(item.unit_cost)}</div>
                     {toNumber(item.price_per_meter) > 0 ? (
                       <div className="mt-1 text-xs text-slate-500">
-                        سعر المتر: {formatCurrency(item.price_per_meter)}
+                        {translateSupplierUiText("سعر المتر", locale)}: {formatCurrency(item.price_per_meter)}
                       </div>
                     ) : null}
                     {toNumber(item.price_per_kilo) > 0 ? (
                       <div className="mt-1 text-xs text-slate-500">
-                        سعر الكيلو: {formatCurrency(item.price_per_kilo)}
+                        {translateSupplierUiText("سعر الكيلو", locale)}: {formatCurrency(item.price_per_kilo)}
                       </div>
                     ) : null}
                     {toNumber(item.piece_cost) > 0 ? (
                       <div className="mt-1 text-xs text-slate-500">
-                        سعر القطعة: {formatCurrency(item.piece_cost)}
+                        {translateSupplierUiText("سعر القطعة", locale)}: {formatCurrency(item.piece_cost)}
                       </div>
                     ) : null}
                     {toNumber(item.manufacturing_cost) > 0 ? (
                       <div className="mt-1 text-xs text-slate-500">
-                        تصنيع: {formatCurrency(item.manufacturing_cost)}
+                        {translateSupplierUiText("تصنيع", locale)}: {formatCurrency(item.manufacturing_cost)}
                       </div>
                     ) : null}
                     {toNumber(item.factory_service_cost) > 0 ? (
                       <div className="mt-1 text-xs text-slate-500">
-                        خدمة المصنع: {formatCurrency(item.factory_service_cost)}
+                        {translateSupplierUiText("خدمة المصنع", locale)}: {formatCurrency(item.factory_service_cost)}
                       </div>
                     ) : null}
                   </td>
@@ -1758,6 +2111,7 @@ function ReceivedItemsTable({ items }) {
 }
 
 function PaymentsList({ payments }) {
+  const { locale } = useLocale();
   return (
     <SectionCard title="الدفعات المسجلة" subtitle="كل المدفوعات المرتبطة بالمورد">
       {payments.length > 0 ? (
@@ -1770,7 +2124,7 @@ function PaymentsList({ payments }) {
                   <div className="mt-1 text-xs text-slate-500">{formatDateTime(payment.entry_date)}</div>
                 </div>
                 <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                  {formatPaymentMethodLabel(payment.payment_method)}
+                  {translateSupplierUiText(formatPaymentMethodLabel(payment.payment_method), locale)}
                 </span>
               </div>
               <div className="mt-3 grid gap-2 text-sm text-slate-600">
@@ -1789,6 +2143,7 @@ function PaymentsList({ payments }) {
 }
 
 function EntriesTimeline({ entries }) {
+  const { locale } = useLocale();
   return (
     <SectionCard title="الحركة المحاسبية" subtitle="Timeline مختصر للواردات والدفعات">
       {entries.length > 0 ? (
@@ -1798,11 +2153,14 @@ function EntriesTimeline({ entries }) {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-slate-900">
-                    {entry.entry_type === "delivery"
-                      ? "وارد"
-                      : entry.entry_type === "payment"
-                        ? "دفعة"
-                        : "تسوية"}
+                    {translateSupplierUiText(
+                      entry.entry_type === "delivery"
+                        ? "وارد"
+                        : entry.entry_type === "payment"
+                          ? "دفعة"
+                          : "تسوية",
+                      locale,
+                    )}
                   </div>
                   <div className="mt-1 text-xs text-slate-500">
                     {formatDateTime(entry.entry_date)}
@@ -1839,6 +2197,7 @@ function EntriesTimeline({ entries }) {
 }
 
 function SummaryCard({ title, value, subtitle, icon: Icon, tone = "sky" }) {
+  const { locale } = useLocale();
   const tones = {
     sky: "border-sky-100 bg-sky-50 text-sky-700",
     blue: "border-cyan-100 bg-cyan-50 text-cyan-700",
@@ -1850,9 +2209,13 @@ function SummaryCard({ title, value, subtitle, icon: Icon, tone = "sky" }) {
     <div className={`rounded-2xl border p-5 shadow-sm ${tones[tone] || tones.sky}`}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-medium opacity-80">{title}</div>
+          <div className="text-sm font-medium opacity-80">
+            {translateSupplierUiText(title, locale)}
+          </div>
           <div className="mt-2 text-2xl font-bold">{value}</div>
-          <div className="mt-2 text-xs opacity-80">{subtitle}</div>
+          <div className="mt-2 text-xs opacity-80">
+            {translateSupplierUiText(subtitle, locale)}
+          </div>
         </div>
         <div className="rounded-2xl bg-white/70 p-3">
           <Icon size={22} />
@@ -1863,12 +2226,19 @@ function SummaryCard({ title, value, subtitle, icon: Icon, tone = "sky" }) {
 }
 
 function SectionCard({ title, subtitle, action, children }) {
+  const { locale } = useLocale();
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
+          <h2 className="text-lg font-semibold text-slate-900">
+            {translateSupplierUiText(title, locale)}
+          </h2>
+          {subtitle ? (
+            <p className="mt-1 text-sm text-slate-500">
+              {translateSupplierUiText(subtitle, locale)}
+            </p>
+          ) : null}
         </div>
         {action}
       </div>
@@ -1878,32 +2248,42 @@ function SectionCard({ title, subtitle, action, children }) {
 }
 
 function TextInput({ label, value, onChange, type = "text" }) {
+  const { locale, isRTL } = useLocale();
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-slate-500">
+        {translateSupplierUiText(label, locale)}
+      </span>
       <input
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none"
+        className={`w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none ${
+          isRTL ? "text-right" : "text-left"
+        }`}
       />
     </label>
   );
 }
 
 function SelectInput({ label, value, options, onChange, disabled = false }) {
+  const { locale, isRTL } = useLocale();
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-slate-500">
+        {translateSupplierUiText(label, locale)}
+      </span>
       <select
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100"
+        className={`w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100 ${
+          isRTL ? "text-right" : "text-left"
+        }`}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
-            {option.label}
+            {translateSupplierUiText(option.label, locale)}
           </option>
         ))}
       </select>
@@ -1912,59 +2292,83 @@ function SelectInput({ label, value, options, onChange, disabled = false }) {
 }
 
 function DetailStat({ label, value }) {
+  const { locale } = useLocale();
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-      <div className="text-[11px] text-slate-500">{label}</div>
-      <div className="mt-1 text-sm font-semibold text-slate-900">{value || "-"}</div>
+      <div className="text-[11px] text-slate-500">
+        {translateSupplierUiText(label, locale)}
+      </div>
+      <div className="mt-1 text-sm font-semibold text-slate-900">
+        {translateSupplierUiText(value || "-", locale)}
+      </div>
     </div>
   );
 }
 
 function TextArea({ label, value, onChange }) {
+  const { locale, isRTL } = useLocale();
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-slate-500">
+        {translateSupplierUiText(label, locale)}
+      </span>
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
         rows={3}
-        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none"
+        className={`w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none ${
+          isRTL ? "text-right" : "text-left"
+        }`}
       />
     </label>
   );
 }
 
 function DetailLine({ label, value }) {
+  const { locale } = useLocale();
   return (
     <div className="rounded-xl bg-slate-50 p-3">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="mt-2 text-sm font-medium text-slate-900">{value || "-"}</div>
+      <div className="text-xs text-slate-500">
+        {translateSupplierUiText(label, locale)}
+      </div>
+      <div className="mt-2 text-sm font-medium text-slate-900">
+        {translateSupplierUiText(value || "-", locale)}
+      </div>
     </div>
   );
 }
 
 function DetailLineCompact({ label, value }) {
+  const { locale } = useLocale();
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="text-xs font-medium text-slate-700">{value || "-"}</div>
+      <div className="text-xs text-slate-500">
+        {translateSupplierUiText(label, locale)}
+      </div>
+      <div className="text-xs font-medium text-slate-700">
+        {translateSupplierUiText(value || "-", locale)}
+      </div>
     </div>
   );
 }
 
 function KeyValueCompact({ label, value }) {
+  const { locale } = useLocale();
   return (
     <div className="rounded-xl bg-slate-50 px-3 py-2">
-      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="text-[11px] text-slate-500">
+        {translateSupplierUiText(label, locale)}
+      </div>
       <div className="mt-1 text-sm font-semibold text-slate-800">{value}</div>
     </div>
   );
 }
 
 function EmptyState({ text }) {
+  const { locale } = useLocale();
   return (
     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-      {text}
+      {translateSupplierUiText(text, locale)}
     </div>
   );
 }

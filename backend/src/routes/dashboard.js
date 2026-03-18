@@ -32,6 +32,7 @@ const PENDING_STATUSES = new Set(["pending", "authorized"]);
 const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
 const DASHBOARD_BATCH_SIZE = 250;
 const DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
+const DASHBOARD_ORDER_VISIBLE_LIMIT = 4500;
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 const QUERY_RETRYABLE_ERROR_CODES = new Set(["57014"]);
 const dashboardStatsCache = new Map();
@@ -221,6 +222,12 @@ const getDashboardCacheKey = (req) =>
     String(getRequestedStoreId(req) || "all").trim(),
     getOrderScopeFiltersCacheKey(req.query || {}),
   ].join("::");
+
+const sortOrdersByCreatedAtDesc = (orders = []) =>
+  [...(orders || [])].sort(
+    (left, right) =>
+      new Date(right?.created_at || 0) - new Date(left?.created_at || 0),
+  );
 
 const getFreshCacheEntry = (cache, key) => {
   const entry = cache.get(key);
@@ -785,7 +792,14 @@ router.get("/stats", authenticateToken, async (req, res) => {
       }),
     ]);
 
-    const filteredOrders = filterOrdersByScope(orders, req.query || {});
+    const recentOrdersWindow = sortOrdersByCreatedAtDesc(orders).slice(
+      0,
+      DASHBOARD_ORDER_VISIBLE_LIMIT,
+    );
+    const filteredOrders = filterOrdersByScope(
+      recentOrdersWindow,
+      req.query || {},
+    );
     const saleOrders = filteredOrders.filter(
       (order) => getOrderNetSalesAmount(order) > 0,
     );
@@ -814,6 +828,7 @@ router.get("/stats", authenticateToken, async (req, res) => {
       total_orders: filteredOrders.length,
       total_products: filteredEntitySummary.totalProducts,
       total_customers: filteredEntitySummary.totalCustomers,
+      orders_window_limit: DASHBOARD_ORDER_VISIBLE_LIMIT,
       avg_order_value:
         saleOrders.length > 0
           ? parseFloat((totalSales / saleOrders.length).toFixed(2))

@@ -284,18 +284,6 @@ export default function ProductDetails() {
       } else {
         fetchProductDetails();
       }
-      return;
-
-      showNotification(
-        "تم الحفظ بنجاح، جاري المزامنة مع Shopify...",
-        "success",
-      );
-      setEditing(false);
-
-      // Refresh after a delay
-      setTimeout(() => {
-        fetchProductDetails();
-      }, 2000);
     } catch (error) {
       console.error("Error saving product:", error);
       showNotification(error.response?.data?.error || "فشل الحفظ", "error");

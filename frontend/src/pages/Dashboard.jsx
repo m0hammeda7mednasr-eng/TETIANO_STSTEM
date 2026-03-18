@@ -47,6 +47,7 @@ const EMPTY_DASHBOARD_STATS = {
   total_orders: 0,
   total_products: 0,
   total_customers: 0,
+  orders_window_limit: 4500,
   avg_order_value: 0,
 };
 
@@ -99,7 +100,10 @@ const getPaymentStatusClassName = (status) => {
   const normalized = String(status || "")
     .toLowerCase()
     .replace(/\s+/g, "_");
-  return PAYMENT_STATUS_STYLE[normalized] || "bg-slate-100 text-slate-700 border border-slate-200";
+  return (
+    PAYMENT_STATUS_STYLE[normalized] ||
+    "bg-slate-100 text-slate-700 border border-slate-200"
+  );
 };
 
 export default function Dashboard() {
@@ -133,15 +137,24 @@ export default function Dashboard() {
     const snapshot = cached?.value;
 
     return {
-      stats: snapshot?.stats || EMPTY_DASHBOARD_STATS,
-      recentOrders: Array.isArray(snapshot?.recentOrders) ? snapshot.recentOrders : [],
+      stats: {
+        ...EMPTY_DASHBOARD_STATS,
+        ...(snapshot?.stats || {}),
+      },
+      recentOrders: Array.isArray(snapshot?.recentOrders)
+        ? snapshot.recentOrders
+        : [],
       pendingRequests: Array.isArray(snapshot?.pendingRequests)
         ? snapshot.pendingRequests
         : [],
       pendingRequestsCount: Number(
-        snapshot?.pendingRequestsCount ?? snapshot?.pendingRequests?.length ?? 0,
+        snapshot?.pendingRequestsCount ??
+          snapshot?.pendingRequests?.length ??
+          0,
       ),
-      recentReports: Array.isArray(snapshot?.recentReports) ? snapshot.recentReports : [],
+      recentReports: Array.isArray(snapshot?.recentReports)
+        ? snapshot.recentReports
+        : [],
       updatedAt: cached?.updatedAt ? new Date(cached.updatedAt) : null,
     };
   }, [cacheKey]);
@@ -219,7 +232,10 @@ export default function Dashboard() {
           ]);
 
         if (statsResult.status === "fulfilled") {
-          setStats(extractObject(statsResult.value.data));
+          setStats({
+            ...EMPTY_DASHBOARD_STATS,
+            ...extractObject(statsResult.value.data),
+          });
         } else {
           setStats(EMPTY_DASHBOARD_STATS);
         }
@@ -242,11 +258,11 @@ export default function Dashboard() {
           .slice(0, 4);
         const nextPendingRequestsCount =
           requestsResult.status === "fulfilled"
-            ? Number(requestsResult.value.data?.total ?? nextPendingRequests.length)
+            ? Number(
+                requestsResult.value.data?.total ?? nextPendingRequests.length,
+              )
             : 0;
-        setPendingRequests(
-          nextPendingRequests,
-        );
+        setPendingRequests(nextPendingRequests);
         setPendingRequestsCount(nextPendingRequestsCount);
 
         const reportsData =
@@ -261,7 +277,10 @@ export default function Dashboard() {
         await writeCachedView(cacheKey, {
           stats:
             statsResult.status === "fulfilled"
-              ? extractObject(statsResult.value.data)
+              ? {
+                  ...EMPTY_DASHBOARD_STATS,
+                  ...extractObject(statsResult.value.data),
+                }
               : EMPTY_DASHBOARD_STATS,
           recentOrders: sortedOrders.slice(0, 6),
           pendingRequests: nextPendingRequests,
@@ -272,7 +291,12 @@ export default function Dashboard() {
         });
 
         if (!silent) {
-          const firstFailure = [statsResult, ordersResult, requestsResult, reportsResult]
+          const firstFailure = [
+            statsResult,
+            ordersResult,
+            requestsResult,
+            reportsResult,
+          ]
             .filter((result) => result.status === "rejected")
             .map((result) => result.reason)[0];
           if (firstFailure) {
@@ -311,23 +335,28 @@ export default function Dashboard() {
       const snapshot = cached?.value;
 
       if (active && snapshot) {
-        setStats(snapshot.stats || {
-          total_sales: 0,
-          total_order_value: 0,
-          pending_order_value: 0,
-          total_orders: 0,
-          total_products: 0,
-          total_customers: 0,
-          avg_order_value: 0,
+        setStats({
+          ...EMPTY_DASHBOARD_STATS,
+          ...(snapshot.stats || {}),
         });
-        setRecentOrders(Array.isArray(snapshot.recentOrders) ? snapshot.recentOrders : []);
+        setRecentOrders(
+          Array.isArray(snapshot.recentOrders) ? snapshot.recentOrders : [],
+        );
         setPendingRequests(
-          Array.isArray(snapshot.pendingRequests) ? snapshot.pendingRequests : [],
+          Array.isArray(snapshot.pendingRequests)
+            ? snapshot.pendingRequests
+            : [],
         );
         setPendingRequestsCount(
-          Number(snapshot.pendingRequestsCount ?? snapshot.pendingRequests?.length ?? 0),
+          Number(
+            snapshot.pendingRequestsCount ??
+              snapshot.pendingRequests?.length ??
+              0,
+          ),
         );
-        setRecentReports(Array.isArray(snapshot.recentReports) ? snapshot.recentReports : []);
+        setRecentReports(
+          Array.isArray(snapshot.recentReports) ? snapshot.recentReports : [],
+        );
         setLastUpdatedAt(
           cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
         );
@@ -339,7 +368,10 @@ export default function Dashboard() {
       }
 
       const hasCachedSnapshot = Boolean(snapshot);
-      if (!hasCachedSnapshot || !isCacheFresh(cached, DASHBOARD_CACHE_FRESH_MS)) {
+      if (
+        !hasCachedSnapshot ||
+        !isCacheFresh(cached, DASHBOARD_CACHE_FRESH_MS)
+      ) {
         await loadData({ silent: hasCachedSnapshot });
       }
     })();
@@ -507,7 +539,10 @@ export default function Dashboard() {
                 disabled={syncing}
                 className="flex items-center gap-2 bg-sky-700 hover:bg-sky-800 text-white px-5 py-2 rounded-lg disabled:opacity-60"
               >
-                <RefreshCw size={18} className={syncing ? "animate-spin" : ""} />
+                <RefreshCw
+                  size={18}
+                  className={syncing ? "animate-spin" : ""}
+                />
                 {syncing ? "Syncing..." : "Sync Shopify"}
               </button>
             )}
@@ -534,8 +569,8 @@ export default function Dashboard() {
               value={formatCurrency(stats.total_sales)}
               subtitle={
                 hasScopedOrderFilters
-                  ? "Filtered paid sales after refunds"
-                  : "Paid after refunds"
+                  ? `Filtered paid sales after refunds inside latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`
+                  : `Paid after refunds from latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`
               }
               icon={TrendingUp}
               color="from-emerald-500 to-emerald-700"
@@ -545,8 +580,8 @@ export default function Dashboard() {
               value={formatCurrency(stats.total_order_value)}
               subtitle={
                 hasScopedOrderFilters
-                  ? "All orders inside the selected scope"
-                  : "All synced orders"
+                  ? `All matching orders inside latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`
+                  : `Latest ${toNumber(stats.orders_window_limit).toLocaleString()} synced orders`
               }
               icon={TrendingUp}
               color="from-amber-500 to-amber-700"
@@ -608,7 +643,9 @@ export default function Dashboard() {
               <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900">
-                    {hasScopedOrderFilters ? "Latest Matching Orders" : "Latest Orders"}
+                    {hasScopedOrderFilters
+                      ? "Latest Matching Orders"
+                      : "Latest Orders"}
                   </h2>
                   {hasScopedOrderFilters ? (
                     <p className="mt-1 text-xs text-slate-500">
@@ -684,22 +721,31 @@ export default function Dashboard() {
               {(isAdmin || canManageUsers) && (
                 <div className="bg-white rounded-xl shadow p-5">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-bold">Pending Access Requests</h2>
+                    <h2 className="text-lg font-bold">
+                      Pending Access Requests
+                    </h2>
                     <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">
                       {pendingRequestsCount}
                     </span>
                   </div>
 
                   {pendingRequests.length === 0 ? (
-                    <p className="text-slate-500">No pending access requests now.</p>
+                    <p className="text-slate-500">
+                      No pending access requests now.
+                    </p>
                   ) : (
                     <div className="space-y-2">
                       {pendingRequests.slice(0, 4).map((item) => (
-                        <div key={item.id} className="border rounded-lg px-3 py-2 text-sm">
+                        <div
+                          key={item.id}
+                          className="border rounded-lg px-3 py-2 text-sm"
+                        >
                           <p className="font-medium text-slate-800">
                             {item.users?.name || item.user_name || "User"}
                           </p>
-                          <p className="text-slate-500">{item.permission_requested}</p>
+                          <p className="text-slate-500">
+                            {item.permission_requested}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -717,7 +763,9 @@ export default function Dashboard() {
               {(isAdmin || canViewAllReports) && (
                 <div className="bg-white rounded-xl shadow p-5">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-bold">Recent Employee Reports</h2>
+                    <h2 className="text-lg font-bold">
+                      Recent Employee Reports
+                    </h2>
                     <button
                       onClick={() => navigate("/reports")}
                       className="text-sky-700 text-sm hover:text-sky-900"
@@ -731,8 +779,13 @@ export default function Dashboard() {
                   ) : (
                     <div className="space-y-2">
                       {recentReports.map((item) => (
-                        <div key={item.id} className="border rounded-lg px-3 py-2 text-sm">
-                          <p className="font-medium text-slate-800">{item.title}</p>
+                        <div
+                          key={item.id}
+                          className="border rounded-lg px-3 py-2 text-sm"
+                        >
+                          <p className="font-medium text-slate-800">
+                            {item.title}
+                          </p>
                           <p className="text-slate-500">
                             {item.users?.name || item.user_name || "Employee"}
                           </p>

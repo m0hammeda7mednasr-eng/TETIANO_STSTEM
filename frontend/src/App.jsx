@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -7,33 +7,43 @@ import {
 } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { StoreProvider } from "./context/StoreContext";
+import { LoadingSpinner } from "./components/Common";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-import Dashboard from "./pages/Dashboard";
-import Customers from "./pages/Customers";
-import Products from "./pages/Products";
-import Suppliers from "./pages/Suppliers";
-import ProductAnalysis from "./pages/ProductAnalysis";
-import ProductDetails from "./pages/ProductDetails";
-import Orders from "./pages/Orders";
-import MissingOrders from "./pages/MissingOrders";
-import OrderDetails from "./pages/OrderDetails";
-import WarehouseStock from "./pages/WarehouseStock";
-import WarehouseScanner from "./pages/WarehouseScanner";
-import Settings from "./pages/Settings";
-import Users from "./pages/Users";
-import Reports from "./pages/Reports";
-import MyReports from "./pages/MyReports";
-import RequestAccess from "./pages/RequestAccess";
-import Tasks from "./pages/Tasks";
-import MyTasks from "./pages/MyTasks";
-import ActivityLog from "./pages/ActivityLog";
-import NetProfit from "./pages/NetProfit";
-import Analytics from "./pages/Analytics";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
-import AdminPage from "./pages/Admin";
 import "./index.css";
+
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Customers = lazy(() => import("./pages/Customers"));
+const Products = lazy(() => import("./pages/Products"));
+const Suppliers = lazy(() => import("./pages/Suppliers"));
+const ProductAnalysis = lazy(() => import("./pages/ProductAnalysis"));
+const ProductDetails = lazy(() => import("./pages/ProductDetails"));
+const Orders = lazy(() => import("./pages/Orders"));
+const MissingOrders = lazy(() => import("./pages/MissingOrders"));
+const OrderDetails = lazy(() => import("./pages/OrderDetails"));
+const WarehouseStock = lazy(() => import("./pages/WarehouseStock"));
+const WarehouseScanner = lazy(() => import("./pages/WarehouseScanner"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Users = lazy(() => import("./pages/Users"));
+const Reports = lazy(() => import("./pages/Reports"));
+const MyReports = lazy(() => import("./pages/MyReports"));
+const RequestAccess = lazy(() => import("./pages/RequestAccess"));
+const Tasks = lazy(() => import("./pages/Tasks"));
+const MyTasks = lazy(() => import("./pages/MyTasks"));
+const ActivityLog = lazy(() => import("./pages/ActivityLog"));
+const NetProfit = lazy(() => import("./pages/NetProfit"));
+const Analytics = lazy(() => import("./pages/Analytics"));
+const AdminPage = lazy(() => import("./pages/Admin"));
+
+function RouteFallback() {
+  return (
+    <div className="min-h-screen bg-slate-50 px-4 py-8">
+      <LoadingSpinner />
+    </div>
+  );
+}
 
 function App() {
   return (
@@ -45,187 +55,189 @@ function App() {
             v7_relativeSplatPath: true,
           }}
         >
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route
-              path="/dashboard"
-              element={
-                <ProtectedRoute permission="can_view_dashboard">
-                  <Dashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/customers"
-              element={
-                <ProtectedRoute permission="can_view_customers">
-                  <Customers />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/products"
-              element={
-                <ProtectedRoute permission="can_view_products">
-                  <Products />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/suppliers"
-              element={
-                <ProtectedRoute permission="can_view_products">
-                  <Suppliers />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/products/analysis"
-              element={
-                <ProtectedRoute permission="can_view_products">
-                  <ProductAnalysis />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/products/:id"
-              element={
-                <ProtectedRoute permission="can_view_products">
-                  <ProductDetails />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/warehouse"
-              element={
-                <ProtectedRoute permission="can_view_products">
-                  <WarehouseStock />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/warehouse/scanner"
-              element={
-                <ProtectedRoute permission="can_view_products">
-                  <WarehouseScanner />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/orders"
-              element={
-                <ProtectedRoute permission="can_view_orders">
-                  <Orders />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/orders/missing"
-              element={
-                <ProtectedRoute permission="can_view_orders">
-                  <MissingOrders />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/orders/:id"
-              element={
-                <ProtectedRoute permission="can_view_orders">
-                  <OrderDetails />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/settings"
-              element={
-                <ProtectedRoute permission="can_manage_settings">
-                  <Settings />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/users"
-              element={
-                <ProtectedRoute permission="can_manage_users">
-                  <Users />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/reports"
-              element={
-                <ProtectedRoute permission="can_view_all_reports">
-                  <Reports />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/my-reports"
-              element={
-                <ProtectedRoute>
-                  <MyReports />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/request-access"
-              element={
-                <ProtectedRoute>
-                  <RequestAccess />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/tasks"
-              element={
-                <ProtectedRoute permission="can_manage_tasks">
-                  <Tasks />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/my-tasks"
-              element={
-                <ProtectedRoute>
-                  <MyTasks />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/activity-log"
-              element={
-                <ProtectedRoute permission="can_view_activity_log">
-                  <ActivityLog />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/net-profit"
-              element={
-                <AdminRoute>
-                  <NetProfit />
-                </AdminRoute>
-              }
-            />
-            <Route
-              path="/analytics"
-              element={
-                <AdminRoute>
-                  <Analytics />
-                </AdminRoute>
-              }
-            />
-            <Route
-              path="/admin"
-              element={
-                <AdminRoute>
-                  <AdminPage />
-                </AdminRoute>
-              }
-            />
-            <Route path="/" element={<Navigate to="/dashboard" />} />
-          </Routes>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route
+                path="/dashboard"
+                element={
+                  <ProtectedRoute permission="can_view_dashboard">
+                    <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/customers"
+                element={
+                  <ProtectedRoute permission="can_view_customers">
+                    <Customers />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/products"
+                element={
+                  <ProtectedRoute permission="can_view_products">
+                    <Products />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/suppliers"
+                element={
+                  <ProtectedRoute permission="can_view_products">
+                    <Suppliers />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/products/analysis"
+                element={
+                  <ProtectedRoute permission="can_view_products">
+                    <ProductAnalysis />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/products/:id"
+                element={
+                  <ProtectedRoute permission="can_view_products">
+                    <ProductDetails />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/warehouse"
+                element={
+                  <ProtectedRoute permission="can_view_products">
+                    <WarehouseStock />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/warehouse/scanner"
+                element={
+                  <ProtectedRoute permission="can_view_products">
+                    <WarehouseScanner />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/orders"
+                element={
+                  <ProtectedRoute permission="can_view_orders">
+                    <Orders />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/orders/missing"
+                element={
+                  <ProtectedRoute permission="can_view_orders">
+                    <MissingOrders />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/orders/:id"
+                element={
+                  <ProtectedRoute permission="can_view_orders">
+                    <OrderDetails />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <ProtectedRoute permission="can_manage_settings">
+                    <Settings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/users"
+                element={
+                  <ProtectedRoute permission="can_manage_users">
+                    <Users />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/reports"
+                element={
+                  <ProtectedRoute permission="can_view_all_reports">
+                    <Reports />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/my-reports"
+                element={
+                  <ProtectedRoute>
+                    <MyReports />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/request-access"
+                element={
+                  <ProtectedRoute>
+                    <RequestAccess />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/tasks"
+                element={
+                  <ProtectedRoute permission="can_manage_tasks">
+                    <Tasks />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/my-tasks"
+                element={
+                  <ProtectedRoute>
+                    <MyTasks />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/activity-log"
+                element={
+                  <ProtectedRoute permission="can_view_activity_log">
+                    <ActivityLog />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/net-profit"
+                element={
+                  <AdminRoute>
+                    <NetProfit />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/analytics"
+                element={
+                  <AdminRoute>
+                    <Analytics />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <AdminRoute>
+                    <AdminPage />
+                  </AdminRoute>
+                }
+              />
+              <Route path="/" element={<Navigate to="/dashboard" />} />
+            </Routes>
+          </Suspense>
         </Router>
       </AuthProvider>
     </StoreProvider>

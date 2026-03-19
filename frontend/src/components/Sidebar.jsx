@@ -91,15 +91,6 @@ const buildSharedNav = (t, select) => [
         permission: "can_view_products",
       },
       {
-        icon: Package,
-        label: t(
-          "sidebar.fabricModels",
-          select("موديلات القماش", "Fabric Models"),
-        ),
-        path: "/suppliers/fabric-models",
-        permission: "can_view_products",
-      },
-      {
         icon: BarChart3,
         label: t("sidebar.productAnalysis", "Product Analysis"),
         path: "/products/analysis",
@@ -231,8 +222,6 @@ const isPathActive = (pathname, itemPath) => {
       return pathname === "/suppliers";
     case "/suppliers/fabric-suppliers":
       return pathname === "/suppliers/fabric-suppliers";
-    case "/suppliers/fabric-models":
-      return pathname === "/suppliers/fabric-models";
     default:
       return pathname === itemPath;
   }

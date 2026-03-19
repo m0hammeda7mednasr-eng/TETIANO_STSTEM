@@ -593,7 +593,6 @@ export default function Dashboard() {
       stats.avg_order_value,
       stats.low_stock_products,
       stats.paid_orders_count,
-      stats.orders_window_limit,
       stats.total_customers,
       stats.total_order_value,
       stats.total_orders,

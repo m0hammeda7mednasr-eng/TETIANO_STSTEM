@@ -3,6 +3,15 @@ import { supabase } from "../supabaseClient.js";
 import { authenticateToken } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { getAccessibleStoreIds } from "../models/index.js";
+import {
+  PAID_LIKE_STATUSES,
+  getLineItemBookedAmount,
+  getOrderFinancialStatus,
+  getOrderGrossAmount,
+  getOrderRefundedAmount,
+  isCancelledOrder,
+  parseOrderData,
+} from "../helpers/orderAnalytics.js";
 import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 import {
   DEFAULT_META_LOOKBACK_DAYS,
@@ -16,6 +25,7 @@ import {
   fetchMetaInsightsForAccount,
   fetchOpenRouterModels,
   generateOpenRouterMetaAnalysis,
+  generateOpenRouterStoreAssistantReply,
 } from "../services/metaAnalyticsService.js";
 
 const router = express.Router();
@@ -26,6 +36,109 @@ const META_SCHEMA_ERROR = {
   error:
     "Meta Analytics tables are missing. Run ADD_META_ANALYTICS_MODULE.sql first.",
 };
+const PAID_STATUSES = new Set(["paid", "partially_paid"]);
+const REFUNDED_STATUSES = new Set(["refunded", "partially_refunded"]);
+const PENDING_STATUSES = new Set(["pending", "authorized"]);
+const LOW_STOCK_THRESHOLD = 10;
+const STORE_CONTEXT_LOOKBACK_DAYS = 180;
+const PRODUCTS_SELECT = [
+  "id",
+  "shopify_id",
+  "store_id",
+  "title",
+  "vendor",
+  "product_type",
+  "sku",
+  "price",
+  "inventory_quantity",
+  "created_at",
+  "updated_at",
+  "data",
+].join(",");
+const PRODUCTS_SELECTS = [
+  PRODUCTS_SELECT,
+  [
+    "id",
+    "store_id",
+    "title",
+    "vendor",
+    "price",
+    "inventory_quantity",
+    "created_at",
+    "updated_at",
+  ].join(","),
+  ["id", "store_id", "title", "inventory_quantity", "updated_at"].join(","),
+];
+const ORDERS_SELECT = [
+  "id",
+  "store_id",
+  "order_number",
+  "customer_name",
+  "customer_email",
+  "financial_status",
+  "status",
+  "fulfillment_status",
+  "total_price",
+  "total_refunded",
+  "cancelled_at",
+  "created_at",
+  "updated_at",
+  "data",
+].join(",");
+const ORDERS_SELECTS = [
+  ORDERS_SELECT,
+  [
+    "id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "financial_status",
+    "status",
+    "fulfillment_status",
+    "total_price",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+  [
+    "id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "status",
+    "fulfillment_status",
+    "total_price",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+];
+const CUSTOMERS_SELECTS = [
+  [
+    "id",
+    "store_id",
+    "email",
+    "name",
+    "customer_name",
+    "total_spent",
+    "orders_count",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+  [
+    "id",
+    "store_id",
+    "email",
+    "name",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+  ["id", "store_id", "email", "created_at", "updated_at"].join(","),
+];
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -219,6 +332,410 @@ const loadOverviewData = async ({ storeId, days }) => {
     analyses: normalizeArray(analysesResult.data),
     days: normalizedDays,
   };
+};
+
+const dedupeRowsById = (rows = []) => {
+  const seen = new Set();
+  const uniqueRows = [];
+
+  for (const row of rows) {
+    const key = normalizeText(row?.id);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    uniqueRows.push(row);
+  }
+
+  return uniqueRows;
+};
+
+const isLowStockProduct = (product) => {
+  const quantity = toNumber(product?.inventory_quantity);
+  return quantity > 0 && quantity < LOW_STOCK_THRESHOLD;
+};
+
+const isOutOfStockProduct = (product) => toNumber(product?.inventory_quantity) <= 0;
+
+const isPaidOrder = (order) => PAID_STATUSES.has(getOrderFinancialStatus(order));
+
+const isRefundedOrder = (order) => {
+  const status = getOrderFinancialStatus(order);
+  return REFUNDED_STATUSES.has(status) || getOrderRefundedAmount(order) > 0;
+};
+
+const isPendingOrder = (order) => PENDING_STATUSES.has(getOrderFinancialStatus(order));
+
+const getOrderGrossSalesAmount = (order) => {
+  const status = getOrderFinancialStatus(order);
+  if (isCancelledOrder(order) || !PAID_LIKE_STATUSES.has(status)) {
+    return 0;
+  }
+
+  return getOrderGrossAmount(order);
+};
+
+const getOrderNetSalesAmount = (order) => {
+  const grossAmount = getOrderGrossSalesAmount(order);
+  if (grossAmount <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, grossAmount - getOrderRefundedAmount(order));
+};
+
+const getLineItems = (order) => {
+  const parsed = parseOrderData(order);
+  return Array.isArray(parsed?.line_items) ? parsed.line_items : [];
+};
+
+const loadScopedRowsWithFallback = async ({
+  tableName,
+  selectCandidates,
+  storeId,
+  orderBy,
+  ascending,
+  afterDate = "",
+}) => {
+  let lastError = null;
+
+  for (const selectColumns of selectCandidates) {
+    let query = supabase.from(tableName).select(selectColumns).eq("store_id", storeId);
+
+    if (afterDate) {
+      query = query.gte("created_at", afterDate);
+    }
+
+    if (orderBy) {
+      query = query.order(orderBy, { ascending });
+    }
+
+    const { data, error } = await query;
+    if (!error) {
+      return normalizeArray(data);
+    }
+
+    lastError = error;
+    if (!isSchemaCompatibilityError(error)) {
+      throw error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return [];
+};
+
+const buildStoreSnapshot = async ({ storeId, days = STORE_CONTEXT_LOOKBACK_DAYS }) => {
+  const normalizedDays = Math.max(30, toNumber(days) || STORE_CONTEXT_LOOKBACK_DAYS);
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - normalizedDays + 1);
+  const since = startDate.toISOString().slice(0, 10);
+
+  const [products, orders, customers] = await Promise.all([
+    loadScopedRowsWithFallback({
+      tableName: "products",
+      selectCandidates: PRODUCTS_SELECTS,
+      storeId,
+      orderBy: "updated_at",
+      ascending: false,
+    }),
+    loadScopedRowsWithFallback({
+      tableName: "orders",
+      selectCandidates: ORDERS_SELECTS,
+      storeId,
+      orderBy: "created_at",
+      ascending: false,
+      afterDate: since,
+    }),
+    loadScopedRowsWithFallback({
+      tableName: "customers",
+      selectCandidates: CUSTOMERS_SELECTS,
+      storeId,
+      orderBy: "updated_at",
+      ascending: false,
+    }),
+  ]);
+
+  const uniqueProducts = dedupeRowsById(products);
+  const lowStockProducts = uniqueProducts
+    .filter((product) => isLowStockProduct(product))
+    .sort((left, right) => {
+      const quantityDiff =
+        toNumber(left?.inventory_quantity) - toNumber(right?.inventory_quantity);
+      if (quantityDiff !== 0) {
+        return quantityDiff;
+      }
+
+      return (
+        new Date(right?.updated_at || 0).getTime() -
+        new Date(left?.updated_at || 0).getTime()
+      );
+    })
+    .slice(0, 6)
+    .map((product) => ({
+      id: product.id,
+      title: normalizeText(product.title) || "Untitled product",
+      vendor: normalizeText(product.vendor),
+      inventory_quantity: toNumber(product.inventory_quantity),
+    }));
+
+  const ordersByStatus = {
+    total: orders.length,
+    paid: orders.filter((order) => isPaidOrder(order)).length,
+    pending: orders.filter((order) => isPendingOrder(order)).length,
+    refunded: orders.filter((order) => isRefundedOrder(order)).length,
+    cancelled: orders.filter((order) => isCancelledOrder(order)).length,
+    fulfilled: orders.filter((order) => {
+      const status = normalizeText(order?.fulfillment_status).toLowerCase();
+      return status === "fulfilled";
+    }).length,
+    unfulfilled: orders.filter((order) => {
+      const status = normalizeText(order?.fulfillment_status).toLowerCase();
+      return !status || status === "unfulfilled" || status === "null";
+    }).length,
+  };
+
+  const totalRevenue = orders.reduce(
+    (sum, order) => sum + getOrderGrossSalesAmount(order),
+    0,
+  );
+  const refundedAmount = orders.reduce(
+    (sum, order) => sum + getOrderRefundedAmount(order),
+    0,
+  );
+  const pendingAmount = orders
+    .filter((order) => isPendingOrder(order))
+    .reduce((sum, order) => sum + getOrderGrossAmount(order), 0);
+  const netRevenue = Math.max(0, totalRevenue - refundedAmount);
+  const paidOrders = orders.filter((order) => getOrderNetSalesAmount(order) > 0);
+
+  const productRevenueMap = new Map();
+  for (const order of paidOrders) {
+    const grossOrderAmount = getOrderGrossSalesAmount(order);
+    const netOrderAmount = getOrderNetSalesAmount(order);
+    const netRatio =
+      grossOrderAmount > 0
+        ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
+        : 0;
+
+    if (netRatio <= 0) {
+      continue;
+    }
+
+    for (const item of getLineItems(order)) {
+      const productKey = normalizeText(
+        item?.product_id || item?.id || item?.sku || item?.title,
+      );
+      if (!productKey) {
+        continue;
+      }
+
+      const quantity = Math.max(0, toNumber(item?.quantity));
+      const lineRevenue = getLineItemBookedAmount(item) * netRatio;
+      const current = productRevenueMap.get(productKey) || {
+        product_id: item?.product_id || null,
+        title: normalizeText(item?.title || item?.name) || "Unknown product",
+        total_revenue: 0,
+        total_quantity: 0,
+        orders_count: 0,
+      };
+
+      current.total_revenue += lineRevenue;
+      current.total_quantity += quantity;
+      current.orders_count += 1;
+      productRevenueMap.set(productKey, current);
+    }
+  }
+
+  const topProducts = Array.from(productRevenueMap.values())
+    .sort((left, right) => right.total_revenue - left.total_revenue)
+    .slice(0, 6)
+    .map((product) => ({
+      ...product,
+      total_revenue: Number(product.total_revenue.toFixed(2)),
+      total_quantity: toNumber(product.total_quantity),
+      orders_count: toNumber(product.orders_count),
+    }));
+
+  const customerSpendMap = new Map();
+  for (const order of paidOrders) {
+    const key = normalizeText(order?.customer_email || order?.customer_name || order?.id);
+    if (!key) {
+      continue;
+    }
+
+    const current = customerSpendMap.get(key) || {
+      email: normalizeText(order?.customer_email),
+      name: normalizeText(order?.customer_name),
+      orders_count: 0,
+      total_spent: 0,
+    };
+
+    current.orders_count += 1;
+    current.total_spent += getOrderNetSalesAmount(order);
+    customerSpendMap.set(key, current);
+  }
+
+  const topCustomers = Array.from(customerSpendMap.values())
+    .sort((left, right) => right.total_spent - left.total_spent)
+    .slice(0, 5)
+    .map((customer) => ({
+      ...customer,
+      total_spent: Number(customer.total_spent.toFixed(2)),
+    }));
+
+  return {
+    lookback_days: normalizedDays,
+    since,
+    financial: {
+      total_revenue: Number(totalRevenue.toFixed(2)),
+      refunded_amount: Number(refundedAmount.toFixed(2)),
+      pending_amount: Number(pendingAmount.toFixed(2)),
+      net_revenue: Number(netRevenue.toFixed(2)),
+      average_order_value:
+        paidOrders.length > 0 ? Number((netRevenue / paidOrders.length).toFixed(2)) : 0,
+    },
+    orders: {
+      ...ordersByStatus,
+      success_rate:
+        ordersByStatus.total > 0
+          ? Number(((ordersByStatus.paid / ordersByStatus.total) * 100).toFixed(2))
+          : 0,
+      cancellation_rate:
+        ordersByStatus.total > 0
+          ? Number(((ordersByStatus.cancelled / ordersByStatus.total) * 100).toFixed(2))
+          : 0,
+      refund_rate:
+        ordersByStatus.total > 0
+          ? Number(((ordersByStatus.refunded / ordersByStatus.total) * 100).toFixed(2))
+          : 0,
+    },
+    catalog: {
+      total_products: uniqueProducts.length,
+      low_stock_count: uniqueProducts.filter((product) => isLowStockProduct(product)).length,
+      out_of_stock_count: uniqueProducts.filter((product) => isOutOfStockProduct(product)).length,
+    },
+    customers: {
+      total_customers: customers.length,
+      active_customers_lookback: customerSpendMap.size,
+    },
+    top_products: topProducts,
+    top_customers: topCustomers,
+    low_stock_products: lowStockProducts,
+  };
+};
+
+const buildOperationalRecommendations = ({
+  storeSnapshot = {},
+  metaOverview = {},
+}) => {
+  const recommendations = [];
+  const orders = storeSnapshot?.orders || {};
+  const financial = storeSnapshot?.financial || {};
+  const catalog = storeSnapshot?.catalog || {};
+  const topProducts = normalizeArray(storeSnapshot?.top_products);
+  const lowStockProducts = normalizeArray(storeSnapshot?.low_stock_products);
+  const metaSummary = metaOverview?.summary || {};
+  const topCampaigns = normalizeArray(metaOverview?.campaigns);
+
+  if (toNumber(orders.pending) >= 8) {
+    recommendations.push({
+      priority: "high",
+      category: "operations",
+      title: "اقفل الطلبات المعلقة أولًا",
+      action: "ابدأ متابعة الطلبات غير المحسومة والدفع/التأكيد قبل توسيع أي spend.",
+      reason: `${orders.pending} طلبات معلقة ما زالت مفتوحة داخل فترة التحليل الحالية.`,
+    });
+  }
+
+  if (toNumber(orders.cancellation_rate) >= 10) {
+    recommendations.push({
+      priority: "high",
+      category: "retention",
+      title: "راجع سبب الإلغاء قبل زيادة المبيعات",
+      action: "حلل أسباب الإلغاء والشحن والتأكيد الهاتفي وسياسة الدفع قبل ضخ traffic إضافي.",
+      reason: `معدل الإلغاء الحالي ${toNumber(orders.cancellation_rate).toFixed(2)}%.`,
+    });
+  }
+
+  if (toNumber(catalog.low_stock_count) > 0) {
+    const productNames = lowStockProducts
+      .slice(0, 3)
+      .map((product) => product.title)
+      .filter(Boolean)
+      .join("، ");
+
+    recommendations.push({
+      priority: toNumber(catalog.low_stock_count) >= 5 ? "high" : "medium",
+      category: "inventory",
+      title: "أمّن المخزون قبل أي push على المبيعات",
+      action: productNames
+        ? `ابدأ بإعادة تموين: ${productNames}.`
+        : "راجع الأصناف منخفضة المخزون وحدد أولويات إعادة التوريد.",
+      reason: `${catalog.low_stock_count} منتجات منخفضة المخزون و${catalog.out_of_stock_count} نافدة.`,
+    });
+  }
+
+  if (topProducts.length > 0 && toNumber(financial.net_revenue) > 0) {
+    const leadProduct = topProducts[0];
+    const revenueShare =
+      toNumber(financial.net_revenue) > 0
+        ? (toNumber(leadProduct.total_revenue) / toNumber(financial.net_revenue)) * 100
+        : 0;
+
+    if (revenueShare >= 25) {
+      recommendations.push({
+        priority: "medium",
+        category: "merchandising",
+        title: "وسّع المنتج المتصدر لكن احمِ اعتمادية الستور",
+        action: `ثبت مخزون وتسعير وكريتيف المنتج ${leadProduct.title}، وفي نفس الوقت ادفع منتجين بديلين معه.`,
+        reason: `${leadProduct.title} مسؤول عن ${revenueShare.toFixed(1)}% من صافي المبيعات.`,
+      });
+    }
+  }
+
+  if (toNumber(metaSummary.rows_count) === 0) {
+    recommendations.push({
+      priority: "medium",
+      category: "ads",
+      title: "فعّل مزامنة Meta قبل الاعتماد على قرارات الإعلانات",
+      action: "اعمل sync لبيانات Meta من الإعدادات ثم راقب الحملات الأعلى spend والأقل ROAS.",
+      reason: "لا توجد rows محفوظة من Meta داخل فترة التحليل الحالية.",
+    });
+  } else {
+    const scalableCampaign = topCampaigns.find(
+      (campaign) => toNumber(campaign.purchases) >= 2 && toNumber(campaign.roas) >= 2,
+    );
+    const weakCampaign = topCampaigns.find(
+      (campaign) => toNumber(campaign.spend) > 0 && toNumber(campaign.roas) < 1,
+    );
+
+    if (scalableCampaign) {
+      recommendations.push({
+        priority: "medium",
+        category: "ads",
+        title: "فيه حملة تستحق التوسيع",
+        action: `اختبر رفع الميزانية تدريجيًا على ${scalableCampaign.name || scalableCampaign.id} مع الحفاظ على نفس الزاوية الإعلانية.`,
+        reason: `ROAS ${toNumber(scalableCampaign.roas).toFixed(2)}x مع ${toNumber(scalableCampaign.purchases)} مشتريات.`,
+      });
+    }
+
+    if (weakCampaign) {
+      recommendations.push({
+        priority: "high",
+        category: "ads",
+        title: "فيه spend لازم يتراجع أو يتوقف",
+        action: `راجع أو أوقف ${weakCampaign.name || weakCampaign.id} إذا استمر نفس الأداء بعد اختبار كريتيف/أودينس جديد.`,
+        reason: `Spend ${toNumber(weakCampaign.spend).toFixed(2)} مقابل ROAS ${toNumber(weakCampaign.roas).toFixed(2)}x.`,
+      });
+    }
+  }
+
+  return recommendations.slice(0, 6);
 };
 
 const handleSchemaAwareError = (res, error, fallbackMessage) => {
@@ -631,18 +1148,31 @@ router.get("/overview", async (req, res) => {
       });
     }
 
-    const data = await loadOverviewData({
-      storeId,
-      days: req.query?.days,
+    const [data, storeSnapshot] = await Promise.all([
+      loadOverviewData({
+        storeId,
+        days: req.query?.days,
+      }),
+      buildStoreSnapshot({
+        storeId,
+      }),
+    ]);
+
+    const metaOverview = buildMetaOverview({
+      snapshots: data.snapshots,
+    });
+    const recommendations = buildOperationalRecommendations({
+      storeSnapshot,
+      metaOverview,
     });
 
     return res.json({
       store_id: storeId,
       days: data.days,
       integration: normalizeIntegrationPayload(data.integration),
-      overview: buildMetaOverview({
-        snapshots: data.snapshots,
-      }),
+      overview: metaOverview,
+      store_snapshot: storeSnapshot,
+      recommendations,
       sync_runs: data.syncRuns,
       analyses: data.analyses,
     });
@@ -762,6 +1292,107 @@ router.post("/analyze", async (req, res) => {
       res,
       error,
       "Failed to generate Meta AI analysis",
+    );
+  }
+});
+
+router.post("/assistant/chat", async (req, res) => {
+  try {
+    const storeId = await resolveStoreScope(req);
+    if (!storeId) {
+      return res.status(400).json({
+        error: "Select a store first before opening the AI assistant.",
+      });
+    }
+
+    const integration = await loadIntegration(storeId);
+    const openRouterApiKey =
+      normalizeText(integration?.openrouter_api_key) ||
+      normalizeText(process.env.OPENROUTER_API_KEY);
+
+    if (!openRouterApiKey) {
+      return res.status(400).json({
+        error: "Save OpenRouter configuration in Settings first.",
+      });
+    }
+
+    const message = normalizeText(req.body?.message);
+    if (!message) {
+      return res.status(400).json({
+        error: "Message is required.",
+      });
+    }
+
+    const [overviewData, storeSnapshot] = await Promise.all([
+      loadOverviewData({
+        storeId,
+        days: req.body?.days || req.query?.days,
+      }),
+      buildStoreSnapshot({
+        storeId,
+      }),
+    ]);
+
+    const metaOverview = buildMetaOverview({
+      snapshots: overviewData.snapshots,
+    });
+    const recommendations = buildOperationalRecommendations({
+      storeSnapshot,
+      metaOverview,
+    });
+
+    const reply = await generateOpenRouterStoreAssistantReply({
+      apiKey: openRouterApiKey,
+      model:
+        normalizeText(req.body?.model) ||
+        normalizeText(integration?.openrouter_model) ||
+        DEFAULT_OPENROUTER_MODEL,
+      siteUrl:
+        normalizeText(req.body?.site_url) ||
+        normalizeText(integration?.openrouter_site_url),
+      siteName:
+        normalizeText(req.body?.site_name) ||
+        normalizeText(integration?.openrouter_site_name),
+      message,
+      history: normalizeArray(req.body?.history),
+      storeSnapshot,
+      metaOverview,
+      recommendations,
+    });
+
+    if (integration?.id) {
+      await supabase
+        .from("meta_integrations")
+        .update({
+          is_openrouter_connected: true,
+          updated_by: req.user.id,
+        })
+        .eq("id", integration.id);
+    }
+
+    emitRealtimeEvent({
+      userIds: [req.user.id],
+      storeIds: [storeId],
+      payload: {
+        resource: "meta_analytics",
+        context: "assistant_replied",
+      },
+    });
+
+    return res.json({
+      success: true,
+      reply: {
+        model: reply.model,
+        content: reply.content,
+      },
+      store_snapshot: storeSnapshot,
+      recommendations,
+    });
+  } catch (error) {
+    return handleSchemaAwareError(
+      res,
+      error,
+      "Failed to generate AI assistant reply",
     );
   }
 });

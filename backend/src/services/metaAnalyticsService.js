@@ -649,6 +649,64 @@ export const fetchOpenRouterModels = async ({
   }));
 };
 
+const buildOpenRouterHeaders = ({
+  apiKey,
+  siteUrl = "",
+  siteName = "",
+}) => {
+  const headers = {
+    Authorization: `Bearer ${normalizeText(apiKey)}`,
+    "Content-Type": "application/json",
+  };
+
+  if (normalizeText(siteUrl)) {
+    headers["HTTP-Referer"] = normalizeText(siteUrl);
+  }
+
+  if (normalizeText(siteName)) {
+    headers["X-Title"] = normalizeText(siteName);
+  }
+
+  return headers;
+};
+
+const requestOpenRouterChatCompletion = async ({
+  apiKey,
+  model = DEFAULT_OPENROUTER_MODEL,
+  siteUrl = "",
+  siteName = "",
+  temperature = 0.2,
+  messages = [],
+}) => {
+  const response = await axios.post(
+    `${OPENROUTER_BASE_URL}/chat/completions`,
+    {
+      model: normalizeText(model) || DEFAULT_OPENROUTER_MODEL,
+      temperature,
+      messages: normalizeArray(messages).filter(
+        (message) =>
+          normalizeText(message?.role) &&
+          normalizeText(message?.content),
+      ),
+    },
+    {
+      headers: buildOpenRouterHeaders({
+        apiKey,
+        siteUrl,
+        siteName,
+      }),
+      timeout: OPENROUTER_TIMEOUT_MS,
+    },
+  );
+
+  const choice = response?.data?.choices?.[0];
+  return {
+    model: response?.data?.model || model,
+    content: normalizeText(choice?.message?.content),
+    raw: response?.data || {},
+  };
+};
+
 const buildAiPrompt = ({ overview, focus = "" }) => ({
   system: [
     "You are a senior performance marketing analyst.",
@@ -687,51 +745,112 @@ export const generateOpenRouterMetaAnalysis = async ({
   focus = "",
 }) => {
   const prompt = buildAiPrompt({ overview, focus });
-  const headers = {
-    Authorization: `Bearer ${normalizeText(apiKey)}`,
-    "Content-Type": "application/json",
-  };
-
-  if (normalizeText(siteUrl)) {
-    headers["HTTP-Referer"] = normalizeText(siteUrl);
-  }
-
-  if (normalizeText(siteName)) {
-    headers["X-Title"] = normalizeText(siteName);
-  }
-
-  const response = await axios.post(
-    `${OPENROUTER_BASE_URL}/chat/completions`,
-    {
-      model: normalizeText(model) || DEFAULT_OPENROUTER_MODEL,
-      temperature: 0.2,
-      messages: [
-        {
-          role: "system",
-          content: prompt.system,
-        },
-        {
-          role: "user",
-          content: prompt.user,
-        },
-      ],
-    },
-    {
-      headers,
-      timeout: OPENROUTER_TIMEOUT_MS,
-    },
-  );
-
-  const choice = response?.data?.choices?.[0];
-  const content = normalizeText(choice?.message?.content);
+  const completion = await requestOpenRouterChatCompletion({
+    apiKey,
+    model,
+    siteUrl,
+    siteName,
+    temperature: 0.2,
+    messages: [
+      {
+        role: "system",
+        content: prompt.system,
+      },
+      {
+        role: "user",
+        content: prompt.user,
+      },
+    ],
+  });
+  const content = completion.content;
 
   return {
-    model: response?.data?.model || model,
+    model: completion.model,
     prompt,
     content,
     parsed: extractFirstJsonObject(content),
-    raw: response?.data || {},
+    raw: completion.raw,
   };
 };
 
-export { DEFAULT_META_LOOKBACK_DAYS, DEFAULT_OPENROUTER_MODEL, normalizeAdAccountId, extractActionMetric };
+const sanitizeChatHistory = (history = []) =>
+  normalizeArray(history)
+    .slice(-8)
+    .map((entry) => ({
+      role:
+        normalizeText(entry?.role).toLowerCase() === "assistant"
+          ? "assistant"
+          : "user",
+      content: normalizeText(entry?.content),
+    }))
+    .filter((entry) => entry.content);
+
+export const generateOpenRouterStoreAssistantReply = async ({
+  apiKey,
+  model = DEFAULT_OPENROUTER_MODEL,
+  siteUrl = "",
+  siteName = "",
+  message = "",
+  history = [],
+  storeSnapshot = {},
+  metaOverview = {},
+  recommendations = [],
+}) => {
+  const normalizedMessage = normalizeText(message);
+  const prompt = {
+    system: [
+      "You are Tetiano AI, an internal commerce operations strategist.",
+      "You help store operators decide what to pause, scale, restock, follow up on, and fix next.",
+      "Use the provided store snapshot, Meta data, and recommendations only.",
+      "Reply in the same language as the user. Prefer Arabic when the user writes Arabic.",
+      "Be specific, operational, and concise.",
+      "When data is missing, say that clearly instead of inventing numbers.",
+    ].join(" "),
+    context: JSON.stringify(
+      {
+        store_snapshot: storeSnapshot || {},
+        meta_overview: metaOverview || {},
+        recommendations: normalizeArray(recommendations).slice(0, 8),
+      },
+      null,
+      2,
+    ),
+  };
+
+  const completion = await requestOpenRouterChatCompletion({
+    apiKey,
+    model,
+    siteUrl,
+    siteName,
+    temperature: 0.25,
+    messages: [
+      {
+        role: "system",
+        content: prompt.system,
+      },
+      {
+        role: "user",
+        content: `Context:\n${prompt.context}`,
+      },
+      ...sanitizeChatHistory(history),
+      {
+        role: "user",
+        content: normalizedMessage,
+      },
+    ],
+  });
+
+  return {
+    model: completion.model,
+    prompt,
+    content: completion.content,
+    raw: completion.raw,
+  };
+};
+
+export {
+  DEFAULT_META_LOOKBACK_DAYS,
+  DEFAULT_OPENROUTER_MODEL,
+  normalizeAdAccountId,
+  extractActionMetric,
+};

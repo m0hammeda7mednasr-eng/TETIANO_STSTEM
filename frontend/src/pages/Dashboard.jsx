@@ -55,6 +55,7 @@ const EMPTY_DASHBOARD_STATS = {
   total_customers: 0,
   low_stock_products: 0,
   orders_window_limit: 4500,
+  paid_orders_count: 0,
   avg_order_value: 0,
 };
 
@@ -498,65 +499,71 @@ export default function Dashboard() {
       [
         {
           id: "net-sales",
-          title: "Net Sales",
+          title: "Collected Net Sales",
           value: formatCurrency(stats.total_sales),
           subtitle: hasScopedOrderFilters
-            ? `Filtered paid sales after refunds inside latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`
-            : `Paid after refunds from latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`,
+            ? "Paid orders minus refunds inside the current filtered scope"
+            : "Paid orders minus refunds across all synced orders",
           icon: TrendingUp,
           color: "from-emerald-500 to-emerald-700",
-          actionLabel: canViewOrders ? "Open orders" : "",
+          actionLabel: canViewOrders ? "View orders" : "",
           onClick: canViewOrders ? () => navigate("/orders") : null,
         },
         {
           id: "order-value",
-          title: "Order Value",
+          title: "Gross Order Value",
           value: formatCurrency(stats.total_order_value),
           subtitle: hasScopedOrderFilters
-            ? `All matching orders inside latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`
-            : `Latest ${toNumber(stats.orders_window_limit).toLocaleString()} synced orders`,
+            ? "Gross order total before refunds inside the current filtered scope"
+            : "Gross order total before refunds across all synced orders",
           icon: TrendingUp,
           color: "from-amber-500 to-amber-700",
-          actionLabel: canViewOrders ? "Review orders" : "",
+          actionLabel: canViewOrders ? "View orders" : "",
           onClick: canViewOrders ? () => navigate("/orders") : null,
         },
         {
           id: "orders",
-          title: "Orders",
+          title: "Total Orders",
           value: toNumber(stats.total_orders).toLocaleString(),
-          subtitle: hasScopedOrderFilters ? "Matching current filters" : "",
+          subtitle: hasScopedOrderFilters
+            ? "Orders matching the current filter scope"
+            : "All synced orders in the current store",
           icon: ShoppingCart,
           color: "from-blue-500 to-blue-700",
-          actionLabel: canViewOrders ? "Open list" : "",
+          actionLabel: canViewOrders ? "View orders" : "",
           onClick: canViewOrders ? () => navigate("/orders") : null,
         },
         {
           id: "products",
           title: "Products",
           value: toNumber(stats.total_products).toLocaleString(),
-          subtitle: hasScopedOrderFilters ? "Referenced by matching orders" : "",
+          subtitle: hasScopedOrderFilters
+            ? "Products referenced by matching orders"
+            : "Total synced products in the catalog",
           icon: Package,
           color: "from-indigo-500 to-indigo-700",
-          actionLabel: canViewProducts ? "Open catalog" : "",
+          actionLabel: canViewProducts ? "View catalog" : "",
           onClick: canViewProducts ? () => navigate("/products") : null,
         },
         {
           id: "customers",
           title: "Customers",
           value: toNumber(stats.total_customers).toLocaleString(),
-          subtitle: hasScopedOrderFilters ? "Customers inside selected scope" : "",
+          subtitle: hasScopedOrderFilters
+            ? "Customers referenced by the current order scope"
+            : "Total synced customers in the store",
           icon: Users,
           color: "from-cyan-500 to-cyan-700",
-          actionLabel: canViewCustomers ? "Open customers" : "",
+          actionLabel: canViewCustomers ? "View customers" : "",
           onClick: canViewCustomers ? () => navigate("/customers") : null,
         },
         {
           id: "avg-order",
-          title: "Avg Order",
+          title: "Avg Paid Order",
           value: formatCurrency(stats.avg_order_value),
           subtitle: hasScopedOrderFilters
-            ? "Average net sales for matching paid orders"
-            : "Net sales average",
+            ? `Net sales divided by ${toNumber(stats.paid_orders_count).toLocaleString()} paid orders in scope`
+            : `Net sales divided by ${toNumber(stats.paid_orders_count).toLocaleString()} paid orders`,
           icon: TrendingUp,
           color: "from-violet-500 to-violet-700",
         },
@@ -585,6 +592,7 @@ export default function Dashboard() {
       navigate,
       stats.avg_order_value,
       stats.low_stock_products,
+      stats.paid_orders_count,
       stats.orders_window_limit,
       stats.total_customers,
       stats.total_order_value,

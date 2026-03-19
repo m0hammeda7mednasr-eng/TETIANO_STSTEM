@@ -35,7 +35,7 @@ const MyTasks = lazy(() => import("./pages/MyTasks"));
 const ActivityLog = lazy(() => import("./pages/ActivityLog"));
 const NetProfit = lazy(() => import("./pages/NetProfit"));
 const Analytics = lazy(() => import("./pages/Analytics"));
-const MetaAnalytics = lazy(() => import("./pages/MetaAnalytics"));
+const MetaAnalytics = lazy(() => import("./pages/MetaCommandCenter"));
 const AdminPage = lazy(() => import("./pages/Admin"));
 
 function RouteFallback() {

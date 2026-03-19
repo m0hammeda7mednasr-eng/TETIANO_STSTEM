@@ -1052,14 +1052,7 @@ router.get("/stats", authenticateToken, async (req, res) => {
       }),
     ]);
 
-    const recentOrdersWindow = sortOrdersByCreatedAtDesc(orders).slice(
-      0,
-      DASHBOARD_ORDER_VISIBLE_LIMIT,
-    );
-    const filteredOrders = filterOrdersByScope(
-      recentOrdersWindow,
-      req.query || {},
-    );
+    const filteredOrders = filterOrdersByScope(orders, req.query || {});
     const saleOrders = filteredOrders.filter(
       (order) => getOrderNetSalesAmount(order) > 0,
     );
@@ -1091,6 +1084,7 @@ router.get("/stats", authenticateToken, async (req, res) => {
       total_customers: filteredEntitySummary.totalCustomers,
       low_stock_products: lowStockProductsCount,
       orders_window_limit: DASHBOARD_ORDER_VISIBLE_LIMIT,
+      paid_orders_count: saleOrders.length,
       avg_order_value:
         saleOrders.length > 0
           ? parseFloat((totalSales / saleOrders.length).toFixed(2))

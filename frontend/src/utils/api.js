@@ -7,6 +7,7 @@ const DEFAULT_API_TIMEOUT_MS = 60 * 1000;
 const SHOPIFY_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
 const META_SYNC_TIMEOUT_MS = 3 * 60 * 1000;
 const META_ANALYSIS_TIMEOUT_MS = 2 * 60 * 1000;
+const META_CHAT_TIMEOUT_MS = 2 * 60 * 1000;
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -197,6 +198,10 @@ export const metaAnalyticsAPI = {
   analyze: (data = {}) =>
     api.post("/meta-analytics/analyze", data, {
       timeout: META_ANALYSIS_TIMEOUT_MS,
+    }),
+  chat: (data = {}) =>
+    api.post("/meta-analytics/assistant/chat", data, {
+      timeout: META_CHAT_TIMEOUT_MS,
     }),
 };
 

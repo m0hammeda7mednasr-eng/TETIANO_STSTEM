@@ -20,6 +20,8 @@ import {
   Tags,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
 import { warehouseAPI } from "../utils/api";
 import { formatCurrency, formatDateTime } from "../utils/helpers";
 import { fetchAllPagesProgressively } from "../utils/pagination";
@@ -131,6 +133,8 @@ const getCodeSourceLabel = (row) => {
 
 export default function WarehouseStock() {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const { isRTL, select } = useLocale();
   const [rows, setRows] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
@@ -242,6 +246,10 @@ export default function WarehouseStock() {
   }, [filteredRows]);
 
   const openScanner = (row, mode = "") => {
+    if (!hasPermission("can_edit_products")) {
+      return;
+    }
+
     const code = String(row?.warehouse_code || "").trim();
     if (!code) {
       return;
@@ -253,6 +261,10 @@ export default function WarehouseStock() {
     }
     navigate(`/warehouse/scanner?${params.toString()}`);
   };
+  const tableAlignClass = isRTL ? "text-right" : "text-left";
+  const searchIconPositionClass = isRTL ? "right-3" : "left-3";
+  const searchInputPaddingClass = isRTL ? "pr-8 pl-3" : "pl-8 pr-3";
+  const canManageWarehouse = hasPermission("can_edit_products");
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -265,17 +277,18 @@ export default function WarehouseStock() {
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <h1 className="text-3xl font-bold text-slate-900">
-                    Warehouse Stock
+                    {select("مخزون المخزن", "Warehouse Stock")}
                   </h1>
                   <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-600">
-                    Every Shopify variant is listed here with a warehouse code
-                    ready for scanning. The scanner can work with SKU, barcode,
-                    or a generated internal code when product data is incomplete.
+                    {select(
+                      "كل فاريانت من Shopify ظاهر هنا مع كود مخزني جاهز للمسح. الماسح يقدر يشتغل بـ SKU أو الباركود أو كود داخلي بديل عند نقص البيانات.",
+                      "Every Shopify variant is listed here with a warehouse code ready for scanning. The scanner can work with SKU, barcode, or a generated internal code when product data is incomplete.",
+                    )}
                   </p>
                   {lastUpdatedAt && (
                     <div className="mt-3 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
                       <Clock3 size={12} />
-                      Last refresh {formatDateTime(lastUpdatedAt)}
+                      {select("آخر تحديث", "Last refresh")} {formatDateTime(lastUpdatedAt)}
                     </div>
                   )}
                 </div>
@@ -286,23 +299,32 @@ export default function WarehouseStock() {
                   className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-800"
                 >
                   <RefreshCw size={18} />
-                  Refresh
+                  {select("تحديث", "Refresh")}
                 </button>
               </div>
             </div>
 
             <div className="grid gap-3 border-t border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600 sm:grid-cols-3">
               <InsightBanner
-                label="Catalog Scope"
-                value="The page shows every Shopify variant, not only rows that already have warehouse movements."
+                label={select("نطاق الكتالوج", "Catalog Scope")}
+                value={select(
+                  "الصفحة تعرض كل فاريانتات Shopify، وليس فقط الصفوف التي لها حركات مخزنية بالفعل.",
+                  "The page shows every Shopify variant, not only rows that already have warehouse movements.",
+                )}
               />
               <InsightBanner
-                label="Warehouse Code"
-                value="Scanner code priority is SKU, then barcode, then an internal fallback code."
+                label={select("كود المخزن", "Warehouse Code")}
+                value={select(
+                  "أولوية كود المسح هي SKU ثم الباركود ثم الكود الداخلي البديل.",
+                  "Scanner code priority is SKU, then barcode, then an internal fallback code.",
+                )}
               />
               <InsightBanner
-                label="Quick Actions"
-                value="Use In, Out, or Open to jump straight to the scanner with the chosen product code."
+                label={select("إجراءات سريعة", "Quick Actions")}
+                value={select(
+                  "استخدم إدخال أو إخراج أو فتح للانتقال مباشرة إلى الماسح بالكود المختار.",
+                  "Use In, Out, or Open to jump straight to the scanner with the chosen product code.",
+                )}
               />
             </div>
           </div>
@@ -318,10 +340,15 @@ export default function WarehouseStock() {
             <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
               <ShieldAlert size={18} className="mt-0.5 shrink-0" />
               <div>
-                <p className="font-semibold">Warehouse setup required</p>
+                <p className="font-semibold">
+                  {select("إعداد المخزن مطلوب", "Warehouse setup required")}
+                </p>
                 <p className="mt-1 text-sm">
-                  {setupNotice}. The stock view stays readable, but scan actions
-                  will not work until the warehouse tables are available.
+                  {setupNotice}.{" "}
+                  {select(
+                    "عرض المخزون يظل متاحًا، لكن إجراءات المسح لن تعمل حتى يتم إنشاء جداول المخزن.",
+                    "The stock view stays readable, but scan actions will not work until the warehouse tables are available.",
+                  )}
                 </p>
               </div>
             </div>
@@ -329,31 +356,31 @@ export default function WarehouseStock() {
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
             <SummaryCard
-              title="Variants"
+              title={select("الفاريانتات", "Variants")}
               value={formatCount(summary.totalVariants)}
               tone="blue"
               icon={Tags}
             />
             <SummaryCard
-              title="Warehouse Units"
+              title={select("وحدات المخزن", "Warehouse Units")}
               value={formatCount(summary.warehouseUnits)}
               tone="emerald"
               icon={Store}
             />
             <SummaryCard
-              title="Need Review"
+              title={select("تحتاج مراجعة", "Need Review")}
               value={formatCount(summary.mismatched)}
               tone="amber"
               icon={ShieldAlert}
             />
             <SummaryCard
-              title="Zero Or Less"
+              title={select("صفر أو أقل", "Zero Or Less")}
               value={formatCount(summary.zeroStock)}
               tone="red"
               icon={AlertCircle}
             />
             <SummaryCard
-              title="Archived Codes"
+              title={select("أكواد مؤرشفة", "Archived Codes")}
               value={formatCount(summary.archived)}
               tone="slate"
               icon={Package}
@@ -364,56 +391,62 @@ export default function WarehouseStock() {
             <div className="flex flex-col gap-4 border-b border-slate-200 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Variant Inventory
+                  {select("جرد الفاريانتات", "Variant Inventory")}
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Compare Shopify inventory against warehouse movements for the
-                  same warehouse code.
+                  {select(
+                    "قارن مخزون Shopify بحركات المخزن لنفس الكود المخزني.",
+                    "Compare Shopify inventory against warehouse movements for the same warehouse code.",
+                  )}
                 </p>
               </div>
 
               <div className="relative w-full lg:w-96">
                 <Search
-                  className="absolute left-3 top-2.5 text-slate-400"
+                  className={`absolute top-2.5 text-slate-400 ${searchIconPositionClass}`}
                   size={16}
                 />
                 <input
                   type="text"
                   value={searchTerm}
                   onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="Search product, variant, code, SKU, barcode, or vendor"
-                  className="w-full rounded-xl border border-slate-200 py-2 pl-8 pr-3 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  placeholder={select(
+                    "ابحث بالمنتج أو الفاريانت أو الكود أو SKU أو الباركود أو المورد",
+                    "Search product, variant, code, SKU, barcode, or vendor",
+                  )}
+                  className={`w-full rounded-xl border border-slate-200 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500 ${searchInputPaddingClass}`}
                 />
               </div>
             </div>
 
             <div className="border-b border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-600">
-              Showing {formatCount(filteredRows.length)} rows out of {formatCount(rows.length)}.
+              {select("عرض", "Showing")} {formatCount(filteredRows.length)}{" "}
+              {select("صفًا من أصل", "rows out of")} {formatCount(rows.length)}.
             </div>
 
             <div className="p-4 sm:p-5">
               {loading ? (
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
-                  Loading warehouse stock...
+                  {select("جارٍ تحميل مخزون المخزن...", "Loading warehouse stock...")}
                 </div>
               ) : filteredRows.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
-                  No variants match the current search.
+                  {select("لا توجد فاريانتات مطابقة للبحث الحالي.", "No variants match the current search.")}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="min-w-full text-right text-sm">
+                  <table className={`min-w-full text-sm ${tableAlignClass}`}>
                     <thead>
                       <tr className="bg-slate-50 text-slate-600">
-                        <th className="px-4 py-3 font-semibold">Variant</th>
-                        <th className="px-4 py-3 font-semibold">Code</th>
-                        <th className="px-4 py-3 font-semibold">Price</th>
-                        <th className="px-4 py-3 font-semibold">Warehouse</th>
+                        <th className="px-4 py-3 font-semibold">{select("الفاريانت", "Variant")}</th>
+                        <th className="px-4 py-3 font-semibold">{select("الكود", "Code")}</th>
+                        <th className="px-4 py-3 font-semibold">{select("السعر", "Price")}</th>
+                        <th className="px-4 py-3 font-semibold">{select("المخزن", "Warehouse")}</th>
                         <th className="px-4 py-3 font-semibold">Shopify</th>
-                        <th className="px-4 py-3 font-semibold">Difference</th>
-                        <th className="px-4 py-3 font-semibold">Last Movement</th>
-                        <th className="px-4 py-3 font-semibold">Status</th>
-                        <th className="px-4 py-3 font-semibold">Scanner</th>
+                        <th className="px-4 py-3 font-semibold">{select("الفرق", "Difference")}</th>
+                        <th className="px-4 py-3 font-semibold">{select("آخر حركة", "Last Movement")}</th>
+                        <th className="px-4 py-3 font-semibold">{select("الحالة", "Status")}</th>
+                        <th className="px-4 py-3 font-semibold">{select("الماسح", "Scanner")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -462,7 +495,7 @@ export default function WarehouseStock() {
                                 SKU: {row?.sku || "-"}
                               </div>
                               <div className="mt-1 text-xs text-slate-500">
-                                Barcode: {row?.barcode || "-"}
+                                {select("باركود", "Barcode")}: {row?.barcode || "-"}
                               </div>
                               <div className="mt-1 text-xs text-slate-500">
                                 {getCodeSourceLabel(row)}
@@ -488,7 +521,9 @@ export default function WarehouseStock() {
                               <div>{formatDateTime(row.last_scanned_at)}</div>
                               {row.last_movement_type ? (
                                 <div className="mt-1 text-xs text-slate-500">
-                                  {row.last_movement_type === "in" ? "In" : "Out"}
+                                  {row.last_movement_type === "in"
+                                    ? select("إدخال", "In")
+                                    : select("إخراج", "Out")}
                                   {row.last_movement_quantity
                                     ? ` | ${formatCount(row.last_movement_quantity)}`
                                     : ""}
@@ -498,14 +533,26 @@ export default function WarehouseStock() {
                             <td className="px-4 py-3">
                               <div className="space-y-2">
                                 {row?.is_archived ? (
-                                  <Badge tone="slate" label="Archived code" />
+                                  <Badge
+                                    tone="slate"
+                                    label={select("كود مؤرشف", "Archived code")}
+                                  />
                                 ) : null}
                                 {difference === 0 ? (
-                                  <Badge tone="emerald" label="Matched" />
+                                  <Badge
+                                    tone="emerald"
+                                    label={select("متطابق", "Matched")}
+                                  />
                                 ) : difference > 0 ? (
-                                  <Badge tone="sky" label="Warehouse higher" />
+                                  <Badge
+                                    tone="sky"
+                                    label={select("المخزن أعلى", "Warehouse higher")}
+                                  />
                                 ) : (
-                                  <Badge tone="amber" label="Shopify higher" />
+                                  <Badge
+                                    tone="amber"
+                                    label={select("Shopify أعلى", "Shopify higher")}
+                                  />
                                 )}
                               </div>
                             </td>
@@ -514,29 +561,29 @@ export default function WarehouseStock() {
                                 <button
                                   type="button"
                                   onClick={() => openScanner(row, "in")}
-                                  disabled={!row?.warehouse_code}
+                                  disabled={!canManageWarehouse || !row?.warehouse_code}
                                   className="inline-flex items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   <ArrowDown size={13} />
-                                  In
+                                  {select("إدخال", "In")}
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => openScanner(row, "out")}
-                                  disabled={!row?.warehouse_code}
+                                  disabled={!canManageWarehouse || !row?.warehouse_code}
                                   className="inline-flex items-center justify-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   <ArrowUp size={13} />
-                                  Out
+                                  {select("إخراج", "Out")}
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => openScanner(row)}
-                                  disabled={!row?.warehouse_code}
+                                  disabled={!canManageWarehouse || !row?.warehouse_code}
                                   className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   <ScanLine size={13} />
-                                  Open
+                                  {select("فتح", "Open")}
                                 </button>
                               </div>
                             </td>

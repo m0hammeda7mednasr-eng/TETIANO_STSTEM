@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { getNestedLocaleValue } from "../i18n/appStrings";
+import { decodeMaybeMojibake } from "../utils/text";
 
 const LOCALE_STORAGE_KEY = "tetiano_locale";
 const LOCALE_TO_LANGUAGE_TAG = {
@@ -73,10 +74,10 @@ export function LocaleProvider({ children }) {
       },
       t: (key, fallback = "") => {
         const resolved = getNestedLocaleValue(locale, key);
-        return resolved === undefined ? fallback : resolved;
+        return decodeMaybeMojibake(resolved === undefined ? fallback : resolved);
       },
       select: (arabicValue, englishValue) =>
-        isArabic ? arabicValue : englishValue,
+        decodeMaybeMojibake(isArabic ? arabicValue : englishValue),
       formatDateTime: (value, options = {}) => {
         if (!value) {
           return "-";

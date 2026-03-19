@@ -1,9 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
 import { Lock, Mail, User } from "lucide-react";
 import { useLocale } from "../context/LocaleContext";
 import LanguageToggle from "../components/LanguageToggle";
+import { authAPI, getErrorMessage } from "../utils/api";
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -15,7 +15,7 @@ export default function Register() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { isRTL, t } = useLocale();
+  const { isRTL, select, t } = useLocale();
 
   const iconPositionClass = isRTL ? "right-3" : "left-3";
   const inputPaddingClass = isRTL ? "pr-10 pl-4" : "pl-10 pr-4";
@@ -51,7 +51,7 @@ export default function Register() {
         return;
       }
 
-      const response = await axios.post("/api/auth/register", {
+      const response = await authAPI.register({
         name: formData.name,
         email: formData.email,
         password: formData.password,
@@ -59,16 +59,20 @@ export default function Register() {
 
       localStorage.setItem("token", response.data.token);
       localStorage.setItem("user", JSON.stringify(response.data.user));
+      localStorage.setItem(
+        "permissions",
+        JSON.stringify(response.data.permissions || {}),
+      );
       navigate("/dashboard");
     } catch (requestError) {
       console.error("Registration error:", requestError);
-      const errorMessage =
-        requestError.response?.data?.error ||
-        t(
-          "auth.registerFailed",
-          "Failed to create account. Please try again.",
-        );
-      setError(errorMessage);
+      setError(
+        getErrorMessage(requestError) ||
+          t(
+            "auth.registerFailed",
+            "Failed to create account. Please try again.",
+          ),
+      );
     } finally {
       setLoading(false);
     }
@@ -88,6 +92,13 @@ export default function Register() {
           <p className="mt-2 text-gray-600">
             {t("auth.registerSubtitle", "Join the store management system")}
           </p>
+        </div>
+
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {select(
+            "التسجيل الذاتي متاح فقط لإنشاء أول حساب في النظام أو إذا قامت الإدارة بتفعيله.",
+            "Self-registration is available only for the first system account or when enabled by an admin.",
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

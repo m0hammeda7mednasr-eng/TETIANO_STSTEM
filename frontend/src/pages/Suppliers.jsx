@@ -21,6 +21,7 @@ import { formatCurrency, formatDateTime } from "../utils/helpers";
 import { fetchAllPages } from "../utils/pagination";
 import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
+import { decodeMaybeMojibake } from "../utils/text";
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: "bank_transfer", label: "تحويل بنكي" },
@@ -283,12 +284,20 @@ const formatDeliveryItemTypeLabel = (value) =>
   DELIVERY_ITEM_TYPE_LABELS[normalizeDeliveryItemType(value)] || "موديل";
 const formatDeliveryMeasurementUnitLabel = (value) =>
   DELIVERY_MEASUREMENT_UNIT_LABELS[normalizeDeliveryMeasurementUnit(value)] || "قطعة";
+const NORMALIZED_SUPPLIER_UI_TRANSLATIONS = Object.fromEntries(
+  Object.entries(SUPPLIER_UI_TRANSLATIONS.en).map(([source, translation]) => [
+    decodeMaybeMojibake(source),
+    decodeMaybeMojibake(translation),
+  ]),
+);
 const translateSupplierUiText = (value, locale = "ar") => {
-  if (locale !== "en" || typeof value !== "string") {
-    return value;
+  const decodedValue = decodeMaybeMojibake(value);
+
+  if (locale !== "en" || typeof decodedValue !== "string") {
+    return decodedValue;
   }
 
-  return SUPPLIER_UI_TRANSLATIONS.en[value] || value;
+  return NORMALIZED_SUPPLIER_UI_TRANSLATIONS[decodedValue] || decodedValue;
 };
 const getSupplierViewType = (pathname = "") =>
   pathname === "/suppliers/fabric-suppliers" ? "fabric" : "factory";

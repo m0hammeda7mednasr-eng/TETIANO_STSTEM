@@ -118,7 +118,7 @@ const buildSharedNav = (t, select) => [
         icon: Activity,
         label: t("sidebar.scanner", "Scanner"),
         path: "/warehouse/scanner",
-        permission: "can_view_products",
+        permission: "can_edit_products",
       },
     ],
   },

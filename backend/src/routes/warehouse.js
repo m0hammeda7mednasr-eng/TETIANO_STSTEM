@@ -589,9 +589,9 @@ const writeActivityLog = async ({
   }
 };
 
-router.use(authenticateToken, requirePermission("can_view_products"));
+router.use(authenticateToken);
 
-router.get("/stock", async (req, res) => {
+router.get("/stock", requirePermission("can_view_products"), async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     const pagination = getPagination(req.query);
@@ -649,7 +649,7 @@ router.get("/stock", async (req, res) => {
   }
 });
 
-router.get("/scans", async (req, res) => {
+router.get("/scans", requirePermission("can_view_products"), async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     const pagination = getPagination(req.query);
@@ -695,7 +695,7 @@ router.get("/scans", async (req, res) => {
   }
 });
 
-router.post("/scan", async (req, res) => {
+router.post("/scan", requirePermission("can_edit_products"), async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     const movementType = String(req.body?.movement_type || "").trim().toLowerCase();

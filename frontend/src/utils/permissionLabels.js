@@ -1,9 +1,11 @@
+import { decodeMaybeMojibake } from "./text";
+
 const PERMISSION_COPY = {
   ar: {
     labels: {
       can_view_dashboard: "عرض لوحة التحكم",
       can_view_products: "عرض المنتجات والموردين والمخزن",
-      can_edit_products: "إدارة المنتجات والموردين",
+      can_edit_products: "إدارة المنتجات والموردين وحركات المخزن",
       can_view_orders: "عرض الطلبات",
       can_edit_orders: "تعديل الطلبات",
       can_view_customers: "عرض العملاء",
@@ -19,9 +21,9 @@ const PERMISSION_COPY = {
       can_view_dashboard:
         "يعرض لوحة التحكم والإحصائيات الرئيسية للمتجر.",
       can_view_products:
-        "يعرض المنتجات وتفاصيلها وتحليل المنتجات والموردين والمخزن والسكانر.",
+        "يعرض المنتجات وتفاصيلها وتحليل المنتجات والموردين وشاشات المخزن.",
       can_edit_products:
-        "يسمح بتعديل المنتجات وSKU والسعر والمخزون، وإدارة الموردين وحركات المخزن.",
+        "يسمح بتعديل المنتجات وSKU والسعر والمخزون، وإدارة الموردين وحركات المخزن بما فيها الماسح.",
       can_view_orders:
         "يعرض الطلبات والطلبات المفقودة وتفاصيل الطلب وصور المنتجات داخل الطلب.",
       can_edit_orders:
@@ -48,7 +50,7 @@ const PERMISSION_COPY = {
     labels: {
       can_view_dashboard: "View Dashboard",
       can_view_products: "View Products, Suppliers, and Warehouse",
-      can_edit_products: "Manage Products and Suppliers",
+      can_edit_products: "Manage Products, Suppliers, and Warehouse Movements",
       can_view_orders: "View Orders",
       can_edit_orders: "Edit Orders",
       can_view_customers: "View Customers",
@@ -64,7 +66,7 @@ const PERMISSION_COPY = {
       can_view_dashboard:
         "Shows the main dashboard and key store metrics.",
       can_view_products:
-        "Shows products, product details, product analysis, suppliers, warehouse, and scanner views.",
+        "Shows products, product details, product analysis, suppliers, and warehouse views.",
       can_edit_products:
         "Allows editing products, SKU, price, stock, suppliers, and warehouse movements.",
       can_view_orders:
@@ -102,18 +104,18 @@ const buildFallbackLabel = (key) =>
 
 export const getPermissionLabel = (key, locale = "ar") => {
   const normalizedLocale = normalizeLocale(locale);
-  return (
+  return decodeMaybeMojibake(
     PERMISSION_COPY[normalizedLocale]?.labels?.[key] ||
-    PERMISSION_COPY.ar.labels?.[key] ||
-    buildFallbackLabel(key)
+      PERMISSION_COPY.ar.labels?.[key] ||
+      buildFallbackLabel(key),
   );
 };
 
 export const getPermissionDescription = (key, locale = "ar") => {
   const normalizedLocale = normalizeLocale(locale);
-  return (
+  return decodeMaybeMojibake(
     PERMISSION_COPY[normalizedLocale]?.descriptions?.[key] ||
-    PERMISSION_COPY.ar.descriptions?.[key] ||
-    ""
+      PERMISSION_COPY.ar.descriptions?.[key] ||
+      "",
   );
 };

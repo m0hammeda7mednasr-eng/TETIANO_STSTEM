@@ -13,6 +13,7 @@ import {
 import api from "../utils/api";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
@@ -107,7 +108,9 @@ const isCustomersRelatedSharedUpdate = (event) => {
 
 export default function Customers() {
   const { hasPermission } = useAuth();
+  const { isRTL, select } = useLocale();
   const canViewOrders = hasPermission("can_view_orders");
+  const tableHeaderAlignClass = isRTL ? "text-right" : "text-left";
   const cacheKey = useMemo(
     () => buildStoreScopedCacheKey("customers:list"),
     [],
@@ -608,26 +611,26 @@ export default function Customers() {
               <table className="data-table w-full min-w-[980px]">
                 <thead>
                   <tr className="bg-slate-50 border-b">
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                      Name
+                    <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}>
+                      {select("الاسم", "Name")}
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                      Email
+                    <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}>
+                      {select("البريد الإلكتروني", "Email")}
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                      Phone
+                    <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}>
+                      {select("الهاتف", "Phone")}
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                      Location
+                    <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}>
+                      {select("الموقع", "Location")}
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                      Orders
+                    <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}>
+                      {select("الطلبات", "Orders")}
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                      Total Spent
+                    <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}>
+                      {select("إجمالي الإنفاق", "Total Spent")}
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                      Joined
+                    <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}>
+                      {select("تاريخ الانضمام", "Joined")}
                     </th>
                   </tr>
                 </thead>
@@ -635,7 +638,10 @@ export default function Customers() {
                   {loadStatus.active && customers.length === 0 ? (
                     <tr>
                       <td colSpan="7" className="px-6 py-10 text-center text-slate-500">
-                        Saved customers will appear here automatically as soon as the first batch is ready.
+                        {select(
+                          "سيظهر العملاء المحفوظون هنا تلقائيًا بمجرد جاهزية أول دفعة.",
+                          "Saved customers will appear here automatically as soon as the first batch is ready.",
+                        )}
                       </td>
                     </tr>
                   ) : filteredCustomers.length > 0 ? (

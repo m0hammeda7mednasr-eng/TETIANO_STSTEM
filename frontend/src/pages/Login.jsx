@@ -16,7 +16,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { refreshAuth } = useAuth();
-  const { isRTL, t } = useLocale();
+  const { isRTL, select, t } = useLocale();
 
   const iconPositionClass = isRTL ? "right-3" : "left-3";
   const inputPaddingClass = isRTL ? "pr-10 pl-4" : "pl-10 pr-4";
@@ -142,6 +142,12 @@ export default function Login() {
           <a href="/register" className="font-medium text-blue-600 hover:underline">
             {t("auth.createAccount", "Create one")}
           </a>
+        </p>
+        <p className="mt-2 text-center text-xs text-gray-500">
+          {select(
+            "التسجيل الذاتي يظل متاحًا فقط أثناء الإعداد الأولي أو إذا قامت الإدارة بتفعيله.",
+            "Self-registration stays available only during initial setup or when the admin enables it.",
+          )}
         </p>
       </div>
     </div>

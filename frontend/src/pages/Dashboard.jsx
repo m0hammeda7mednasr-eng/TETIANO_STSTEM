@@ -14,6 +14,11 @@ import {
 } from "lucide-react";
 import api, { getErrorMessage, shopifyAPI } from "../utils/api";
 import Sidebar from "../components/Sidebar";
+import {
+  SkeletonBlock,
+  StatCardSkeleton,
+  TableSkeleton,
+} from "../components/Common";
 import OrderInsightsFilterBar from "../components/OrderInsightsFilterBar";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
@@ -48,6 +53,7 @@ const EMPTY_DASHBOARD_STATS = {
   total_orders: 0,
   total_products: 0,
   total_customers: 0,
+  low_stock_products: 0,
   orders_window_limit: 4500,
   avg_order_value: 0,
 };
@@ -114,7 +120,9 @@ export default function Dashboard() {
 
   const isAdmin = user?.role === "admin";
   const canManageSettings = hasPermission("can_manage_settings");
+  const canViewProducts = hasPermission("can_view_products");
   const canViewOrders = hasPermission("can_view_orders");
+  const canViewCustomers = hasPermission("can_view_customers");
   const canManageUsers = hasPermission("can_manage_users");
   const canViewAllReports = hasPermission("can_view_all_reports");
   const [scopeFilters, setScopeFilters] = useState(INITIAL_ORDER_SCOPE_FILTERS);
@@ -161,7 +169,7 @@ export default function Dashboard() {
     };
   }, [cacheKey]);
 
-  const [, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(
@@ -475,6 +483,117 @@ export default function Dashboard() {
     return items.filter((item) => item.visible);
   }, [canManageUsers, hasPermission, isAdmin, pendingRequestsCount]);
 
+  const initialDashboardLoad = useMemo(
+    () =>
+      loading &&
+      !lastUpdatedAt &&
+      recentOrders.length === 0 &&
+      pendingRequests.length === 0 &&
+      recentReports.length === 0,
+    [lastUpdatedAt, loading, pendingRequests.length, recentOrders.length, recentReports.length],
+  );
+
+  const statCards = useMemo(
+    () =>
+      [
+        {
+          id: "net-sales",
+          title: "Net Sales",
+          value: formatCurrency(stats.total_sales),
+          subtitle: hasScopedOrderFilters
+            ? `Filtered paid sales after refunds inside latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`
+            : `Paid after refunds from latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`,
+          icon: TrendingUp,
+          color: "from-emerald-500 to-emerald-700",
+          actionLabel: canViewOrders ? "Open orders" : "",
+          onClick: canViewOrders ? () => navigate("/orders") : null,
+        },
+        {
+          id: "order-value",
+          title: "Order Value",
+          value: formatCurrency(stats.total_order_value),
+          subtitle: hasScopedOrderFilters
+            ? `All matching orders inside latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`
+            : `Latest ${toNumber(stats.orders_window_limit).toLocaleString()} synced orders`,
+          icon: TrendingUp,
+          color: "from-amber-500 to-amber-700",
+          actionLabel: canViewOrders ? "Review orders" : "",
+          onClick: canViewOrders ? () => navigate("/orders") : null,
+        },
+        {
+          id: "orders",
+          title: "Orders",
+          value: toNumber(stats.total_orders).toLocaleString(),
+          subtitle: hasScopedOrderFilters ? "Matching current filters" : "",
+          icon: ShoppingCart,
+          color: "from-blue-500 to-blue-700",
+          actionLabel: canViewOrders ? "Open list" : "",
+          onClick: canViewOrders ? () => navigate("/orders") : null,
+        },
+        {
+          id: "products",
+          title: "Products",
+          value: toNumber(stats.total_products).toLocaleString(),
+          subtitle: hasScopedOrderFilters ? "Referenced by matching orders" : "",
+          icon: Package,
+          color: "from-indigo-500 to-indigo-700",
+          actionLabel: canViewProducts ? "Open catalog" : "",
+          onClick: canViewProducts ? () => navigate("/products") : null,
+        },
+        {
+          id: "customers",
+          title: "Customers",
+          value: toNumber(stats.total_customers).toLocaleString(),
+          subtitle: hasScopedOrderFilters ? "Customers inside selected scope" : "",
+          icon: Users,
+          color: "from-cyan-500 to-cyan-700",
+          actionLabel: canViewCustomers ? "Open customers" : "",
+          onClick: canViewCustomers ? () => navigate("/customers") : null,
+        },
+        {
+          id: "avg-order",
+          title: "Avg Order",
+          value: formatCurrency(stats.avg_order_value),
+          subtitle: hasScopedOrderFilters
+            ? "Average net sales for matching paid orders"
+            : "Net sales average",
+          icon: TrendingUp,
+          color: "from-violet-500 to-violet-700",
+        },
+        canViewProducts
+          ? {
+              id: "low-stock",
+              title: "Low Stock",
+              value: toNumber(stats.low_stock_products).toLocaleString(),
+              subtitle:
+                toNumber(stats.low_stock_products) > 0
+                  ? "Catalog-wide items below 10 units need attention"
+                  : "No low-stock items need action right now",
+              icon: AlertCircle,
+              color: "from-rose-500 to-rose-700",
+              actionLabel:
+                toNumber(stats.low_stock_products) > 0 ? "Review low stock" : "Catalog healthy",
+              onClick: () => navigate("/products?stockStatus=low_stock"),
+            }
+          : null,
+      ].filter(Boolean),
+    [
+      canViewOrders,
+      canViewCustomers,
+      canViewProducts,
+      hasScopedOrderFilters,
+      navigate,
+      stats.avg_order_value,
+      stats.low_stock_products,
+      stats.orders_window_limit,
+      stats.total_customers,
+      stats.total_order_value,
+      stats.total_orders,
+      stats.total_products,
+      stats.total_sales,
+    ],
+  );
+
   const handleSync = async () => {
     if (!canManageSettings) return;
 
@@ -560,6 +679,33 @@ export default function Dashboard() {
             </div>
           )}
 
+          {canViewProducts &&
+            toNumber(stats.low_stock_products) > 0 &&
+            !initialDashboardLoad && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 shadow-sm">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="mt-0.5 rounded-full bg-amber-100 p-2 text-amber-700">
+                    <AlertCircle size={18} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {toNumber(stats.low_stock_products).toLocaleString()} items need stock attention
+                    </p>
+                    <p className="mt-1 text-xs text-amber-800/90">
+                      Low-stock alerts are generated automatically and sent to product owners.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate("/products?stockStatus=low_stock")}
+                  className="inline-flex items-center rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+                >
+                  Review low stock
+                </button>
+              </div>
+            )}
+
           <OrderInsightsFilterBar
             filters={scopeFilters}
             onChange={setScopeFilters}
@@ -572,80 +718,41 @@ export default function Dashboard() {
           />
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
-            <StatCard
-              title="Net Sales"
-              value={formatCurrency(stats.total_sales)}
-              subtitle={
-                hasScopedOrderFilters
-                  ? `Filtered paid sales after refunds inside latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`
-                  : `Paid after refunds from latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`
-              }
-              icon={TrendingUp}
-              color="from-emerald-500 to-emerald-700"
-            />
-            <StatCard
-              title="Order Value"
-              value={formatCurrency(stats.total_order_value)}
-              subtitle={
-                hasScopedOrderFilters
-                  ? `All matching orders inside latest ${toNumber(stats.orders_window_limit).toLocaleString()} orders`
-                  : `Latest ${toNumber(stats.orders_window_limit).toLocaleString()} synced orders`
-              }
-              icon={TrendingUp}
-              color="from-amber-500 to-amber-700"
-            />
-            <StatCard
-              title="Orders"
-              value={toNumber(stats.total_orders).toLocaleString()}
-              subtitle={hasScopedOrderFilters ? "Matching current filters" : ""}
-              icon={ShoppingCart}
-              color="from-blue-500 to-blue-700"
-            />
-            <StatCard
-              title="Products"
-              value={toNumber(stats.total_products).toLocaleString()}
-              subtitle={
-                hasScopedOrderFilters ? "Referenced by matching orders" : ""
-              }
-              icon={Package}
-              color="from-indigo-500 to-indigo-700"
-            />
-            <StatCard
-              title="Customers"
-              value={toNumber(stats.total_customers).toLocaleString()}
-              subtitle={
-                hasScopedOrderFilters ? "Customers inside selected scope" : ""
-              }
-              icon={Users}
-              color="from-cyan-500 to-cyan-700"
-            />
-            <StatCard
-              title="Avg Order"
-              value={formatCurrency(stats.avg_order_value)}
-              subtitle={
-                hasScopedOrderFilters
-                  ? "Average net sales for matching paid orders"
-                  : "Net sales average"
-              }
-              icon={TrendingUp}
-              color="from-violet-500 to-violet-700"
-            />
+            {initialDashboardLoad
+              ? Array.from({ length: canViewProducts ? 7 : 6 }).map((_, index) => (
+                  <StatCardSkeleton key={`dashboard-stat-skeleton-${index}`} />
+                ))
+              : statCards.map((item) => <StatCard key={item.id} {...item} />)}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {shortcuts.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => navigate(item.path)}
-                className={`bg-gradient-to-r ${item.className} rounded-xl p-6 text-white transition hover:shadow-xl ${
-                  isRTL ? "text-right" : "text-left"
-                }`}
-              >
-                <item.icon size={28} className="mb-3" />
-                <p className="font-bold text-lg">{item.label}</p>
-                <p className="text-sm text-white/90 mt-1">{item.description}</p>
-              </button>
-            ))}
+            {initialDashboardLoad
+              ? Array.from({ length: 3 }).map((_, index) => (
+                  <div
+                    key={`shortcut-skeleton-${index}`}
+                    className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+                  >
+                    <SkeletonBlock
+                      className="mb-4 h-10 w-10 rounded-2xl"
+                      roundedClassName=""
+                    />
+                    <SkeletonBlock className="h-5 w-32" />
+                    <SkeletonBlock className="mt-3 h-4 w-full max-w-[16rem]" />
+                  </div>
+                ))
+              : shortcuts.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => navigate(item.path)}
+                    className={`bg-gradient-to-r ${item.className} rounded-xl p-6 text-white transition hover:shadow-xl ${
+                      isRTL ? "text-right" : "text-left"
+                    }`}
+                  >
+                    <item.icon size={28} className="mb-3" />
+                    <p className="font-bold text-lg">{item.label}</p>
+                    <p className="text-sm text-white/90 mt-1">{item.description}</p>
+                  </button>
+                ))}
           </div>
 
           {canViewOrders && (
@@ -654,12 +761,15 @@ export default function Dashboard() {
                 <div>
                   <h2 className="text-xl font-bold text-slate-900">
                     {hasScopedOrderFilters
-                      ? "Latest Matching Orders"
-                      : "Latest Orders"}
+                      ? select("أحدث الطلبات المطابقة", "Latest Matching Orders")
+                      : select("أحدث الطلبات", "Latest Orders")}
                   </h2>
                   {hasScopedOrderFilters ? (
                     <p className="mt-1 text-xs text-slate-500">
-                      Only orders inside the current filter scope appear here.
+                      {select(
+                        "لا تظهر هنا إلا الطلبات الواقعة داخل نطاق الفلترة الحالي.",
+                        "Only orders inside the current filter scope appear here.",
+                      )}
                     </p>
                   ) : null}
                 </div>
@@ -667,15 +777,22 @@ export default function Dashboard() {
                   onClick={() => navigate("/orders")}
                   className="inline-flex items-center rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-semibold text-sky-700 hover:bg-sky-100"
                 >
-                  Open Orders
+                  {select("فتح الطلبات", "Open Orders")}
                 </button>
               </div>
 
-              {recentOrders.length === 0 ? (
+              {initialDashboardLoad ? (
+                <div className="p-5">
+                  <TableSkeleton rows={5} columns={5} />
+                </div>
+              ) : recentOrders.length === 0 ? (
                 <p className="px-5 py-6 text-slate-500">
                   {hasScopedOrderFilters
-                    ? "No orders match the selected filters."
-                    : "No recent orders found."}
+                    ? select(
+                        "لا توجد طلبات مطابقة للفلاتر المختارة.",
+                        "No orders match the selected filters.",
+                      )
+                    : select("لا توجد طلبات حديثة.", "No recent orders found.")}
                 </p>
               ) : (
                 <div className="overflow-x-auto">
@@ -686,11 +803,11 @@ export default function Dashboard() {
                           isRTL ? "text-right" : "text-left uppercase"
                         }`}
                       >
-                        <th className="px-5 py-3">Order</th>
-                        <th className="px-5 py-3">Customer</th>
-                        <th className="px-5 py-3">Total</th>
-                        <th className="px-5 py-3">Payment</th>
-                        <th className="px-5 py-3">Date</th>
+                        <th className="px-5 py-3">{select("الطلب", "Order")}</th>
+                        <th className="px-5 py-3">{select("العميل", "Customer")}</th>
+                        <th className="px-5 py-3">{select("الإجمالي", "Total")}</th>
+                        <th className="px-5 py-3">{select("الدفع", "Payment")}</th>
+                        <th className="px-5 py-3">{select("التاريخ", "Date")}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -826,9 +943,28 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ title, value, subtitle = "", icon: Icon, color }) {
+function StatCard({
+  title,
+  value,
+  subtitle = "",
+  icon: Icon,
+  color,
+  onClick = null,
+  actionLabel = "",
+}) {
+  const { isRTL } = useLocale();
+  const Component = onClick ? "button" : "div";
+
   return (
-    <div className={`bg-gradient-to-r ${color} rounded-xl text-white p-5`}>
+    <Component
+      type={onClick ? "button" : undefined}
+      onClick={onClick || undefined}
+      className={`bg-gradient-to-r ${color} rounded-xl p-5 text-white ${
+        onClick
+          ? `${isRTL ? "text-right" : "text-left"} transition hover:-translate-y-0.5 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-sky-100/80`
+          : ""
+      }`}
+    >
       <div className="flex justify-between items-center gap-3">
         <div>
           <p className="text-sm text-white/90">{title}</p>
@@ -836,9 +972,14 @@ function StatCard({ title, value, subtitle = "", icon: Icon, color }) {
           {subtitle ? (
             <p className="text-xs text-white/80 mt-1">{subtitle}</p>
           ) : null}
+          {actionLabel ? (
+            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-white/80">
+              {actionLabel}
+            </p>
+          ) : null}
         </div>
         <Icon size={28} />
       </div>
-    </div>
+    </Component>
   );
 }

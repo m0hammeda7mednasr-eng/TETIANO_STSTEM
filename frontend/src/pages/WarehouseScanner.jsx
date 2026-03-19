@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
 import { warehouseAPI } from "../utils/api";
 import { formatDateTime } from "../utils/helpers";
 import { extractArray, extractObject } from "../utils/response";
@@ -41,6 +42,7 @@ const getScanVariantLabel = (product) => {
 export default function WarehouseScanner() {
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const { isRTL, select } = useLocale();
   const inputRef = useRef(null);
 
   const [movementType, setMovementType] = useState("in");
@@ -86,14 +88,21 @@ export default function WarehouseScanner() {
       if (payload?.schema_ready === false || payload?.setup_required) {
         setSetupNotice(
           payload?.message ||
-            "Warehouse is not configured yet on the database.",
+            select(
+              "المخزن غير مهيأ بعد على قاعدة البيانات.",
+              "Warehouse is not configured yet on the database.",
+            ),
         );
       }
       setLastUpdatedAt(new Date());
     } catch (requestError) {
       console.error("Error fetching recent scans:", requestError);
       setError(
-        requestError?.response?.data?.error || "Failed to load warehouse scans",
+        requestError?.response?.data?.error ||
+          select(
+            "تعذر تحميل سجل مسح المخزن.",
+            "Failed to load warehouse scans",
+          ),
       );
     } finally {
       setLoadingScans(false);
@@ -142,8 +151,14 @@ export default function WarehouseScanner() {
 
       setSuccess(
         movementType === "in"
-          ? `Added ${formatCount(quantityNumber)} unit(s) to ${getScanDisplayTitle(product)}`
-          : `Removed ${formatCount(quantityNumber)} unit(s) from ${getScanDisplayTitle(product)}`,
+          ? select(
+              `تمت إضافة ${formatCount(quantityNumber)} وحدة إلى ${getScanDisplayTitle(product)}`,
+              `Added ${formatCount(quantityNumber)} unit(s) to ${getScanDisplayTitle(product)}`,
+            )
+          : select(
+              `تم خصم ${formatCount(quantityNumber)} وحدة من ${getScanDisplayTitle(product)}`,
+              `Removed ${formatCount(quantityNumber)} unit(s) from ${getScanDisplayTitle(product)}`,
+            ),
       );
       setLastResult({
         ...payload,
@@ -158,7 +173,11 @@ export default function WarehouseScanner() {
     } catch (requestError) {
       console.error("Error applying warehouse scan:", requestError);
       setError(
-        requestError?.response?.data?.error || "Failed to save warehouse scan",
+        requestError?.response?.data?.error ||
+          select(
+            "تعذر حفظ حركة المخزن.",
+            "Failed to save warehouse scan",
+          ),
       );
       inputRef.current?.focus();
     } finally {
@@ -171,6 +190,7 @@ export default function WarehouseScanner() {
       ? "bg-emerald-600 hover:bg-emerald-700 border-emerald-600"
       : "bg-rose-600 hover:bg-rose-700 border-rose-600";
   const scannerLocked = Boolean(setupNotice);
+  const textAlignClass = isRTL ? "text-right" : "text-left";
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -180,17 +200,20 @@ export default function WarehouseScanner() {
         <div className="p-4 sm:p-6 lg:p-8 space-y-6">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6">
             <div className="flex flex-wrap justify-between items-center gap-3">
-              <div>
-                <h1 className="text-3xl font-bold text-slate-900">Warehouse Scanner</h1>
+              <div className={textAlignClass}>
+                <h1 className="text-3xl font-bold text-slate-900">
+                  {select("ماسح المخزن", "Warehouse Scanner")}
+                </h1>
                 <p className="text-slate-600 mt-1">
-                  Scan a warehouse code to move stock in or out. The scanner
-                  accepts SKU, barcode, or the generated internal code for the
-                  selected variant.
+                  {select(
+                    "امسح كود المخزن لتنفيذ إدخال أو إخراج للمخزون. الماسح يقبل SKU أو الباركود أو الكود الداخلي للفاريانت المحدد.",
+                    "Scan a warehouse code to move stock in or out. The scanner accepts SKU, barcode, or the generated internal code for the selected variant.",
+                  )}
                 </p>
                 {lastUpdatedAt && (
                   <div className="mt-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
                     <Clock3 size={12} />
-                    Last refresh {formatDateTime(lastUpdatedAt)}
+                    {select("آخر تحديث", "Last refresh")} {formatDateTime(lastUpdatedAt)}
                   </div>
                 )}
               </div>
@@ -200,7 +223,7 @@ export default function WarehouseScanner() {
                 className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
               >
                 <RefreshCw size={18} />
-                Refresh Log
+                {select("تحديث السجل", "Refresh Log")}
               </button>
             </div>
           </div>
@@ -211,10 +234,15 @@ export default function WarehouseScanner() {
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-2 text-amber-800">
                   <AlertCircle size={18} className="mt-0.5 shrink-0" />
                   <div>
-                    <p className="font-semibold">Warehouse setup required</p>
+                    <p className="font-semibold">
+                      {select("إعداد المخزن مطلوب", "Warehouse setup required")}
+                    </p>
                     <p className="text-sm mt-1">
-                      {setupNotice}. Scanner actions stay disabled until the
-                      warehouse tables are created.
+                      {setupNotice}.{" "}
+                      {select(
+                        "تظل إجراءات الماسح معطلة حتى يتم إنشاء جداول المخزن.",
+                        "Scanner actions stay disabled until the warehouse tables are created.",
+                      )}
                     </p>
                   </div>
                 </div>
@@ -224,14 +252,14 @@ export default function WarehouseScanner() {
                 <div className="flex flex-wrap gap-3">
                   <ToggleButton
                     active={movementType === "in"}
-                    label="In"
+                    label={select("إدخال", "In")}
                     icon={ArrowDown}
                     onClick={() => setMovementType("in")}
                     className="border-emerald-200 bg-emerald-50 text-emerald-700"
                   />
                   <ToggleButton
                     active={movementType === "out"}
-                    label="Out"
+                    label={select("إخراج", "Out")}
                     icon={ArrowUp}
                     onClick={() => setMovementType("out")}
                     className="border-rose-200 bg-rose-50 text-rose-700"
@@ -241,21 +269,26 @@ export default function WarehouseScanner() {
                 <form onSubmit={handleSubmit} className="mt-5 space-y-4">
                   {scannerLocked && (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                      Warehouse tables are not deployed yet, so scan actions are
-                      temporarily disabled.
+                      {select(
+                        "جداول المخزن غير منشأة بعد، لذلك تم تعطيل إجراءات المسح مؤقتًا.",
+                        "Warehouse tables are not deployed yet, so scan actions are temporarily disabled.",
+                      )}
                     </div>
                   )}
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Scan Code
+                      {select("كود المسح", "Scan Code")}
                     </label>
                     <input
                       ref={inputRef}
                       type="text"
                       value={scanCode}
                       onChange={(event) => setScanCode(event.target.value)}
-                      placeholder="Scan or type SKU, barcode, or internal code"
+                      placeholder={select(
+                        "امسح أو اكتب SKU أو الباركود أو الكود الداخلي",
+                        "Scan or type SKU, barcode, or internal code",
+                      )}
                       className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg"
                       autoComplete="off"
                       disabled={scannerLocked}
@@ -265,7 +298,7 @@ export default function WarehouseScanner() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Quantity
+                        {select("الكمية", "Quantity")}
                       </label>
                       <input
                         type="number"
@@ -280,13 +313,16 @@ export default function WarehouseScanner() {
 
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Note
+                        {select("ملاحظة", "Note")}
                       </label>
                       <input
                         type="text"
                         value={note}
                         onChange={(event) => setNote(event.target.value)}
-                        placeholder="Optional: return, transfer, count, adjustment..."
+                        placeholder={select(
+                          "اختياري: مرتجع، تحويل، جرد، تسوية...",
+                          "Optional: return, transfer, count, adjustment...",
+                        )}
                         className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
                         disabled={scannerLocked}
                       />
@@ -300,10 +336,10 @@ export default function WarehouseScanner() {
                   >
                     {movementType === "in" ? <ArrowDown size={18} /> : <ArrowUp size={18} />}
                     {submitting
-                      ? "Saving movement..."
+                      ? select("جارٍ حفظ الحركة...", "Saving movement...")
                       : movementType === "in"
-                        ? "Record Stock In"
-                        : "Record Stock Out"}
+                        ? select("تسجيل إدخال مخزون", "Record Stock In")
+                        : select("تسجيل إخراج مخزون", "Record Stock Out")}
                   </button>
                 </form>
               </div>
@@ -327,9 +363,13 @@ export default function WarehouseScanner() {
               <div className="bg-slate-900 text-white rounded-2xl shadow-sm p-5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-slate-300 text-sm">Current Mode</p>
+                    <p className="text-slate-300 text-sm">
+                      {select("الوضع الحالي", "Current Mode")}
+                    </p>
                     <h2 className="text-2xl font-bold mt-1">
-                      {movementType === "in" ? "Stock In" : "Stock Out"}
+                      {movementType === "in"
+                        ? select("إدخال مخزون", "Stock In")
+                        : select("إخراج مخزون", "Stock Out")}
                     </h2>
                   </div>
                   <div
@@ -342,14 +382,20 @@ export default function WarehouseScanner() {
                 </div>
                 <p className="text-slate-300 text-sm mt-4 leading-6">
                   {movementType === "in"
-                    ? "Each scan increases warehouse stock for the selected variant code."
-                    : "Each scan decreases warehouse stock for the selected variant code and never allows negative inventory."}
+                    ? select(
+                        "كل عملية مسح تزود مخزون المخزن للكود المحدد.",
+                        "Each scan increases warehouse stock for the selected variant code.",
+                      )
+                    : select(
+                        "كل عملية مسح تقلل مخزون المخزن للكود المحدد ولا تسمح أبدًا بمخزون سالب.",
+                        "Each scan decreases warehouse stock for the selected variant code and never allows negative inventory.",
+                      )}
                 </p>
               </div>
 
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Last Movement
+                  {select("آخر حركة", "Last Movement")}
                 </h2>
 
                 {lastResult?.inventory ? (
@@ -359,20 +405,21 @@ export default function WarehouseScanner() {
                         {getScanDisplayTitle(lastResult?.product)}
                       </div>
                       <div className="text-sm text-slate-600 mt-1">
-                        Code: {lastResult?.product?.warehouse_code || lastResult?.product?.sku || "-"}
+                        {select("الكود", "Code")}:{" "}
+                        {lastResult?.product?.warehouse_code || lastResult?.product?.sku || "-"}
                       </div>
                       <div className="text-xs text-slate-500 mt-1">
                         SKU: {lastResult?.product?.sku || "-"}
                       </div>
                       <div className="text-xs text-slate-500 mt-1">
-                        Barcode: {lastResult?.product?.barcode || "-"}
+                        {select("باركود", "Barcode")}: {lastResult?.product?.barcode || "-"}
                       </div>
                       <div className="text-xs text-slate-500 mt-1">
-                        Variant: {getScanVariantLabel(lastResult?.product)}
+                        {select("الفاريانت", "Variant")}: {getScanVariantLabel(lastResult?.product)}
                       </div>
                       {lastResult?.product?.vendor ? (
                         <div className="text-xs text-slate-500 mt-1">
-                          Vendor: {lastResult.product.vendor}
+                          {select("المورد", "Vendor")}: {lastResult.product.vendor}
                         </div>
                       ) : null}
                     </div>
@@ -398,7 +445,10 @@ export default function WarehouseScanner() {
                   </div>
                 ) : (
                   <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-slate-500">
-                    No movement has been recorded in this session yet.
+                    {select(
+                      "لم يتم تسجيل أي حركة في هذه الجلسة بعد.",
+                      "No movement has been recorded in this session yet.",
+                    )}
                   </div>
                 )}
               </div>
@@ -409,38 +459,44 @@ export default function WarehouseScanner() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Recent Scan History
+                  {select("سجل المسح الأخير", "Recent Scan History")}
                 </h2>
                 <p className="text-sm text-slate-500">
-                  Every movement is saved with time, code, quantity, and user.
+                  {select(
+                    "يتم حفظ كل حركة مع الوقت والكود والكمية والمستخدم.",
+                    "Every movement is saved with time, code, quantity, and user.",
+                  )}
                 </p>
               </div>
               <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 border border-slate-200">
                 <Package size={14} />
-                Current user {user?.name || "User"}
+                {select("المستخدم الحالي", "Current user")} {user?.name || select("مستخدم", "User")}
               </div>
             </div>
 
             {loadingScans ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
-                Loading scan history...
+                {select("جارٍ تحميل سجل المسح...", "Loading scan history...")}
               </div>
             ) : recentScans.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
-                No warehouse scans have been recorded yet.
+                {select(
+                  "لم يتم تسجيل أي عمليات مسح للمخزن بعد.",
+                  "No warehouse scans have been recorded yet.",
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="min-w-full text-sm text-right">
+                <table className={`min-w-full text-sm ${textAlignClass}`}>
                   <thead>
                     <tr className="bg-slate-50 text-slate-600">
-                      <th className="px-4 py-3 font-semibold">Time</th>
-                      <th className="px-4 py-3 font-semibold">Movement</th>
-                      <th className="px-4 py-3 font-semibold">Product</th>
-                      <th className="px-4 py-3 font-semibold">Code</th>
-                      <th className="px-4 py-3 font-semibold">Quantity</th>
-                      <th className="px-4 py-3 font-semibold">User</th>
-                      <th className="px-4 py-3 font-semibold">Note</th>
+                      <th className="px-4 py-3 font-semibold">{select("الوقت", "Time")}</th>
+                      <th className="px-4 py-3 font-semibold">{select("الحركة", "Movement")}</th>
+                      <th className="px-4 py-3 font-semibold">{select("المنتج", "Product")}</th>
+                      <th className="px-4 py-3 font-semibold">{select("الكود", "Code")}</th>
+                      <th className="px-4 py-3 font-semibold">{select("الكمية", "Quantity")}</th>
+                      <th className="px-4 py-3 font-semibold">{select("المستخدم", "User")}</th>
+                      <th className="px-4 py-3 font-semibold">{select("ملاحظة", "Note")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -458,7 +514,9 @@ export default function WarehouseScanner() {
                             }`}
                           >
                             {scan.movement_type === "in" ? <ArrowDown size={12} /> : <ArrowUp size={12} />}
-                            {scan.movement_type === "in" ? "In" : "Out"}
+                            {scan.movement_type === "in"
+                              ? select("إدخال", "In")
+                              : select("إخراج", "Out")}
                           </span>
                         </td>
                         <td className="px-4 py-3">

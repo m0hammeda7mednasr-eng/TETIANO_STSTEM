@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   CheckCircle,
@@ -20,6 +20,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import { SkeletonBlock } from "../components/Common";
 import ProductEditModal from "../components/ProductEditModal";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
@@ -65,6 +66,51 @@ const INITIAL_FILTERS = {
   updatedTo: "",
   profitability: "all",
   sortBy: "updated_desc",
+};
+const SUPPORTED_STOCK_STATUS_FILTERS = new Set([
+  "all",
+  "in_stock",
+  "low_stock",
+  "out_of_stock",
+]);
+
+const resolveFiltersFromSearchParams = (searchParams) => {
+  const nextFilters = { ...INITIAL_FILTERS };
+  const stockStatus = String(searchParams.get("stockStatus") || "").trim();
+  const searchTerm = String(searchParams.get("q") || "").trim();
+
+  if (SUPPORTED_STOCK_STATUS_FILTERS.has(stockStatus)) {
+    nextFilters.stockStatus = stockStatus;
+  }
+
+  if (searchTerm) {
+    nextFilters.searchTerm = searchTerm;
+  }
+
+  return nextFilters;
+};
+
+const buildSearchParamsFromFilters = (filters, currentSearchParams) => {
+  const nextSearchParams = new URLSearchParams(currentSearchParams);
+  const normalizedSearchTerm = String(filters.searchTerm || "").trim();
+
+  if (
+    filters.stockStatus &&
+    filters.stockStatus !== "all" &&
+    SUPPORTED_STOCK_STATUS_FILTERS.has(filters.stockStatus)
+  ) {
+    nextSearchParams.set("stockStatus", filters.stockStatus);
+  } else {
+    nextSearchParams.delete("stockStatus");
+  }
+
+  if (normalizedSearchTerm) {
+    nextSearchParams.set("q", normalizedSearchTerm);
+  } else {
+    nextSearchParams.delete("q");
+  }
+
+  return nextSearchParams;
 };
 
 const formatAmount = (value) => `${toNumber(value).toFixed(2)} ${CURRENCY_LABEL}`;
@@ -114,6 +160,7 @@ const mapVariantRowToEditableProduct = (variantRow) => ({
 
 export default function Products() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isAdmin, hasPermission } = useAuth();
   const canEditProducts = hasPermission("can_edit_products");
   const cacheKey = useMemo(
@@ -129,7 +176,9 @@ export default function Products() {
   }, [cacheKey]);
 
   const [products, setProducts] = useState(() => initialCachedSnapshot.rows);
-  const [filters, setFilters] = useState(INITIAL_FILTERS);
+  const [filters, setFilters] = useState(() =>
+    resolveFiltersFromSearchParams(searchParams),
+  );
   const [, setLoading] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [notification, setNotification] = useState(null);
@@ -144,6 +193,16 @@ export default function Products() {
   const fetchPromiseRef = useRef(null);
   const productsRef = useRef([]);
   const deferredSearchTerm = useDeferredValue(filters.searchTerm);
+
+  useEffect(() => {
+    const nextSearchParams = buildSearchParamsFromFilters(filters, searchParams);
+    const currentParamsString = searchParams.toString();
+    const nextParamsString = nextSearchParams.toString();
+
+    if (currentParamsString !== nextParamsString) {
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [filters, searchParams, setSearchParams]);
 
   useEffect(() => {
     productsRef.current = products;
@@ -524,6 +583,8 @@ export default function Products() {
     return buildCatalogCounts(variantRows, filteredVariants);
   }, [filteredVariants, variantRows]);
 
+  const hasLowStockAlert = summary.lowStock > 0 && filters.stockStatus !== "low_stock";
+
   const activeFilterChips = useMemo(() => {
     const chips = [];
 
@@ -734,6 +795,31 @@ export default function Products() {
             <div className="bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 text-sm text-sky-800 flex items-center justify-between gap-3">
               <span>{loadStatus.message}</span>
               {loadStatus.active && <span className="text-xs text-sky-600">Updating...</span>}
+            </div>
+          )}
+
+          {hasLowStockAlert && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="mt-0.5 rounded-full bg-amber-100 p-2 text-amber-700">
+                  <AlertCircle size={18} />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">
+                    {summary.lowStock.toLocaleString()} low-stock variants need follow-up
+                  </p>
+                  <p className="mt-1 text-xs text-amber-800/90">
+                    Focus this view on products below the stock threshold to restock faster.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleFilterChange("stockStatus", "low_stock")}
+                className="inline-flex items-center rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+              >
+                Focus low stock
+              </button>
             </div>
           )}
 
@@ -1017,9 +1103,37 @@ export default function Products() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
             {loadStatus.active && products.length === 0 ? (
-              <div className="col-span-full bg-white rounded-xl shadow p-8 text-center text-slate-500">
-                Product cards will appear as soon as the first batch is ready.
-              </div>
+              Array.from({ length: 8 }).map((_, index) => (
+                <div
+                  key={`product-skeleton-${index}`}
+                  className="overflow-hidden rounded-xl border border-slate-100 bg-white shadow"
+                >
+                  <SkeletonBlock className="h-52 w-full" roundedClassName="" />
+                  <div className="space-y-4 p-4">
+                    <div className="space-y-2">
+                      <SkeletonBlock className="h-3 w-16" />
+                      <SkeletonBlock className="h-5 w-full max-w-[14rem]" />
+                      <SkeletonBlock className="h-5 w-24" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {Array.from({ length: 4 }).map((__, detailIndex) => (
+                        <div key={`product-skeleton-detail-${index}-${detailIndex}`} className="space-y-2">
+                          <SkeletonBlock className="h-3 w-14" />
+                          <SkeletonBlock className="h-4 w-20" />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-2 rounded-lg bg-slate-50 p-3">
+                      <SkeletonBlock className="h-4 w-full" />
+                      <SkeletonBlock className="h-4 w-4/5" />
+                    </div>
+                    <div className="flex gap-2">
+                      <SkeletonBlock className="h-10 flex-1 rounded-lg" roundedClassName="" />
+                      <SkeletonBlock className="h-10 flex-1 rounded-lg" roundedClassName="" />
+                    </div>
+                  </div>
+                </div>
+              ))
             ) : filteredVariants.length > 0 ? (
               filteredVariants.map((variant) => (
                 <div

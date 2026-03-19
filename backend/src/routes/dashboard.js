@@ -16,6 +16,7 @@ import {
   getOrderScopeFiltersCacheKey,
   hasActiveOrderScopeFilters,
 } from "../helpers/orderScope.js";
+import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 
 const router = express.Router();
 const UUID_REGEX =
@@ -33,11 +34,28 @@ const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
 const DASHBOARD_BATCH_SIZE = 250;
 const DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
 const DASHBOARD_ORDER_VISIBLE_LIMIT = 4500;
+const LOW_STOCK_THRESHOLD = 10;
+const LOW_STOCK_NOTIFICATION_TYPE = "low_stock";
+const LOW_STOCK_NOTIFICATION_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const LOW_STOCK_NOTIFICATION_MAX_PRODUCTS = 8;
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 const QUERY_RETRYABLE_ERROR_CODES = new Set(["57014"]);
 const dashboardStatsCache = new Map();
 const dashboardAnalyticsCache = new Map();
-const DASHBOARD_PRODUCT_COUNT_SELECT = "id,store_id,user_id";
+const DASHBOARD_PRODUCT_COUNT_SELECT = [
+  "id",
+  "store_id",
+  "user_id",
+  "title",
+  "inventory_quantity",
+  "updated_at",
+].join(",");
+const DASHBOARD_PRODUCT_COUNT_SELECTS = [
+  DASHBOARD_PRODUCT_COUNT_SELECT,
+  ["id", "store_id", "user_id", "title", "inventory_quantity"].join(","),
+  ["id", "store_id", "user_id", "inventory_quantity"].join(","),
+  "id,store_id,user_id",
+];
 const DASHBOARD_CUSTOMER_COUNT_SELECT = "id,store_id,user_id";
 const DASHBOARD_ORDER_STATS_SELECT = [
   "id",
@@ -264,6 +282,248 @@ const dedupeRowsById = (rows = []) => {
   }
 
   return uniqueRows;
+};
+
+const isLowStockProduct = (product) => {
+  const quantity = toNumber(product?.inventory_quantity);
+  return quantity > 0 && quantity < LOW_STOCK_THRESHOLD;
+};
+
+const getLowStockProducts = (products = []) =>
+  dedupeRowsById(products)
+    .filter((product) => product?.id && isLowStockProduct(product))
+    .sort((left, right) => {
+      const quantityDiff =
+        toNumber(left?.inventory_quantity) - toNumber(right?.inventory_quantity);
+      if (quantityDiff !== 0) {
+        return quantityDiff;
+      }
+
+      return (
+        new Date(right?.updated_at || 0).getTime() -
+        new Date(left?.updated_at || 0).getTime()
+      );
+    })
+    .slice(0, LOW_STOCK_NOTIFICATION_MAX_PRODUCTS);
+
+const countLowStockProducts = (products = []) =>
+  dedupeRowsById(products).filter((product) => isLowStockProduct(product))
+    .length;
+
+const buildLowStockNotificationDraft = (product, userId) => {
+  const productTitle = String(product?.title || "").trim() || "Untitled product";
+  const quantity = toNumber(product?.inventory_quantity);
+
+  return {
+    user_id: userId,
+    type: LOW_STOCK_NOTIFICATION_TYPE,
+    title: `Low stock: ${productTitle}`,
+    message: `${productTitle} is down to ${quantity} units and needs replenishment.`,
+    entity_type: "product",
+    entity_id: product?.id || null,
+    metadata: {
+      route: product?.id ? `/products/${product.id}` : "/products?stockStatus=low_stock",
+      product_id: product?.id || null,
+      product_title: productTitle,
+      inventory_quantity: quantity,
+      threshold: LOW_STOCK_THRESHOLD,
+      store_id: product?.store_id || null,
+    },
+  };
+};
+
+const getLowStockNotificationRecipients = async () => {
+  const { data: users, error } = await supabase
+    .from("users")
+    .select("id, role, is_active");
+
+  if (error) {
+    if (isSchemaCompatibilityError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const activeUsers = (users || []).filter(
+    (user) => user?.id && user?.is_active !== false,
+  );
+  if (activeUsers.length === 0) {
+    return [];
+  }
+
+  const nonAdminIds = activeUsers
+    .filter((user) => String(user?.role || "").trim().toLowerCase() !== "admin")
+    .map((user) => user.id);
+
+  let permissionByUserId = new Map();
+  if (nonAdminIds.length > 0) {
+    const { data: permissionRows, error: permissionError } = await supabase
+      .from("permissions")
+      .select("user_id, can_view_products, can_edit_products")
+      .in("user_id", nonAdminIds);
+
+    if (permissionError && !isSchemaCompatibilityError(permissionError)) {
+      throw permissionError;
+    }
+
+    permissionByUserId = new Map(
+      (permissionRows || []).map((row) => [
+        String(row?.user_id || "").trim(),
+        {
+          canViewProducts: Boolean(row?.can_view_products),
+          canEditProducts: Boolean(row?.can_edit_products),
+        },
+      ]),
+    );
+  }
+
+  const recipients = [];
+  for (const user of activeUsers) {
+    const userId = String(user?.id || "").trim();
+    if (!userId) {
+      continue;
+    }
+
+    const isAdmin = String(user?.role || "").trim().toLowerCase() === "admin";
+    if (!isAdmin) {
+      const permissions = permissionByUserId.get(userId);
+      if (!permissions?.canViewProducts && !permissions?.canEditProducts) {
+        continue;
+      }
+    }
+
+    let storeIds = [];
+    if (!isAdmin) {
+      try {
+        storeIds = await getAccessibleStoreIds(userId);
+      } catch (storeScopeError) {
+        console.error(
+          "Low-stock recipient store scope resolution failed:",
+          storeScopeError,
+        );
+      }
+    }
+
+    recipients.push({
+      userId,
+      isAdmin,
+      storeIds: new Set(
+        (storeIds || [])
+          .map((storeId) => String(storeId || "").trim())
+          .filter(Boolean),
+      ),
+    });
+  }
+
+  return recipients;
+};
+
+const canRecipientAccessProduct = (recipient, product) => {
+  if (!recipient || !product) {
+    return false;
+  }
+
+  if (recipient.isAdmin) {
+    return true;
+  }
+
+  const normalizedStoreId = String(product?.store_id || "").trim();
+  if (recipient.storeIds.size > 0 && normalizedStoreId) {
+    return recipient.storeIds.has(normalizedStoreId);
+  }
+
+  return String(product?.user_id || "").trim() === recipient.userId;
+};
+
+const ensureLowStockNotifications = async (products = []) => {
+  const lowStockProducts = getLowStockProducts(products);
+  if (lowStockProducts.length === 0) {
+    return 0;
+  }
+
+  const recipients = await getLowStockNotificationRecipients();
+  if (recipients.length === 0) {
+    return 0;
+  }
+
+  const recipientIds = recipients.map((recipient) => recipient.userId);
+  const productIds = lowStockProducts
+    .map((product) => String(product?.id || "").trim())
+    .filter(Boolean);
+
+  if (productIds.length === 0) {
+    return 0;
+  }
+
+  const { data: existingNotifications, error: existingError } = await supabase
+    .from("notifications")
+    .select("user_id, entity_id")
+    .eq("type", LOW_STOCK_NOTIFICATION_TYPE)
+    .in("user_id", recipientIds)
+    .in("entity_id", productIds)
+    .gte(
+      "created_at",
+      new Date(Date.now() - LOW_STOCK_NOTIFICATION_LOOKBACK_MS).toISOString(),
+    );
+
+  if (existingError) {
+    if (isSchemaCompatibilityError(existingError)) {
+      return 0;
+    }
+    throw existingError;
+  }
+
+  const existingKeys = new Set(
+    (existingNotifications || []).map(
+      (row) =>
+        `${String(row?.user_id || "").trim()}::${String(row?.entity_id || "").trim()}`,
+    ),
+  );
+
+  const drafts = [];
+  const draftRecipientIds = new Set();
+
+  for (const product of lowStockProducts) {
+    for (const recipient of recipients) {
+      if (!canRecipientAccessProduct(recipient, product)) {
+        continue;
+      }
+
+      const key = `${recipient.userId}::${String(product?.id || "").trim()}`;
+      if (existingKeys.has(key)) {
+        continue;
+      }
+
+      drafts.push(buildLowStockNotificationDraft(product, recipient.userId));
+      draftRecipientIds.add(recipient.userId);
+      existingKeys.add(key);
+    }
+  }
+
+  if (drafts.length === 0) {
+    return 0;
+  }
+
+  const { error: insertError } = await supabase
+    .from("notifications")
+    .insert(drafts);
+
+  if (insertError) {
+    if (isSchemaCompatibilityError(insertError)) {
+      return 0;
+    }
+    throw insertError;
+  }
+
+  emitRealtimeEvent({
+    userIds: Array.from(draftRecipientIds),
+    payload: {
+      resource: "notifications",
+      context: "low_stock",
+    },
+  });
+
+  return drafts.length;
 };
 
 const parseOrderData = (order) => {
@@ -777,7 +1037,7 @@ router.get("/stats", authenticateToken, async (req, res) => {
     const hasScopedOrderFilters = hasActiveOrderScopeFilters(req.query || {});
     const [products, orders, customers] = await Promise.all([
       getScopedRowsBatched(req, Product, {
-        select: DASHBOARD_PRODUCT_COUNT_SELECT,
+        selects: DASHBOARD_PRODUCT_COUNT_SELECTS,
         allowUnorderedFallback: true,
       }),
       getScopedRowsBatched(req, Order, {
@@ -814,6 +1074,7 @@ router.get("/stats", authenticateToken, async (req, res) => {
     const pendingOrderValue = filteredOrders
       .filter((order) => isPendingOrder(order))
       .reduce((sum, order) => sum + getOrderGrossAmount(order), 0);
+    const lowStockProductsCount = countLowStockProducts(products);
     const filteredEntitySummary = hasScopedOrderFilters
       ? buildFilteredOrderEntitySummary(filteredOrders)
       : {
@@ -828,6 +1089,7 @@ router.get("/stats", authenticateToken, async (req, res) => {
       total_orders: filteredOrders.length,
       total_products: filteredEntitySummary.totalProducts,
       total_customers: filteredEntitySummary.totalCustomers,
+      low_stock_products: lowStockProductsCount,
       orders_window_limit: DASHBOARD_ORDER_VISIBLE_LIMIT,
       avg_order_value:
         saleOrders.length > 0
@@ -836,6 +1098,9 @@ router.get("/stats", authenticateToken, async (req, res) => {
     };
 
     rememberCacheEntry(dashboardStatsCache, cacheKey, payload);
+    ensureLowStockNotifications(products).catch((notificationError) => {
+      console.error("Low-stock notification dispatch failed:", notificationError);
+    });
     res.json(payload);
   } catch (error) {
     console.error("Dashboard stats error:", error);

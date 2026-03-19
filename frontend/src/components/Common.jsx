@@ -22,6 +22,71 @@ export function LoadingSpinner({ label = "" }) {
   );
 }
 
+export function SkeletonBlock({
+  className = "",
+  roundedClassName = "rounded-xl",
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`animate-pulse bg-slate-200/80 ${roundedClassName} ${className}`}
+    />
+  );
+}
+
+export function StatCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 space-y-3">
+          <SkeletonBlock className="h-3.5 w-24" />
+          <SkeletonBlock className="h-8 w-28" />
+          <SkeletonBlock className="h-3 w-full max-w-[14rem]" />
+        </div>
+        <SkeletonBlock className="h-12 w-12 rounded-2xl" roundedClassName="" />
+      </div>
+    </div>
+  );
+}
+
+export function TableSkeleton({ rows = 5, columns = 5 }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
+        <div className="flex flex-wrap gap-3">
+          {Array.from({ length: columns }).map((_, index) => (
+            <SkeletonBlock
+              key={`table-header-${index}`}
+              className="h-3 w-20"
+            />
+          ))}
+        </div>
+      </div>
+      <div className="divide-y divide-slate-100 px-5">
+        {Array.from({ length: rows }).map((_, rowIndex) => (
+          <div
+            key={`table-row-${rowIndex}`}
+            className="grid grid-cols-1 gap-3 py-4 md:grid-cols-5"
+          >
+            {Array.from({ length: columns }).map((__, columnIndex) => (
+              <SkeletonBlock
+                key={`table-cell-${rowIndex}-${columnIndex}`}
+                className={`h-4 ${
+                  columnIndex === 0
+                    ? "w-24"
+                    : columnIndex === columns - 1
+                      ? "w-20"
+                      : "w-full"
+                }`}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function InlineAlert({
   message,
   onClose,

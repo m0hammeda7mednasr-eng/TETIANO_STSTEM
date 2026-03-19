@@ -20,6 +20,7 @@ const TYPE_LABELS = {
   order: "Order",
   order_missing: "Order Alert",
   order_missing_escalated: "Critical Order",
+  low_stock: "Low Stock",
 };
 
 const formatTimestamp = (value, locale) => {

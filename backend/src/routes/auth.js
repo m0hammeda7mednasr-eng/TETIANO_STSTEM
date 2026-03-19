@@ -17,6 +17,35 @@ const router = express.Router();
 const INVALID_LOGIN_ERROR = "Invalid email or password";
 const AUTH_SERVICE_UNAVAILABLE_ERROR =
   "Authentication service is temporarily unavailable. Please try again in a moment.";
+const SELF_REGISTRATION_DISABLED_ERROR =
+  "Self-service registration is disabled. Ask an admin to create your account.";
+
+const resolveRegistrationPolicy = async () => {
+  const allowSelfRegistration =
+    String(process.env.ALLOW_SELF_REGISTRATION || "").trim().toLowerCase() ===
+    "true";
+
+  if (allowSelfRegistration) {
+    return {
+      allowed: true,
+      bootstrapAdmin: false,
+    };
+  }
+
+  const { data, error } = await withSupabaseRetry(() =>
+    supabase.from("users").select("id").limit(1),
+  );
+
+  if (error) {
+    throw error;
+  }
+
+  const hasExistingUsers = Array.isArray(data) && data.length > 0;
+  return {
+    allowed: !hasExistingUsers,
+    bootstrapAdmin: !hasExistingUsers,
+  };
+};
 
 const createTokenPayload = (user) => ({
   id: user.id,
@@ -44,11 +73,24 @@ router.post("/register", async (req, res) => {
         .json({ error: "Password must be at least 6 characters long" });
     }
 
+    const registrationPolicy = await resolveRegistrationPolicy();
+    if (!registrationPolicy.allowed) {
+      return res.status(403).json({ error: SELF_REGISTRATION_DISABLED_ERROR });
+    }
+
     const hashedPassword = await bcryptjs.hash(password, 10);
     const { data: userData, error: userError } = await withSupabaseRetry(() =>
       supabase
         .from("users")
-        .insert([{ email, password: hashedPassword, name }])
+        .insert([
+          {
+            email,
+            password: hashedPassword,
+            name,
+            role: registrationPolicy.bootstrapAdmin ? "admin" : "user",
+            is_active: true,
+          },
+        ])
         .select("id, email, name, role"),
     );
 

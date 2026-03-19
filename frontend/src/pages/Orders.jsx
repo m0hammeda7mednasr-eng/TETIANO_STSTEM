@@ -1408,52 +1408,52 @@ export default function Orders() {
                     <th
                       className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
                     >
-                      Order
+                      {select("الطلب", "Order")}
                     </th>
                     <th
                       className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
                     >
-                      Customer
+                      {select("العميل", "Customer")}
                     </th>
                     <th
                       className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
                     >
-                      Items
+                      {select("العناصر", "Items")}
                     </th>
                     <th
                       className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
                     >
-                      Total
+                      {select("الإجمالي", "Total")}
                     </th>
                     <th
                       className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
                     >
-                      Payment
+                      {select("الدفع", "Payment")}
                     </th>
                     <th
                       className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
                     >
-                      Payment Method
+                      {select("طريقة الدفع", "Payment Method")}
                     </th>
                     <th
                       className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
                     >
-                      Fulfillment
+                      {select("التنفيذ", "Fulfillment")}
                     </th>
                     <th
                       className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
                     >
-                      Refund
+                      {select("الاسترداد", "Refund")}
                     </th>
                     <th
                       className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
                     >
-                      Date
+                      {select("التاريخ", "Date")}
                     </th>
                     <th
                       className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
                     >
-                      Details
+                      {select("التفاصيل", "Details")}
                     </th>
                   </tr>
                 </thead>
@@ -1461,7 +1461,10 @@ export default function Orders() {
                   {loadStatus.active && orders.length === 0 ? (
                     <tr>
                       <td colSpan="11" className="px-6 py-10 text-center text-slate-500">
-                        Latest orders will appear here automatically.
+                        {select(
+                          "ستظهر أحدث الطلبات هنا تلقائيًا.",
+                          "Latest orders will appear here automatically.",
+                        )}
                       </td>
                     </tr>
                   ) : filteredOrders.length > 0 ? (

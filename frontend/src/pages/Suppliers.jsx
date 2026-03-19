@@ -97,6 +97,41 @@ const SUPPLIER_UI_TRANSLATIONS = {
     "موديلات القماش": "Fabric Models",
     "ابدأ بالقماش لترى الموديلات المرتبطة به وكمياتها ووارداتها":
       "Start from the fabric to see linked models, quantities, and deliveries.",
+    "الخامات وربط مورد القماش": "Fabric Codes and Fabric Supplier Link",
+    "سجل خامات المصنع وربط كل خامة بمورد القماش المناسب لتظهر مباشرة داخل الواردات والربط على المنتجات.":
+      "Register factory fabrics and link each one to the right fabric supplier so it appears directly in deliveries and product linking.",
+    "إغلاق نموذج الخامة": "Close fabric form",
+    "تعديل الخامة": "Edit fabric",
+    "إضافة خامة": "Add fabric",
+    "إضافة خامة جديدة": "Add new fabric",
+    "موردو القماش المرتبطون": "Linked fabric suppliers",
+    "عدد الموديلات المرتبطة": "Linked models count",
+    "لا يوجد مورد قماش محدد": "No fabric supplier selected",
+    "خامات نشطة": "Active fabrics",
+    "لا توجد خامات مسجلة لهذا المصنع بعد.": "No fabrics are registered for this factory yet.",
+    "عرّف الخامة مرة واحدة ثم اختر مورد القماش المناسب لها ليظهر الربط مباشرة داخل الواردات.":
+      "Define the fabric once, then choose the right fabric supplier so the link appears directly in deliveries.",
+    "كود الخامة": "Fabric Code",
+    "اسم الخامة": "Fabric Name",
+    "الخامة نشطة وتظهر في قائمة الربط": "Fabric is active and appears in the linking list",
+    "جارٍ حفظ الخامة...": "Saving fabric...",
+    "حفظ الخامة": "Save fabric",
+    "هذه الصفحة مرجعية لبيانات مورد القماش فقط، أما إنشاء الربط مع خامات المصانع فيتم من صفحة المصنع.":
+      "This page is for the fabric supplier profile only. Linking to factory fabrics is managed from the factory page.",
+    "أكواد القماش": "Fabric Codes",
+    "المصانع المرتبطة": "Linked Factories",
+    "آخر نشاط": "Last Activity",
+    "ملخص الربط": "Linking Summary",
+    "مراجع الاستخدام": "Usage Reference",
+    "عرض مرجعي للمصانع التي تستخدم خامات مرتبطة بهذا المورد.":
+      "Reference view of factories that use fabrics linked to this supplier.",
+    "لا توجد مصانع مرتبطة بهذا المورد حتى الآن.": "No factories are linked to this supplier yet.",
+    "أكواد القماش المرتبطة": "Linked Fabric Codes",
+    "الأكواد المرتبطة بهذا المورد مع توضيح المصنع الذي يستخدم كل كود.":
+      "Codes linked to this supplier, with the factory that uses each code.",
+    "لا توجد أكواد قماش مرتبطة بهذا المورد حتى الآن.":
+      "No fabric codes are linked to this supplier yet.",
+    "إنشاء الربط يتم من صفحة المصنع": "Linking is managed from the factory page",
     "المنتجات المستلمة من المورد": "Received Products from Supplier",
     "كل الأصناف المرتبطة بحركات الوارد للمورد الحالي":
       "All items linked to delivery movements for the current supplier.",
@@ -1813,32 +1848,40 @@ function FabricSupplierDetails({
   canEditProducts,
   startEditingSupplier,
 }) {
+  const { locale } = useLocale();
   const linkedFabricRecords = toArray(
     supplier?.linked_fabric_records || supplier?.fabric_records,
   );
   const linkedFactories = toArray(supplier?.linked_factory_suppliers);
+  const linkedFactoriesSummary = linkedFactories.map((linkedSupplier) => ({
+    ...linkedSupplier,
+    linked_fabrics_count: linkedFabricRecords.filter(
+      (fabric) =>
+        normalizeText(fabric?.supplier_id) === normalizeText(linkedSupplier?.id),
+    ).length,
+  }));
 
   return (
     <>
       <div className="grid gap-4 lg:grid-cols-3">
         <SummaryCard
-          title="أكواد الأقمشة المرتبطة"
+          title="أكواد القماش"
           value={formatCount(supplier.registered_fabrics_count)}
-          subtitle={`${formatCount(linkedFactories.length)} مصنع مرتبط`}
+          subtitle={`${formatCount(linkedFabricRecords.length)} كود مرتبط`}
           icon={Package}
           tone="blue"
         />
         <SummaryCard
-          title="المنتجات المرتبطة"
-          value={formatCount(supplier.products_count)}
-          subtitle={`${formatCount(supplier.deliveries_count)} حركة مرتبطة`}
+          title="المصانع المرتبطة"
+          value={formatCount(linkedFactories.length)}
+          subtitle="إنشاء الربط يتم من صفحة المصنع"
           icon={Truck}
           tone="sky"
         />
         <SummaryCard
-          title="القيمة المرتبطة"
-          value={formatCurrency(supplier.total_deliveries)}
-          subtitle={`إجمالي الكمية ${formatCount(supplier.received_quantity)}`}
+          title="آخر نشاط"
+          value={formatDateTime(supplier.last_delivery_at)}
+          subtitle={supplier.is_active !== false ? "نشط" : "مؤرشف"}
           icon={Wallet}
           tone="emerald"
         />
@@ -1868,7 +1911,7 @@ function FabricSupplierDetails({
               value={supplier.is_active !== false ? "نشط" : "مؤرشف"}
             />
             <DetailLine
-              label="آخر حركة مرتبطة"
+              label="آخر نشاط"
               value={formatDateTime(supplier.last_delivery_at)}
             />
             <DetailLine
@@ -1884,35 +1927,71 @@ function FabricSupplierDetails({
         </SectionCard>
 
         <SectionCard
-          title="المصانع المرتبطة"
-          subtitle="المصانع التي تستخدم أكواد أقمشة مرتبطة بهذا المورد"
+          title="ملخص الربط"
+          subtitle="هذه الصفحة مرجعية لبيانات مورد القماش فقط، أما إنشاء الربط مع خامات المصانع فيتم من صفحة المصنع."
         >
-          {linkedFactories.length > 0 ? (
-            <div className="space-y-3">
-              {linkedFactories.map((linkedSupplier) => (
-                <div
-                  key={linkedSupplier.id || linkedSupplier.name}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                >
-                  <div className="text-sm font-semibold text-slate-900">
-                    {linkedSupplier.name || "-"}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {linkedSupplier.code ? `كود المصنع: ${linkedSupplier.code}` : "بدون كود"}
-                    {linkedSupplier.phone ? ` | ${linkedSupplier.phone}` : ""}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState text="لا توجد مصانع مرتبطة بهذا المورد حتى الآن." />
-          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <DetailLine
+              label="أكواد القماش"
+              value={formatCount(supplier.registered_fabrics_count)}
+            />
+            <DetailLine
+              label="المصانع المرتبطة"
+              value={formatCount(linkedFactories.length)}
+            />
+            <DetailLine
+              label="عدد الموديلات المرتبطة"
+              value={formatCount(supplier.products_count)}
+            />
+            <DetailLine
+              label="آخر نشاط"
+              value={formatDateTime(supplier.last_delivery_at)}
+            />
+          </div>
         </SectionCard>
       </div>
 
       <SectionCard
-        title="أكواد الأقمشة المرتبطة"
-        subtitle="كل كود قماش مربوط بهذا المورد مع المصنع صاحب الكود"
+        title="مراجع الاستخدام"
+        subtitle="عرض مرجعي للمصانع التي تستخدم خامات مرتبطة بهذا المورد."
+      >
+        {linkedFactoriesSummary.length > 0 ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {linkedFactoriesSummary.map((linkedSupplier) => (
+              <div
+                key={linkedSupplier.id || linkedSupplier.name}
+                className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900">
+                      {linkedSupplier.name || "-"}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {linkedSupplier.code ? `كود المصنع: ${linkedSupplier.code}` : "بدون كود"}
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
+                    {formatCount(linkedSupplier.linked_fabrics_count)}{" "}
+                    {translateSupplierUiText("أكواد القماش", locale)}
+                  </span>
+                </div>
+                {linkedSupplier.phone ? (
+                  <div className="mt-3 text-xs text-slate-500">
+                    {linkedSupplier.phone}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState text="لا توجد مصانع مرتبطة بهذا المورد حتى الآن." />
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="أكواد القماش المرتبطة"
+        subtitle="الأكواد المرتبطة بهذا المورد مع توضيح المصنع الذي يستخدم كل كود."
       >
         {linkedFabricRecords.length > 0 ? (
           <div className="grid gap-3 md:grid-cols-2">
@@ -1921,15 +2000,28 @@ function FabricSupplierDetails({
                 key={fabric.id || `${fabric.code}-${fabric.name}`}
                 className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
               >
-                <div className="text-sm font-semibold text-slate-900">
-                  {formatSupplierFabricDisplay(fabric)}
-                </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  {fabric.supplier_name
-                    ? fabric.supplier_code
-                      ? `المصنع: ${fabric.supplier_code} | ${fabric.supplier_name}`
-                      : `المصنع: ${fabric.supplier_name}`
-                    : "بدون مصنع مرتبط"}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900">
+                      {formatSupplierFabricDisplay(fabric)}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {fabric.supplier_name
+                        ? fabric.supplier_code
+                          ? `المصنع: ${fabric.supplier_code} | ${fabric.supplier_name}`
+                          : `المصنع: ${fabric.supplier_name}`
+                        : "-"}
+                    </div>
+                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                      fabric.is_active !== false
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {fabric.is_active !== false ? "نشط" : "مؤرشف"}
+                  </span>
                 </div>
                 {fabric.notes ? (
                   <div className="mt-3 rounded-xl bg-white px-3 py-2 text-xs text-slate-600">
@@ -1940,7 +2032,7 @@ function FabricSupplierDetails({
             ))}
           </div>
         ) : (
-          <EmptyState text="لا توجد أكواد أقمشة مرتبطة بهذا المورد حتى الآن." />
+          <EmptyState text="لا توجد أكواد قماش مرتبطة بهذا المورد حتى الآن." />
         )}
       </SectionCard>
     </>
@@ -2009,11 +2101,16 @@ function SupplierFabricsSection({
   const activeFabricsCount = fabricRecords.filter(
     (fabric) => fabric?.is_active !== false,
   ).length;
+  const linkedFabricSuppliersCount = new Set(
+    fabricRecords
+      .map((fabric) => normalizeText(fabric?.fabric_supplier_id))
+      .filter(Boolean),
+  ).size;
 
   return (
     <SectionCard
-      title="سجل الأقمشة"
-      subtitle="أكواد الأقمشة الخاصة بهذا المصنع، وتظهر مباشرة داخل الواردات والربط بالموديلات."
+      title="الخامات وربط مورد القماش"
+      subtitle="سجل خامات المصنع وربط كل خامة بمورد القماش المناسب لتظهر مباشرة داخل الواردات والربط على المنتجات."
       action={
         canManage ? (
           <button
@@ -2022,10 +2119,10 @@ function SupplierFabricsSection({
           >
             <Plus size={16} />
             {showForm
-              ? "إغلاق نموذج القماش"
+              ? "إغلاق نموذج الخامة"
               : editingFabricId
-                ? "تعديل القماش"
-                : "قماش جديد"}
+                ? "تعديل الخامة"
+                : "إضافة خامة"}
           </button>
         ) : null
       }
@@ -2038,8 +2135,12 @@ function SupplierFabricsSection({
               value={formatCount(fabricRecords.length)}
             />
             <DetailLineCompact
-              label="أقمشة نشطة"
+              label="خامات نشطة"
               value={formatCount(activeFabricsCount)}
+            />
+            <DetailLineCompact
+              label="موردو القماش المرتبطون"
+              value={formatCount(linkedFabricSuppliersCount)}
             />
           </div>
 
@@ -2056,7 +2157,7 @@ function SupplierFabricsSection({
                         {fabric.name || fabric.fabric_name || "-"}
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
-                        كود القماش: {fabric.code || "-"}
+                        كود الخامة: {fabric.code || "-"}
                       </div>
                     </div>
                     <span
@@ -2088,11 +2189,11 @@ function SupplierFabricsSection({
                           ? fabric.fabric_supplier_code
                             ? `${fabric.fabric_supplier_code} | ${fabric.fabric_supplier_name}`
                             : fabric.fabric_supplier_name
-                          : "-"
+                          : "لا يوجد مورد قماش محدد"
                       }
                     />
                     <DetailLineCompact
-                      label="الربط الحالي"
+                      label="عدد الموديلات المرتبطة"
                       value={formatCount(
                         toArray(supplier?.fabric_catalog).find((group) =>
                           getSupplierFabricLookupKeys(group).some((key) =>
@@ -2116,7 +2217,7 @@ function SupplierFabricsSection({
               ))}
             </div>
           ) : (
-            <EmptyState text="لا توجد أكواد أقمشة مسجلة لهذا المورد بعد." />
+            <EmptyState text="لا توجد خامات مسجلة لهذا المصنع بعد." />
           )}
         </div>
 
@@ -2124,23 +2225,23 @@ function SupplierFabricsSection({
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="mb-4">
               <h3 className="text-base font-semibold text-slate-900">
-                {editingFabricId ? "تعديل كود قماش" : "إضافة كود قماش"}
+                {editingFabricId ? "تعديل الخامة" : "إضافة خامة جديدة"}
               </h3>
               <p className="mt-1 text-sm text-slate-500">
-                سجل القماش مرة واحدة ثم استخدمه في الواردات والربط بالموديل.
+                عرّف الخامة مرة واحدة ثم اختر مورد القماش المناسب لها ليظهر الربط مباشرة داخل الواردات.
               </p>
             </div>
 
             <div className="space-y-3">
               <TextInput
-                label="كود القماش"
+                label="كود الخامة"
                 value={form.code}
                 onChange={(value) =>
                   setForm((current) => ({ ...current, code: value }))
                 }
               />
               <TextInput
-                label="اسم القماش"
+                label="اسم الخامة"
                 value={form.name}
                 onChange={(value) =>
                   setForm((current) => ({ ...current, name: value }))
@@ -2175,7 +2276,7 @@ function SupplierFabricsSection({
                     }))
                   }
                 />
-                القماش نشط ويظهر في قائمة الربط
+                الخامة نشطة وتظهر في قائمة الربط
               </label>
               <button
                 onClick={onSave}
@@ -2183,7 +2284,7 @@ function SupplierFabricsSection({
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save size={18} />
-                {saving ? "جارٍ حفظ القماش..." : "حفظ كود القماش"}
+                {saving ? "جارٍ حفظ الخامة..." : "حفظ الخامة"}
               </button>
             </div>
           </div>

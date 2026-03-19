@@ -5,6 +5,8 @@ import { resolveApiBase } from "./apiConfig";
 const API_BASE = resolveApiBase();
 const DEFAULT_API_TIMEOUT_MS = 60 * 1000;
 const SHOPIFY_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
+const META_SYNC_TIMEOUT_MS = 3 * 60 * 1000;
+const META_ANALYSIS_TIMEOUT_MS = 2 * 60 * 1000;
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -179,6 +181,23 @@ export const suppliersAPI = {
     api.put(`/suppliers/${id}/fabrics/${fabricId}`, data),
   addDelivery: (id, data) => api.post(`/suppliers/${id}/deliveries`, data),
   addPayment: (id, data) => api.post(`/suppliers/${id}/payments`, data),
+};
+
+export const metaAnalyticsAPI = {
+  getStatus: () => api.get("/meta-analytics/status"),
+  getOverview: (params = {}) => api.get("/meta-analytics/overview", { params }),
+  saveMetaConfig: (data) => api.put("/meta-analytics/config/meta", data),
+  saveOpenRouterConfig: (data) =>
+    api.put("/meta-analytics/config/openrouter", data),
+  getModels: (params = {}) => api.get("/meta-analytics/models", { params }),
+  sync: (data = {}) =>
+    api.post("/meta-analytics/sync", data, {
+      timeout: META_SYNC_TIMEOUT_MS,
+    }),
+  analyze: (data = {}) =>
+    api.post("/meta-analytics/analyze", data, {
+      timeout: META_ANALYSIS_TIMEOUT_MS,
+    }),
 };
 
 export default api;

@@ -107,7 +107,7 @@ export default function WarehouseScanner() {
     } finally {
       setLoadingScans(false);
     }
-  }, []);
+  }, [select]);
 
   useEffect(() => {
     inputRef.current?.focus();

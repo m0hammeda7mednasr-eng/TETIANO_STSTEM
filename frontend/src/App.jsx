@@ -35,6 +35,7 @@ const MyTasks = lazy(() => import("./pages/MyTasks"));
 const ActivityLog = lazy(() => import("./pages/ActivityLog"));
 const NetProfit = lazy(() => import("./pages/NetProfit"));
 const Analytics = lazy(() => import("./pages/Analytics"));
+const MetaAnalytics = lazy(() => import("./pages/MetaAnalytics"));
 const AdminPage = lazy(() => import("./pages/Admin"));
 
 function RouteFallback() {
@@ -225,6 +226,14 @@ function App() {
                   <AdminRoute>
                     <NetProfit />
                   </AdminRoute>
+                }
+              />
+              <Route
+                path="/meta-analytics"
+                element={
+                  <ProtectedRoute permission="can_manage_settings">
+                    <MetaAnalytics />
+                  </ProtectedRoute>
                 }
               />
               <Route

@@ -11,6 +11,7 @@ import {
   Home,
   LogOut,
   Menu,
+  Megaphone,
   Package,
   Server,
   Settings,
@@ -159,6 +160,12 @@ const buildEmployeeNav = (t) => [
 ];
 
 const buildAdminNav = (t) => [
+  {
+    icon: Megaphone,
+    label: t("sidebar.metaAnalytics", "Meta وتحليلات"),
+    path: "/meta-analytics",
+    permission: "can_manage_settings",
+  },
   {
     icon: BarChart3,
     label: t("sidebar.analytics", "Analytics"),

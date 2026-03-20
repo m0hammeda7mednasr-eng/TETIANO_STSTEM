@@ -44,7 +44,6 @@ import {
   INITIAL_ORDER_SCOPE_FILTERS,
 } from "../utils/orderScope";
 
-const CURRENCY_LABEL = "LE";
 const DASHBOARD_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const EMPTY_DASHBOARD_STATS = {
   total_sales: 0,
@@ -63,31 +62,6 @@ const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-
-const formatCurrency = (value) =>
-  `${toNumber(value).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} ${CURRENCY_LABEL}`;
-
-const formatDate = (value) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("ar-EG", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
-const formatOrderTotal = (amount) =>
-  `${toNumber(amount).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} ${CURRENCY_LABEL}`;
 
 const getOrderFinancialStatus = (order) => {
   return String(order.financial_status || order.status || "")
@@ -117,7 +91,8 @@ const getPaymentStatusClassName = (status) => {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, hasPermission, loading: authLoading } = useAuth();
-  const { locale, select, isRTL } = useLocale();
+  const { select, isRTL, formatCurrency, formatDateTime, formatNumber, formatTime } =
+    useLocale();
 
   const isAdmin = user?.role === "admin";
   const canManageSettings = hasPermission("can_manage_settings");
@@ -188,6 +163,17 @@ export default function Dashboard() {
   );
   const [recentOrders, setRecentOrders] = useState(
     () => initialCachedSnapshot.recentOrders,
+  );
+  const formatDashboardDate = useCallback(
+    (value) =>
+      formatDateTime(value, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    [formatDateTime],
   );
 
   const loadData = useCallback(
@@ -524,7 +510,7 @@ export default function Dashboard() {
         {
           id: "orders",
           title: "Total Orders",
-          value: toNumber(stats.total_orders).toLocaleString(),
+          value: formatNumber(stats.total_orders),
           subtitle: hasScopedOrderFilters
             ? "Orders matching the current filter scope"
             : "All synced orders in the current store",
@@ -536,7 +522,7 @@ export default function Dashboard() {
         {
           id: "products",
           title: "Products",
-          value: toNumber(stats.total_products).toLocaleString(),
+          value: formatNumber(stats.total_products),
           subtitle: hasScopedOrderFilters
             ? "Products referenced by matching orders"
             : "Total synced products in the catalog",
@@ -548,7 +534,7 @@ export default function Dashboard() {
         {
           id: "customers",
           title: "Customers",
-          value: toNumber(stats.total_customers).toLocaleString(),
+          value: formatNumber(stats.total_customers),
           subtitle: hasScopedOrderFilters
             ? "Customers referenced by the current order scope"
             : "Total synced customers in the store",
@@ -562,8 +548,8 @@ export default function Dashboard() {
           title: "Avg Paid Order",
           value: formatCurrency(stats.avg_order_value),
           subtitle: hasScopedOrderFilters
-            ? `Net sales divided by ${toNumber(stats.paid_orders_count).toLocaleString()} paid orders in scope`
-            : `Net sales divided by ${toNumber(stats.paid_orders_count).toLocaleString()} paid orders`,
+            ? `Net sales divided by ${formatNumber(stats.paid_orders_count)} paid orders in scope`
+            : `Net sales divided by ${formatNumber(stats.paid_orders_count)} paid orders`,
           icon: TrendingUp,
           color: "from-violet-500 to-violet-700",
         },
@@ -571,7 +557,7 @@ export default function Dashboard() {
           ? {
               id: "low-stock",
               title: "Low Stock",
-              value: toNumber(stats.low_stock_products).toLocaleString(),
+              value: formatNumber(stats.low_stock_products),
               subtitle:
                 toNumber(stats.low_stock_products) > 0
                   ? "Catalog-wide items below 10 units need attention"
@@ -588,6 +574,8 @@ export default function Dashboard() {
       canViewOrders,
       canViewCustomers,
       canViewProducts,
+      formatCurrency,
+      formatNumber,
       hasScopedOrderFilters,
       navigate,
       stats.avg_order_value,
@@ -657,9 +645,10 @@ export default function Dashboard() {
                 <p className="text-xs text-slate-500 mt-2 flex items-center gap-1">
                   <Clock3 size={12} />
                   {select("آخر تحديث", "Last refresh")}:{" "}
-                  {lastUpdatedAt.toLocaleTimeString(
-                    locale === "ar" ? "ar-EG" : "en-US",
-                  )}
+                  {formatTime(lastUpdatedAt, {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </p>
               )}
             </div>
@@ -696,7 +685,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-sm font-semibold">
-                      {toNumber(stats.low_stock_products).toLocaleString()} items need stock attention
+                      {formatNumber(stats.low_stock_products)} items need stock attention
                     </p>
                     <p className="mt-1 text-xs text-amber-800/90">
                       Low-stock alerts are generated automatically and sent to product owners.
@@ -831,7 +820,7 @@ export default function Dashboard() {
                             {order.customer_name || "Unknown customer"}
                           </td>
                           <td className="px-5 py-3.5 text-sm font-medium text-slate-800">
-                            {formatOrderTotal(order.total_price)}
+                            {formatCurrency(order.total_price)}
                           </td>
                           <td className="px-5 py-3.5 text-sm">
                             <span
@@ -843,7 +832,7 @@ export default function Dashboard() {
                             </span>
                           </td>
                           <td className="px-5 py-3.5 text-sm text-slate-600">
-                            {formatDate(order.created_at)}
+                            {formatDashboardDate(order.created_at)}
                           </td>
                         </tr>
                       ))}

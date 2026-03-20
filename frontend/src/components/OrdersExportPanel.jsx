@@ -9,22 +9,23 @@ import {
 } from "lucide-react";
 import api from "../utils/api";
 import { downloadCsvFile } from "../utils/csv";
-
-const CURRENCY_LABEL = "LE";
+import {
+  formatCurrency as formatAmount,
+  formatDateTime,
+  formatNumber,
+} from "../utils/helpers";
 
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const formatAmount = (value) => `${toNumber(value).toFixed(2)} ${CURRENCY_LABEL}`;
-
 const formatDate = (value) => {
   if (!value) {
     return "";
   }
 
-  return new Date(value).toLocaleString("ar-EG", {
+  return formatDateTime(value, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -278,10 +279,10 @@ export default function OrdersExportPanel({
     visibleProducts.every((product) => selectedProductKeySet.has(product.key));
 
   return (
-    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-5">
+    <section className="app-surface rounded-[28px] p-5 sm:p-6 space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
-          <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+          <div className="app-chip inline-flex items-center gap-2 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
             <FileText size={14} />
             Export Hub
           </div>
@@ -299,38 +300,48 @@ export default function OrdersExportPanel({
           <button
             type="button"
             onClick={onClearSelectedOrders}
-            className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="app-button-secondary rounded-lg px-3 py-2 text-sm font-medium text-slate-700"
           >
-            Clear selected orders ({selectedOrders.length.toLocaleString()})
+            Clear selected orders ({formatNumber(selectedOrders.length, {
+              maximumFractionDigits: 0,
+            })})
           </button>
         ) : null}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="app-chip rounded-2xl px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
             Filtered orders
           </p>
           <p className="mt-2 text-2xl font-semibold text-slate-900">
-            {filteredOrders.length.toLocaleString()}
+            {formatNumber(filteredOrders.length, {
+              maximumFractionDigits: 0,
+            })}
           </p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="app-chip rounded-2xl px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
             Selected orders
           </p>
           <p className="mt-2 text-2xl font-semibold text-slate-900">
-            {selectedOrders.length.toLocaleString()}
+            {formatNumber(selectedOrders.length, {
+              maximumFractionDigits: 0,
+            })}
           </p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="app-chip rounded-2xl px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
             Active export scope
           </p>
           <p className="mt-2 text-lg font-semibold text-slate-900">
             {scope === "selected" && selectedOrders.length > 0
-              ? `${selectedOrders.length.toLocaleString()} selected orders`
-              : `${filteredOrders.length.toLocaleString()} filtered orders`}
+              ? `${formatNumber(selectedOrders.length, {
+                  maximumFractionDigits: 0,
+                })} selected orders`
+              : `${formatNumber(filteredOrders.length, {
+                  maximumFractionDigits: 0,
+                })} filtered orders`}
           </p>
         </div>
       </div>
@@ -339,10 +350,10 @@ export default function OrdersExportPanel({
         <button
           type="button"
           onClick={() => setScope("filtered")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium border ${
-            scope === "filtered"
-              ? "bg-sky-700 text-white border-sky-700"
-              : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  scope === "filtered"
+              ? "app-button-primary border border-sky-700 text-white"
+              : "app-button-secondary text-slate-700"
           }`}
         >
           Use filtered orders
@@ -351,10 +362,10 @@ export default function OrdersExportPanel({
           type="button"
           onClick={() => setScope("selected")}
           disabled={selectedOrders.length === 0}
-          className={`px-4 py-2 rounded-lg text-sm font-medium border ${
-            scope === "selected" && selectedOrders.length > 0
-              ? "bg-sky-700 text-white border-sky-700"
-              : "border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  scope === "selected" && selectedOrders.length > 0
+              ? "app-button-primary border border-sky-700 text-white"
+              : "app-button-secondary text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
           }`}
         >
           Use selected orders
@@ -366,7 +377,7 @@ export default function OrdersExportPanel({
           type="button"
           onClick={exportOrders}
           disabled={scopeOrders.length === 0}
-          className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="app-button-secondary inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Download size={16} />
           Export orders CSV
@@ -375,7 +386,7 @@ export default function OrdersExportPanel({
           type="button"
           onClick={loadProductsSummary}
           disabled={scopeOrderIds.length === 0 || loadingProducts}
-          className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-[0_18px_30px_-20px_rgba(5,150,105,0.9)] transition hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loadingProducts ? <RefreshCw size={16} className="animate-spin" /> : <Package size={16} />}
           {loadingProducts ? "Loading products summary..." : "Load products summary"}
@@ -390,33 +401,39 @@ export default function OrdersExportPanel({
       ) : null}
 
       {productsSummaryTotals ? (
-        <div className="space-y-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
+        <div className="space-y-4 rounded-[26px] border border-emerald-100 bg-emerald-50/60 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div className="rounded-xl bg-white px-4 py-3 border border-emerald-100">
+            <div className="app-surface rounded-2xl border border-emerald-100 px-4 py-3">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                 Orders in summary
               </p>
               <p className="mt-2 text-xl font-semibold text-slate-900">
-                {toNumber(productsSummaryTotals.orders_count).toLocaleString()}
+                {formatNumber(productsSummaryTotals.orders_count, {
+                  maximumFractionDigits: 0,
+                })}
               </p>
             </div>
-            <div className="rounded-xl bg-white px-4 py-3 border border-emerald-100">
+            <div className="app-surface rounded-2xl border border-emerald-100 px-4 py-3">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                 Unique products
               </p>
               <p className="mt-2 text-xl font-semibold text-slate-900">
-                {toNumber(productsSummaryTotals.products_count).toLocaleString()}
+                {formatNumber(productsSummaryTotals.products_count, {
+                  maximumFractionDigits: 0,
+                })}
               </p>
             </div>
-            <div className="rounded-xl bg-white px-4 py-3 border border-emerald-100">
+            <div className="app-surface rounded-2xl border border-emerald-100 px-4 py-3">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                 Units sold
               </p>
               <p className="mt-2 text-xl font-semibold text-slate-900">
-                {toNumber(productsSummaryTotals.total_units_sold).toLocaleString()}
+                {formatNumber(productsSummaryTotals.total_units_sold, {
+                  maximumFractionDigits: 0,
+                })}
               </p>
             </div>
-            <div className="rounded-xl bg-white px-4 py-3 border border-emerald-100">
+            <div className="app-surface rounded-2xl border border-emerald-100 px-4 py-3">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                 Gross sales
               </p>
@@ -428,7 +445,9 @@ export default function OrdersExportPanel({
 
           {productsSummaryMeta?.missing_order_ids?.length > 0 ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              {productsSummaryMeta.missing_order_ids.length.toLocaleString()} order(s)
+              {formatNumber(productsSummaryMeta.missing_order_ids.length, {
+                maximumFractionDigits: 0,
+              })} order(s)
               were skipped because they were not available in the current store scope.
             </div>
           ) : null}
@@ -441,7 +460,7 @@ export default function OrdersExportPanel({
                 value={productsSearchTerm}
                 onChange={(event) => setProductsSearchTerm(event.target.value)}
                 placeholder="Search product, variant, or SKU..."
-                className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="app-input w-full py-2 pl-9 pr-3 text-sm"
               />
             </div>
 
@@ -450,7 +469,7 @@ export default function OrdersExportPanel({
                 type="button"
                 onClick={toggleSelectAllVisibleProducts}
                 disabled={visibleProducts.length === 0}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="app-button-secondary rounded-lg px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {allVisibleProductsSelected ? "Unselect visible products" : "Select visible products"}
               </button>
@@ -466,13 +485,17 @@ export default function OrdersExportPanel({
               >
                 <Download size={16} />
                 {selectedProductKeys.length > 0
-                  ? `Export selected products (${selectedProductKeys.length.toLocaleString()})`
-                  : `Export visible products (${visibleProducts.length.toLocaleString()})`}
+                  ? `Export selected products (${formatNumber(selectedProductKeys.length, {
+                      maximumFractionDigits: 0,
+                    })})`
+                  : `Export visible products (${formatNumber(visibleProducts.length, {
+                      maximumFractionDigits: 0,
+                    })})`}
               </button>
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="app-table-shell rounded-[24px]">
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full min-w-[860px]">
                 <thead className="bg-slate-50 border-b border-slate-200">
@@ -524,10 +547,14 @@ export default function OrdersExportPanel({
                           {product.sku || "-"}
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-slate-900">
-                          {toNumber(product.orders_count).toLocaleString()}
+                          {formatNumber(product.orders_count, {
+                            maximumFractionDigits: 0,
+                          })}
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-slate-900">
-                          {toNumber(product.quantity_sold).toLocaleString()}
+                          {formatNumber(product.quantity_sold, {
+                            maximumFractionDigits: 0,
+                          })}
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-slate-900">
                           {formatAmount(product.gross_sales)}
@@ -572,13 +599,17 @@ export default function OrdersExportPanel({
                       <p className="text-slate-600">
                         Orders:{" "}
                         <span className="font-medium text-slate-900">
-                          {toNumber(product.orders_count).toLocaleString()}
+                          {formatNumber(product.orders_count, {
+                            maximumFractionDigits: 0,
+                          })}
                         </span>
                       </p>
                       <p className="text-slate-600">
                         Qty:{" "}
                         <span className="font-medium text-slate-900">
-                          {toNumber(product.quantity_sold).toLocaleString()}
+                          {formatNumber(product.quantity_sold, {
+                            maximumFractionDigits: 0,
+                          })}
                         </span>
                       </p>
                       <p className="text-slate-600">
@@ -600,10 +631,16 @@ export default function OrdersExportPanel({
 
           <p className="text-xs text-slate-500">
             {selectedProductKeys.length > 0
-              ? `${selectedProductKeys.length.toLocaleString()} product rows selected`
-              : `${visibleProducts.length.toLocaleString()} visible product rows ready for export`}
+              ? `${formatNumber(selectedProductKeys.length, {
+                  maximumFractionDigits: 0,
+                })} product rows selected`
+              : `${formatNumber(visibleProducts.length, {
+                  maximumFractionDigits: 0,
+                })} visible product rows ready for export`}
             {selectedProductKeys.length > 0
-              ? `, ${selectedVisibleProductCount.toLocaleString()} selected rows are visible in the current search.`
+              ? `, ${formatNumber(selectedVisibleProductCount, {
+                  maximumFractionDigits: 0,
+                })} selected rows are visible in the current search.`
               : "."}
           </p>
         </div>

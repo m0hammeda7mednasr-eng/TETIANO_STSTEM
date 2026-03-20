@@ -3,6 +3,7 @@ const DEFAULT_LOCALE = "en";
 export const INITIAL_ORDER_SCOPE_FILTERS = {
   dateFrom: "",
   dateTo: "",
+  ordersLimit: "",
   paymentFilter: "all",
   fulfillmentFilter: "all",
   refundFilter: "all",
@@ -76,9 +77,14 @@ const ORDER_SCOPE_TRANSLATIONS = {
       start: "البداية",
       now: "الآن",
       period: "الفترة",
+      ordersLimit: "عدد الأوردرات",
+      ordersLimitHint:
+        "اتركها فارغة لتحليل كل طلبات النطاق، أو اكتب مثلًا 1000 أو 4000.",
       payment: "الدفع",
       fulfillment: "التسليم",
       refund: "الاسترجاع",
+      recentOrders: "آخر",
+      orders: "أوردر",
       paid_or_partial: "مدفوع + مدفوع جزئيًا",
       pending_or_authorized: "معلق + مصرح به",
       paid: "مدفوع",
@@ -123,9 +129,14 @@ const ORDER_SCOPE_TRANSLATIONS = {
       start: "Start",
       now: "Now",
       period: "Period",
+      ordersLimit: "Orders Count",
+      ordersLimitHint:
+        "Leave empty to analyze the full scoped orders, or enter a count like 1000 or 4000.",
       payment: "Payment",
       fulfillment: "Fulfillment",
       refund: "Refund",
+      recentOrders: "Latest",
+      orders: "orders",
       paid_or_partial: "Paid + Partially Paid",
       pending_or_authorized: "Pending + Authorized",
       paid: "Paid",
@@ -164,6 +175,7 @@ const hasValue = (value) => String(value || "").trim().length > 0;
 export const hasActiveOrderScopeFilters = (filters = {}) =>
   hasValue(filters.dateFrom) ||
   hasValue(filters.dateTo) ||
+  hasValue(filters.ordersLimit) ||
   String(filters.paymentFilter || "all") !== "all" ||
   String(filters.fulfillmentFilter || "all") !== "all" ||
   String(filters.refundFilter || "all") !== "all";
@@ -176,6 +188,9 @@ export const buildOrderScopeApiParams = (filters = {}) => {
   }
   if (hasValue(filters.dateTo)) {
     params.date_to = filters.dateTo;
+  }
+  if (hasValue(filters.ordersLimit)) {
+    params.orders_limit = String(filters.ordersLimit).replace(/[^\d]/g, "");
   }
   if (String(filters.paymentFilter || "all") !== "all") {
     params.payment_status = filters.paymentFilter;
@@ -219,6 +234,12 @@ export const getOrderScopeSummary = (
     const from = filters.dateFrom || translations.start;
     const to = filters.dateTo || translations.now;
     parts.push(`${translations.period}: ${from} → ${to}`);
+  }
+
+  if (hasValue(filters.ordersLimit)) {
+    parts.push(
+      `${translations.ordersLimit}: ${translations.recentOrders} ${filters.ordersLimit} ${translations.orders}`,
+    );
   }
 
   if (String(filters.paymentFilter || "all") !== "all") {

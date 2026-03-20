@@ -15,6 +15,7 @@ import {
   Store,
 } from "lucide-react";
 import { markSharedDataUpdated } from "../utils/realtime";
+import { formatDateTime } from "../utils/helpers";
 
 const normalizeShopDomain = (value) => {
   let raw = String(value || "")
@@ -647,7 +648,13 @@ export default function Settings() {
                 }
                 subtitle={
                   metaStatus?.integration?.meta?.last_sync_at
-                    ? `Last sync ${new Date(metaStatus.integration.meta.last_sync_at).toLocaleString()}`
+                    ? `Last sync ${formatDateTime(metaStatus.integration.meta.last_sync_at, {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}`
                     : "Set token and ad accounts to start pulling campaigns"
                 }
                 tone="sky"

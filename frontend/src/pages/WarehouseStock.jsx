@@ -23,7 +23,7 @@ import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
 import { warehouseAPI } from "../utils/api";
-import { formatCurrency, formatDateTime } from "../utils/helpers";
+import { formatCurrency, formatDateTime, formatNumber } from "../utils/helpers";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { extractObject } from "../utils/response";
@@ -35,7 +35,8 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const formatCount = (value) => toNumber(value).toLocaleString("ar-EG");
+const formatCount = (value) =>
+  formatNumber(value, { maximumFractionDigits: 0 });
 
 const matchesSearch = (row, keyword) => {
   const normalized = String(keyword || "").trim().toLowerCase();
@@ -97,10 +98,10 @@ const getDifferenceBadgeClassName = (difference) => {
 const formatDifference = (value) => {
   const numericValue = toNumber(value);
   if (numericValue > 0) {
-    return `+${numericValue.toLocaleString("ar-EG")}`;
+    return `+${formatNumber(numericValue, { maximumFractionDigits: 0 })}`;
   }
 
-  return numericValue.toLocaleString("ar-EG");
+  return formatNumber(numericValue, { maximumFractionDigits: 0 });
 };
 
 const getDisplayTitle = (row) =>

@@ -29,19 +29,6 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 const toArray = (value) => (Array.isArray(value) ? value : []);
-const formatCount = (value) => toNumber(value).toLocaleString("en-US");
-const formatPercent = (value) => `${toNumber(value).toFixed(2)}%`;
-const formatCurrency = (value, currency = "USD") => {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency || "USD",
-      maximumFractionDigits: 2,
-    }).format(toNumber(value));
-  } catch {
-    return `${toNumber(value).toFixed(2)} ${currency || "USD"}`;
-  }
-};
 const truncateText = (value, maxLength = 260) => {
   const normalized = String(value || "").trim();
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength)}...`;
@@ -143,7 +130,8 @@ function SimpleTable({ columns, rows, renderRow, emptyText }) {
 }
 
 export default function MetaCommandCenter() {
-  const { select, formatDateTime } = useLocale();
+  const { select, formatCurrency, formatDateTime, formatNumber, formatPercent } =
+    useLocale();
   const [status, setStatus] = useState(null);
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -178,6 +166,18 @@ export default function MetaCommandCenter() {
 
   const summary = overview?.overview?.summary || {};
   const storeSnapshot = overview?.store_snapshot || {};
+  const formatCount = (value) =>
+    formatNumber(value, { maximumFractionDigits: 0 });
+  const formatRate = (value) =>
+    formatPercent(value, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  const formatMoney = (value, currency = "USD") =>
+    formatCurrency(value, {
+      currency: currency || "USD",
+      currencyStyle: "intl",
+    });
   const recommendations = useMemo(() => toArray(overview?.recommendations).slice(0, 6), [overview]);
   const campaigns = useMemo(() => toArray(overview?.overview?.campaigns).slice(0, 8), [overview]);
   const ads = useMemo(() => toArray(overview?.overview?.ads).slice(0, 8), [overview]);
@@ -256,13 +256,13 @@ export default function MetaCommandCenter() {
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
             <Card title="Meta connection" value={status?.integration?.meta?.configured ? (status?.integration?.meta?.connected ? "Connected" : "Configured") : "Not configured"} subtitle={status?.integration?.meta?.last_sync_at ? `Last sync ${formatDateTime(status.integration.meta.last_sync_at)}` : "Configure Meta in Settings to validate the token"} icon={Megaphone} tone="sky" />
             <Card title="OpenRouter" value={status?.integration?.openrouter?.configured ? (status?.integration?.openrouter?.connected ? "Ready" : "Configured") : "Not configured"} subtitle={status?.integration?.openrouter?.model || "AI brief and operator chat run from the saved model"} icon={Bot} tone="violet" />
-            <Card title="Net revenue" value={formatCurrency(storeSnapshot?.financial?.net_revenue, primaryCurrency)} subtitle={`${formatCount(storeSnapshot?.orders?.total)} orders in the store snapshot`} icon={Wallet} tone="emerald" />
+            <Card title="Net revenue" value={formatMoney(storeSnapshot?.financial?.net_revenue, primaryCurrency)} subtitle={`${formatCount(storeSnapshot?.orders?.total)} orders in the store snapshot`} icon={Wallet} tone="emerald" />
             <Card title="Low stock pressure" value={formatCount(storeSnapshot?.catalog?.low_stock_count)} subtitle={`${formatCount(storeSnapshot?.catalog?.out_of_stock_count)} out of stock`} icon={KeyRound} tone="amber" />
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-            <Card title="Success rate" value={formatPercent(storeSnapshot?.orders?.success_rate)} subtitle={`${formatCount(storeSnapshot?.orders?.paid)} paid orders`} icon={Target} tone="sky" />
-            <Card title="Pending orders" value={formatCount(storeSnapshot?.orders?.pending)} subtitle={formatCurrency(storeSnapshot?.financial?.pending_amount, primaryCurrency)} icon={Brain} tone="rose" />
+            <Card title="Success rate" value={formatRate(storeSnapshot?.orders?.success_rate)} subtitle={`${formatCount(storeSnapshot?.orders?.paid)} paid orders`} icon={Target} tone="sky" />
+            <Card title="Pending orders" value={formatCount(storeSnapshot?.orders?.pending)} subtitle={formatMoney(storeSnapshot?.financial?.pending_amount, primaryCurrency)} icon={Brain} tone="rose" />
             <Card title="Active customers" value={formatCount(storeSnapshot?.customers?.active_customers_lookback)} subtitle={`${formatCount(storeSnapshot?.customers?.total_customers)} total customers`} icon={Bot} tone="emerald" />
             <Card title="Schema" value={status?.schemaReady ? "Ready" : "Missing"} subtitle="Run ADD_META_ANALYTICS_MODULE.sql before first live sync" icon={Sparkles} tone="violet" />
           </div>
@@ -289,19 +289,19 @@ export default function MetaCommandCenter() {
           </Section>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <Card title="Spend" value={formatCurrency(summary.spend, primaryCurrency)} subtitle={`${formatCount(summary.accounts_count)} accounts in scope`} icon={Wallet} tone="sky" />
+            <Card title="Spend" value={formatMoney(summary.spend, primaryCurrency)} subtitle={`${formatCount(summary.accounts_count)} accounts in scope`} icon={Wallet} tone="sky" />
             <Card title="Impressions" value={formatCount(summary.impressions)} subtitle={`${formatCount(summary.clicks)} clicks`} icon={LineChart} tone="emerald" />
-            <Card title="CTR" value={formatPercent(summary.ctr)} subtitle={`CPC ${formatCurrency(summary.cpc, primaryCurrency)}`} icon={TrendingUp} tone="amber" />
+            <Card title="CTR" value={formatRate(summary.ctr)} subtitle={`CPC ${formatMoney(summary.cpc, primaryCurrency)}`} icon={TrendingUp} tone="amber" />
             <Card title="Purchases" value={formatCount(summary.purchases)} subtitle={`ROAS ${toNumber(summary.roas).toFixed(2)}x`} icon={Target} tone="violet" />
             <Card title="Leads" value={formatCount(summary.leads)} subtitle={`${formatCount(summary.rows_count)} daily insight rows`} icon={Sparkles} tone="rose" />
           </div>
 
           <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
             <Section title="Top Campaigns" description="Highest-spend campaigns ranked from the synced Meta data.">
-              <SimpleTable columns={["Campaign", "Spend", "Clicks", "Purchases", "ROAS"]} rows={campaigns} emptyText="No campaign data available yet." renderRow={(row) => <tr key={row.id} className="hover:bg-slate-50"><td className="px-4 py-3"><div className="font-medium text-slate-900">{row.name || row.id}</div><div className="text-xs text-slate-500">{row.objective || "-"}</div></td><td className="px-4 py-3 text-slate-700">{formatCurrency(row.spend, primaryCurrency)}</td><td className="px-4 py-3 text-slate-700">{formatCount(row.clicks)}</td><td className="px-4 py-3 text-slate-700">{formatCount(row.purchases)}</td><td className="px-4 py-3 text-slate-700">{toNumber(row.roas).toFixed(2)}x</td></tr>} />
+              <SimpleTable columns={["Campaign", "Spend", "Clicks", "Purchases", "ROAS"]} rows={campaigns} emptyText="No campaign data available yet." renderRow={(row) => <tr key={row.id} className="hover:bg-slate-50"><td className="px-4 py-3"><div className="font-medium text-slate-900">{row.name || row.id}</div><div className="text-xs text-slate-500">{row.objective || "-"}</div></td><td className="px-4 py-3 text-slate-700">{formatMoney(row.spend, primaryCurrency)}</td><td className="px-4 py-3 text-slate-700">{formatCount(row.clicks)}</td><td className="px-4 py-3 text-slate-700">{formatCount(row.purchases)}</td><td className="px-4 py-3 text-slate-700">{formatNumber(row.roas, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}x</td></tr>} />
             </Section>
             <Section title="Top Ads" description="Best or biggest ads by spend based on synced daily ad-level rows.">
-              <SimpleTable columns={["Ad", "Spend", "CTR", "Leads", "Purchases"]} rows={ads} emptyText="No ad data available yet." renderRow={(row) => <tr key={row.id} className="hover:bg-slate-50"><td className="px-4 py-3"><div className="font-medium text-slate-900">{row.name || row.id}</div><div className="text-xs text-slate-500">Campaign {row.campaign_id || "-"}</div></td><td className="px-4 py-3 text-slate-700">{formatCurrency(row.spend, primaryCurrency)}</td><td className="px-4 py-3 text-slate-700">{formatPercent(row.ctr)}</td><td className="px-4 py-3 text-slate-700">{formatCount(row.leads)}</td><td className="px-4 py-3 text-slate-700">{formatCount(row.purchases)}</td></tr>} />
+              <SimpleTable columns={["Ad", "Spend", "CTR", "Leads", "Purchases"]} rows={ads} emptyText="No ad data available yet." renderRow={(row) => <tr key={row.id} className="hover:bg-slate-50"><td className="px-4 py-3"><div className="font-medium text-slate-900">{row.name || row.id}</div><div className="text-xs text-slate-500">Campaign {row.campaign_id || "-"}</div></td><td className="px-4 py-3 text-slate-700">{formatMoney(row.spend, primaryCurrency)}</td><td className="px-4 py-3 text-slate-700">{formatRate(row.ctr)}</td><td className="px-4 py-3 text-slate-700">{formatCount(row.leads)}</td><td className="px-4 py-3 text-slate-700">{formatCount(row.purchases)}</td></tr>} />
             </Section>
           </div>
 

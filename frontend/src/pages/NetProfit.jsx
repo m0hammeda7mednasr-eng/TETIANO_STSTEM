@@ -4,6 +4,7 @@ import api from "../utils/api";
 import { extractArray, extractObject } from "../utils/response";
 import {
   DollarSign,
+  Download,
   Edit,
   Pencil,
   Package,
@@ -14,6 +15,12 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
+import { buildCsvFilename, downloadCsvSections } from "../utils/csv";
+import {
+  formatCurrency as formatLocaleCurrency,
+  formatNumber,
+  formatPercent as formatLocalePercent,
+} from "../utils/helpers";
 
 const SUMMARY_DEFAULT = {
   total_revenue: 0,
@@ -24,7 +31,6 @@ const SUMMARY_DEFAULT = {
   profit_margin: 0,
 };
 
-const CURRENCY_LABEL = "LE";
 const EMPTY_COST_FORM = {
   cost_name: "",
   cost_type: "operations",
@@ -57,9 +63,15 @@ const COST_TYPE_GROUPS = {
   other: "other",
 };
 
-const formatAmount = (value) =>
-  `${Number(value || 0).toFixed(2)} ${CURRENCY_LABEL}`;
 const toAmount = (value) => Number(value || 0);
+const formatAmount = (value) => formatLocaleCurrency(value);
+const formatCount = (value) =>
+  formatNumber(Math.round(toAmount(value)), { maximumFractionDigits: 0 });
+const formatPercent = (value) =>
+  formatLocalePercent(toAmount(value), {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 const hasCostPrice = (value) =>
   value !== null && value !== undefined && String(value).trim() !== "";
 const getCostGroupKey = (costType) =>
@@ -88,6 +100,33 @@ const formatEntryCount = (count) => {
   if (!count) return "No entries";
   return `${count} ${count === 1 ? "entry" : "entries"}`;
 };
+const getMarginTone = (value) => {
+  const margin = toAmount(value);
+  if (margin >= 35) {
+    return {
+      badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+      bar: "bg-emerald-500",
+    };
+  }
+  if (margin >= 15) {
+    return {
+      badge: "bg-sky-50 text-sky-700 ring-sky-200",
+      bar: "bg-sky-500",
+    };
+  }
+  if (margin >= 0) {
+    return {
+      badge: "bg-amber-50 text-amber-700 ring-amber-200",
+      bar: "bg-amber-500",
+    };
+  }
+  return {
+    badge: "bg-rose-50 text-rose-700 ring-rose-200",
+    bar: "bg-rose-500",
+  };
+};
+const getProfitToneClass = (value) =>
+  toAmount(value) >= 0 ? "text-emerald-700" : "text-rose-700";
 const buildProductCostBreakdown = (product, costs) => {
   const soldQuantity = toAmount(product?.sold_quantity);
   const ordersCount = toAmount(product?.orders_count);
@@ -343,6 +382,116 @@ export default function NetProfit() {
   const getProductCosts = (productId) =>
     operationalCostsByProduct.get(productId) || [];
 
+  const exportNetProfitView = useCallback(() => {
+    const visibleProductRows = filteredProducts.map((product) => {
+      const productCosts = operationalCostsByProduct.get(product.id) || [];
+      const breakdown = buildProductCostBreakdown(product, productCosts);
+
+      return [
+        product.id,
+        product.title || "Untitled product",
+        toAmount(product.sold_quantity),
+        toAmount(product.orders_count),
+        toAmount(product.avg_selling_price),
+        toAmount(product.total_revenue),
+        hasCostPrice(product.cost_price) ? toAmount(product.cost_price) : "",
+        toAmount(product.total_cost),
+        breakdown.ads,
+        breakdown.shipping,
+        breakdown.operations,
+        breakdown.other,
+        breakdown.operationalTotal,
+        breakdown.totalCosts,
+        toAmount(product.net_profit),
+        toAmount(product.profit_margin),
+        productCosts.length,
+      ];
+    });
+
+    const visibleCostRows = filteredProducts.flatMap((product) => {
+      const productCosts = operationalCostsByProduct.get(product.id) || [];
+
+      return productCosts.map((cost) => [
+        product.id,
+        product.title || "Untitled product",
+        cost.cost_name || COST_TYPE_LABELS[cost.cost_type] || "Operational Cost",
+        cost.cost_type || "other",
+        cost.apply_to || "per_unit",
+        toAmount(cost.amount),
+        getAppliedCostTotal(
+          cost,
+          product.sold_quantity,
+          product.orders_count,
+        ),
+        cost.description || "",
+      ]);
+    });
+
+    downloadCsvSections({
+      filename: buildCsvFilename("net-profit-view"),
+      sections: [
+        {
+          title: "Export metadata",
+          headers: ["Field", "Value"],
+          rows: [
+            ["Search", searchTerm.trim() || "-"],
+            ["Visible products", filteredProducts.length],
+            ["Exported at", new Date().toISOString()],
+          ],
+        },
+        {
+          title: "Summary",
+          headers: ["Metric", "Value"],
+          rows: [
+            ["Total revenue", toAmount(summary.total_revenue)],
+            ["Total cost", toAmount(summary.total_cost)],
+            ["Operational costs", toAmount(summary.total_operational_costs)],
+            ["Total net profit", toAmount(summary.total_net_profit)],
+            ["Sold units", toAmount(summary.total_sold_units)],
+            ["Profit margin", toAmount(summary.profit_margin)],
+          ],
+        },
+        {
+          title: "Visible products",
+          headers: [
+            "Product ID",
+            "Title",
+            "Sold Qty",
+            "Orders",
+            "Avg Sell",
+            "Revenue",
+            "Cost / Unit",
+            "Base Product Cost",
+            "Ads Cost",
+            "Shipping Cost",
+            "Operations Cost",
+            "Other Cost",
+            "Operational Total",
+            "Total Costs",
+            "Net Profit",
+            "Profit Margin %",
+            "Tracked Cost Entries",
+          ],
+          rows: visibleProductRows,
+        },
+        {
+          title: "Tracked operational costs",
+          headers: [
+            "Product ID",
+            "Product",
+            "Cost Name",
+            "Cost Type",
+            "Apply To",
+            "Unit Amount",
+            "Applied Total",
+            "Description",
+          ],
+          rows: visibleCostRows,
+        },
+      ],
+    });
+  }, [filteredProducts, operationalCostsByProduct, searchTerm, summary]);
+
   if (loading) {
     return (
       <div className="flex h-screen bg-gray-100">
@@ -379,114 +528,127 @@ export default function NetProfit() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <SummaryCard
               label="Total Revenue"
               value={formatAmount(summary.total_revenue)}
               icon={DollarSign}
-              color="from-blue-500 to-blue-700"
+              color="bg-sky-100 text-sky-700"
             />
             <SummaryCard
               label="Total Cost"
               value={formatAmount(summary.total_cost)}
               icon={Package}
-              color="from-orange-500 to-orange-700"
+              color="bg-amber-100 text-amber-700"
             />
             <SummaryCard
               label="Operational Costs"
               value={formatAmount(summary.total_operational_costs)}
               icon={TrendingUp}
-              color="from-yellow-500 to-yellow-700"
+              color="bg-orange-100 text-orange-700"
             />
             <SummaryCard
               label="Total Net Profit"
               value={formatAmount(summary.total_net_profit)}
               icon={TrendingUp}
-              color="from-emerald-500 to-emerald-700"
+              color="bg-emerald-100 text-emerald-700"
             />
             <SummaryCard
               label="Sold Units"
-              value={String(Math.round(summary.total_sold_units))}
+              value={formatCount(summary.total_sold_units)}
               icon={Package}
-              color="from-indigo-500 to-indigo-700"
+              color="bg-indigo-100 text-indigo-700"
             />
             <SummaryCard
               label="Profit Margin"
-              value={`${summary.profit_margin.toFixed(2)}%`}
+              value={formatPercent(summary.profit_margin)}
               icon={TrendingUp}
-              color="from-purple-500 to-purple-700"
+              color="bg-rose-100 text-rose-700"
             />
           </div>
 
-          <div className="bg-white rounded-lg shadow-lg p-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-center gap-3 flex-1">
-                <Search className="text-gray-500" size={18} />
+          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-1 items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <Search className="text-slate-500" size={18} />
                 <input
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   placeholder="Search by product name or ID..."
-                  className="w-full px-3 py-2 border rounded-lg"
+                  className="w-full border-0 bg-transparent px-0 py-0 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:ring-0"
                 />
               </div>
-              <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-800 border border-blue-100">
-                Costs are now tracked per product only. Add ads, shipping and
-                operations directly on each item.
+              <div className="flex flex-col gap-2 xl:items-end">
+                <button
+                  onClick={exportNetProfitView}
+                  className="inline-flex items-center gap-2 self-start rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-950 xl:self-end"
+                >
+                  <Download size={16} />
+                  Export CSV
+                </button>
+                <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                  Costs are tracked per product. Use Edit to manage cost price,
+                  ads, shipping, workshop, packaging, and other expenses.
+                </div>
+                <div className="text-xs font-medium text-slate-500">
+                  Showing {formatCount(filteredProducts.length)} of{" "}
+                  {formatCount(products.length)} products
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="data-table table-auto w-full min-w-[1640px]">
+          <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
+            <div className="overflow-x-auto" dir="ltr">
+              <table className="data-table table-fixed w-full min-w-[1880px]">
                 <colgroup>
-                  <col className="w-[320px]" />
-                  <col className="w-[90px]" />
-                  <col className="w-[90px]" />
-                  <col className="w-[120px]" />
+                  <col className="w-[340px]" />
+                  <col className="w-[110px]" />
+                  <col className="w-[110px]" />
+                  <col className="w-[160px]" />
+                  <col className="w-[170px]" />
+                  <col className="w-[620px]" />
+                  <col className="w-[170px]" />
+                  <col className="w-[180px]" />
                   <col className="w-[140px]" />
-                  <col className="w-[560px]" />
-                  <col className="w-[150px]" />
-                  <col className="w-[150px]" />
-                  <col className="w-[110px]" />
-                  <col className="w-[110px]" />
+                  <col className="w-[180px]" />
                 </colgroup>
-                <thead className="bg-gray-50">
+                <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 backdrop-blur">
                   <tr>
-                    <th className="px-5 py-4 text-right text-sm font-semibold text-gray-700">
+                    <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Product
                     </th>
-                    <th className="px-4 py-4 text-center text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-center text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Sold
                     </th>
-                    <th className="px-4 py-4 text-center text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-center text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Orders
                     </th>
-                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Avg Sell
                     </th>
-                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Revenue
                     </th>
-                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Cost Breakdown
                     </th>
-                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Total Costs
                     </th>
-                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Net Profit
                     </th>
-                    <th className="px-4 py-4 text-center text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-center text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Margin
                     </th>
-                    <th className="px-4 py-4 text-center text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-center text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Actions
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200">
+                <tbody className="divide-y divide-slate-200 bg-white">
                   {filteredProducts.map((product) => {
                     const opCosts = getProductCosts(product.id);
                     const breakdown = buildProductCostBreakdown(
@@ -505,49 +667,83 @@ export default function NetProfit() {
                       product.cost_price,
                     );
 
+                    const marginTone = getMarginTone(product.profit_margin);
+
                     return (
-                      <tr key={product.id} className="hover:bg-gray-50">
-                        <td className="px-5 py-4">
-                          <div className="flex items-start gap-3 min-w-0">
+                      <tr
+                        key={product.id}
+                        className="align-top transition-colors hover:bg-slate-50/80"
+                      >
+                        <td className="px-5 py-5">
+                          <div className="flex min-w-0 items-start gap-4">
                             {product.image_url ? (
                               <img
                                 src={product.image_url}
                                 alt={product.title}
-                                className="w-12 h-12 object-cover rounded-lg border border-gray-200 flex-none"
+                                className="h-16 w-16 flex-none rounded-2xl border border-slate-200 object-cover shadow-sm shadow-slate-200/60"
                               />
                             ) : (
-                              <div className="w-12 h-12 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center flex-none">
-                                <Package size={20} className="text-gray-400" />
+                              <div className="flex h-16 w-16 flex-none items-center justify-center rounded-2xl border border-slate-200 bg-slate-100">
+                                <Package size={22} className="text-slate-400" />
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-gray-900 leading-6 break-normal whitespace-normal">
+                              <p
+                                className="break-words text-sm font-semibold leading-6 text-slate-900"
+                                dir="auto"
+                              >
                                 {product.title}
                               </p>
-                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                                <span className="truncate">{product.id}</span>
-                                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
-                                  {opCosts.length} tracked costs
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                                  #{product.id}
+                                </span>
+                                <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+                                  {formatCount(opCosts.length)} tracked
+                                </span>
+                                <span
+                                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                                    productCostMissing
+                                      ? "bg-amber-50 text-amber-700"
+                                      : "bg-emerald-50 text-emerald-700"
+                                  }`}
+                                >
+                                  {productCostMissing ? "Cost missing" : "Cost saved"}
                                 </span>
                               </div>
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-4 text-sm text-center text-gray-700">
-                          {product.sold_quantity || 0}
+                        <td className="px-4 py-5">
+                          <DataMetric
+                            value={formatCount(product.sold_quantity)}
+                            note="units sold"
+                            align="center"
+                          />
                         </td>
-                        <td className="px-4 py-4 text-sm text-center text-gray-700">
-                          {product.orders_count || 0}
+                        <td className="px-4 py-5">
+                          <DataMetric
+                            value={formatCount(product.orders_count)}
+                            note="orders"
+                            align="center"
+                          />
                         </td>
-                        <td className="px-4 py-4 text-sm text-right font-medium text-gray-800">
-                          {formatAmount(product.avg_selling_price)}
+                        <td className="px-4 py-5">
+                          <DataMetric
+                            value={formatAmount(product.avg_selling_price)}
+                            note="per unit"
+                          />
                         </td>
-                        <td className="px-4 py-4 text-sm text-right text-blue-700 font-semibold">
-                          {formatAmount(product.total_revenue)}
+                        <td className="px-4 py-5">
+                          <DataMetric
+                            value={formatAmount(product.total_revenue)}
+                            note="gross sales"
+                            valueClassName="text-sky-700"
+                          />
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-5">
                           <div className="space-y-3">
-                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+                            <div className="grid grid-cols-2 gap-2">
                               <BreakdownMetric
                                 label="Product Cost"
                                 value={
@@ -557,13 +753,13 @@ export default function NetProfit() {
                                 }
                                 note={
                                   productCostMissing
-                                    ? "Set it from Edit to calculate the real product cost"
+                                    ? "Add from Manage to unlock exact profit"
                                     : `Base total ${formatAmount(product.total_cost)}`
                                 }
                                 valueClassName={
                                   productCostMissing
                                     ? "text-amber-700"
-                                    : "text-gray-900"
+                                    : "text-slate-900"
                                 }
                               />
                               <BreakdownMetric
@@ -596,95 +792,132 @@ export default function NetProfit() {
                               />
                             </div>
 
-                            {opCosts.length > 0 ? (
-                              <div className="space-y-2">
-                                {opCosts.map((cost) => (
-                                  <div
-                                    key={cost.id}
-                                    className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2"
-                                  >
-                                    <div className="min-w-0 text-right">
-                                      <p className="truncate text-xs font-semibold text-gray-800">
-                                        {cost.cost_name ||
-                                          COST_TYPE_LABELS[cost.cost_type] ||
-                                          "Operational Cost"}
-                                      </p>
-                                      <p className="text-[11px] text-gray-500">
-                                        {COST_TYPE_LABELS[cost.cost_type] ||
-                                          "Other"}{" "}
-                                        | {getApplyToLabel(cost.apply_to)} |{" "}
-                                        {formatAmount(cost.amount)}
-                                      </p>
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs font-semibold text-gray-800">
-                                        {formatAmount(
-                                          getAppliedCostTotal(
-                                            cost,
-                                            product.sold_quantity,
-                                            product.orders_count,
-                                          ),
-                                        )}
-                                      </span>
-                                      <button
-                                        onClick={() =>
-                                          openCostModal(product.id, cost)
-                                        }
-                                        className="rounded p-1 text-blue-500 hover:bg-blue-50 hover:text-blue-700"
-                                        title="Edit cost"
-                                      >
-                                        <Pencil size={12} />
-                                      </button>
-                                      <button
-                                        onClick={() =>
-                                          deleteOperationalCost(cost.id)
-                                        }
-                                        className="rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-700"
-                                        title="Delete cost"
-                                      >
-                                        <Trash2 size={12} />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                              <div className="mb-2 flex items-center justify-between gap-3">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                  Tracked Entries
+                                </p>
+                                <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                                  {formatCount(opCosts.length)}
+                                </span>
                               </div>
-                            ) : (
-                              <p className="text-xs text-gray-500 text-right">
-                                No per-product costs added yet.
-                              </p>
-                            )}
+
+                              {opCosts.length > 0 ? (
+                                <div className="max-h-[240px] space-y-2 overflow-y-auto pr-1">
+                                  {opCosts.map((cost) => (
+                                    <div
+                                      key={cost.id}
+                                      className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm shadow-slate-100/70"
+                                    >
+                                      <div className="min-w-0">
+                                        <p
+                                          className="truncate text-sm font-semibold text-slate-900"
+                                          dir="auto"
+                                        >
+                                          {cost.cost_name ||
+                                            COST_TYPE_LABELS[cost.cost_type] ||
+                                            "Operational Cost"}
+                                        </p>
+                                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                                          <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                                            {COST_TYPE_LABELS[cost.cost_type] ||
+                                              "Other"}
+                                          </span>
+                                          <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                                            {getApplyToLabel(cost.apply_to)}
+                                          </span>
+                                          <span className="whitespace-nowrap">
+                                            {formatAmount(cost.amount)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 pl-2">
+                                        <span className="whitespace-nowrap text-sm font-semibold tabular-nums text-slate-900">
+                                          {formatAmount(
+                                            getAppliedCostTotal(
+                                              cost,
+                                              product.sold_quantity,
+                                              product.orders_count,
+                                            ),
+                                          )}
+                                        </span>
+                                        <button
+                                          onClick={() =>
+                                            openCostModal(product.id, cost)
+                                          }
+                                          className="rounded-lg p-1.5 text-blue-500 hover:bg-blue-50 hover:text-blue-700"
+                                          title="Edit cost"
+                                        >
+                                          <Pencil size={12} />
+                                        </button>
+                                        <button
+                                          onClick={() =>
+                                            deleteOperationalCost(cost.id)
+                                          }
+                                          className="rounded-lg p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700"
+                                          title="Delete cost"
+                                        >
+                                          <Trash2 size={12} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-4 text-center text-xs text-slate-500">
+                                  No per-product costs added yet.
+                                </p>
+                              )}
+                            </div>
                           </div>
                         </td>
-                        <td className="px-4 py-4 text-sm text-right">
-                          <div className="space-y-1">
-                            <p className="font-semibold text-gray-900">
-                              {formatAmount(breakdown.totalCosts)}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              Ops {formatAmount(breakdown.operationalTotal)}
-                            </p>
+                        <td className="px-4 py-5">
+                          <DataMetric
+                            value={formatAmount(breakdown.totalCosts)}
+                            note={`Ops ${formatAmount(
+                              breakdown.operationalTotal,
+                            )}`}
+                          />
+                        </td>
+                        <td className="px-4 py-5">
+                          <DataMetric
+                            value={formatAmount(product.net_profit)}
+                            note={
+                              toAmount(product.net_profit) >= 0
+                                ? "profitable"
+                                : "loss making"
+                            }
+                            valueClassName={getProfitToneClass(product.net_profit)}
+                          />
+                        </td>
+                        <td className="px-4 py-5">
+                          <div className="mx-auto w-full max-w-[112px]">
+                            <div
+                              className={`rounded-full px-3 py-2 text-center text-sm font-semibold ring-1 ${marginTone.badge}`}
+                            >
+                              {formatPercent(product.profit_margin)}
+                            </div>
+                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                              <div
+                                className={`h-full rounded-full ${marginTone.bar}`}
+                                style={{
+                                  width: `${Math.min(
+                                    Math.abs(toAmount(product.profit_margin)),
+                                    100,
+                                  )}%`,
+                                }}
+                              />
+                            </div>
                           </div>
                         </td>
-                        <td
-                          className={`px-4 py-4 text-sm text-right font-semibold ${
-                            Number(product.net_profit || 0) >= 0
-                              ? "text-emerald-700"
-                              : "text-red-700"
-                          }`}
-                        >
-                          {formatAmount(product.net_profit)}
-                        </td>
-                        <td className="px-4 py-4 text-sm text-center font-medium text-gray-700">
-                          {Number(product.profit_margin || 0).toFixed(2)}%
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex items-center justify-center gap-1">
+                        <td className="px-4 py-5">
+                          <div className="flex flex-col gap-2">
                             <button
                               onClick={() => openCostModal(product.id)}
-                              className={`rounded p-1 ${
+                              className={`inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold ${
                                 productCostMissing
-                                  ? "text-amber-600 hover:bg-amber-50"
-                                  : "text-blue-600 hover:bg-blue-50"
+                                  ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                  : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
                               }`}
                               title={
                                 productCostMissing
@@ -692,17 +925,19 @@ export default function NetProfit() {
                                   : "Manage product cost and operational costs"
                               }
                             >
-                              <Edit size={16} />
+                              <Edit size={14} />
+                              {productCostMissing ? "Set Cost" : "Manage"}
                             </button>
                             <button
                               onClick={() => {
                                 openCostModal(product.id);
                                 prepareNewOperationalCost();
                               }}
-                              className="rounded p-1 text-emerald-600 hover:bg-emerald-50"
+                              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
                               title="Add operational cost"
                             >
-                              <Plus size={16} />
+                              <Plus size={14} />
+                              New Cost
                             </button>
                           </div>
                         </td>
@@ -1009,47 +1244,75 @@ export default function NetProfit() {
   );
 }
 
+function DataMetric({
+  value,
+  note,
+  valueClassName = "text-slate-900",
+  align = "left",
+}) {
+  const alignmentClass = align === "center" ? "text-center" : "text-left";
+
+  return (
+    <div className={alignmentClass}>
+      <div
+        className={`whitespace-nowrap text-lg font-semibold tracking-tight tabular-nums ${valueClassName}`}
+      >
+        {value}
+      </div>
+      <p className="mt-1 text-xs font-medium text-slate-500">{note}</p>
+    </div>
+  );
+}
+
 function BreakdownMetric({
   label,
   value,
   note,
-  valueClassName = "text-gray-900",
+  valueClassName = "text-slate-900",
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-right">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+    <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3 shadow-sm shadow-slate-100/70">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
-      <div className={`mt-1 text-sm font-semibold ${valueClassName}`}>
+      <div
+        className={`mt-2 whitespace-nowrap text-sm font-semibold tabular-nums ${valueClassName}`}
+      >
         {value}
       </div>
-      <p className="mt-1 text-[11px] text-gray-500">{note}</p>
+      <p className="mt-1 text-[11px] text-slate-500">{note}</p>
     </div>
   );
 }
 
 function InfoBadge({ label, value }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-100/60">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
-      <p className="mt-2 text-lg font-semibold text-gray-900">{value}</p>
+      <p className="mt-2 whitespace-nowrap text-lg font-semibold tabular-nums text-slate-900">
+        {value}
+      </p>
     </div>
   );
 }
 
 function SummaryCard({ label, value, icon: Icon, color }) {
   return (
-    <div
-      className={`bg-gradient-to-br ${color} rounded-lg p-4 text-white shadow`}
-    >
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-white/85 text-xs">{label}</p>
-          <p className="font-bold text-xl mt-1">{value}</p>
+    <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            {label}
+          </p>
+          <p className="mt-3 whitespace-nowrap text-2xl font-semibold tracking-tight tabular-nums text-slate-900">
+            {value}
+          </p>
         </div>
-        <Icon size={20} />
+        <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${color}`}>
+          <Icon size={20} />
+        </div>
       </div>
     </div>
   );

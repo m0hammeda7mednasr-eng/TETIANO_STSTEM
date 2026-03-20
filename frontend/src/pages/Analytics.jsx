@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock3,
   DollarSign,
+  Download,
   Package,
   RefreshCw,
   RotateCcw,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { dashboardAPI } from "../utils/api";
+import { buildCsvFilename, downloadCsvSections } from "../utils/csv";
 import { useLocale } from "../context/LocaleContext";
 
 const DEFAULT_PRESET = "6months";
@@ -151,7 +153,8 @@ const normalizeAnalyticsResponse = (raw = {}) => {
 };
 
 export default function Analytics() {
-  const { select, languageTag, formatDate } = useLocale();
+  const { select, formatCurrency, formatDate, formatNumber, formatPercent } =
+    useLocale();
   const [filters, setFilters] = useState(createDefaultFilters);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -196,30 +199,6 @@ export default function Analytics() {
     fetchAnalytics();
   }, [fetchAnalytics]);
 
-  const formatCurrency = useCallback(
-    (value) =>
-      new Intl.NumberFormat(languageTag, {
-        style: "currency",
-        currency: "EGP",
-        maximumFractionDigits: 2,
-      }).format(toNumber(value)),
-    [languageTag],
-  );
-
-  const formatNumber = useCallback(
-    (value) => new Intl.NumberFormat(languageTag).format(toNumber(value)),
-    [languageTag],
-  );
-
-  const formatPercent = useCallback(
-    (value) =>
-      `${toNumber(value).toLocaleString(languageTag, {
-        minimumFractionDigits: 1,
-        maximumFractionDigits: 1,
-      })}%`,
-    [languageTag],
-  );
-
   const rangeLabel = useMemo(() => {
     const dateRange = analytics?.meta?.dateRange;
     if (!dateRange?.from || !dateRange?.to) {
@@ -238,6 +217,113 @@ export default function Analytics() {
       day: "numeric",
     })}`;
   }, [analytics?.meta?.dateRange, filters.dateFrom, filters.dateTo, formatDate, select]);
+
+  const exportAnalytics = useCallback(() => {
+    if (!analytics) {
+      return;
+    }
+
+    downloadCsvSections({
+      filename: buildCsvFilename("analytics-view"),
+      sections: [
+        {
+          title: select("بيانات التصدير", "Export metadata"),
+          headers: [select("الحقل", "Field"), select("القيمة", "Value")],
+          rows: [
+            [select("النطاق الحالي", "Current range"), rangeLabel],
+            [select("الفترة المختارة", "Selected preset"), filters.preset],
+            [
+              select("من تاريخ", "Date from"),
+              analytics.meta?.dateRange?.from || filters.dateFrom || "-",
+            ],
+            [
+              select("إلى تاريخ", "Date to"),
+              analytics.meta?.dateRange?.to || filters.dateTo || "-",
+            ],
+            [
+              select("نوع الاتجاه", "Trend granularity"),
+              analytics.meta?.trendGranularity || "-",
+            ],
+            [select("وقت التصدير", "Exported at"), new Date().toISOString()],
+          ],
+        },
+        {
+          title: select("الملخص", "Summary"),
+          headers: [select("المؤشر", "Metric"), select("القيمة", "Value")],
+          rows: [
+            [select("إجمالي الإيراد", "Total revenue"), analytics.financial.totalRevenue],
+            [select("صافي الإيراد", "Net revenue"), analytics.financial.netRevenue],
+            [select("المرتجعات", "Refunded amount"), analytics.financial.refundedAmount],
+            [select("المبالغ المعلقة", "Pending amount"), analytics.financial.pendingAmount],
+            [select("عدد الطلبات", "Orders"), analytics.summary.totalOrders],
+            [select("معدل النجاح", "Success rate"), analytics.summary.successRate],
+            [
+              select("معدل الإلغاء", "Cancellation rate"),
+              analytics.summary.cancellationRate,
+            ],
+            [select("معدل المرتجع", "Refund rate"), analytics.summary.refundRate],
+          ],
+        },
+        {
+          title: select("حالة الطلبات", "Order status"),
+          headers: [select("الحالة", "Status"), select("العدد", "Count")],
+          rows: [
+            [select("مدفوعة", "Paid"), analytics.ordersByStatus.paid],
+            [select("معلقة", "Pending"), analytics.ordersByStatus.pending],
+            [select("ملغية", "Cancelled"), analytics.ordersByStatus.cancelled],
+            [select("مستردة", "Refunded"), analytics.ordersByStatus.refunded],
+            [select("تم تسليمها", "Fulfilled"), analytics.ordersByStatus.fulfilled],
+            [select("غير مسلمة", "Unfulfilled"), analytics.ordersByStatus.unfulfilled],
+          ],
+        },
+        {
+          title: select("اتجاه الأداء", "Performance trend"),
+          headers: [
+            select("الفترة", "Period"),
+            select("الطلبات", "Orders"),
+            select("الإيراد", "Revenue"),
+            select("الملغي", "Cancelled"),
+            select("المرتجع", "Refunded"),
+          ],
+          rows: analytics.trends.map((trend) => [
+            trend.periodStart || trend.label || "-",
+            trend.orders,
+            trend.revenue,
+            trend.cancelled,
+            trend.refunded,
+          ]),
+        },
+        {
+          title: select("أفضل المنتجات", "Top products"),
+          headers: [
+            select("المنتج", "Product"),
+            select("عدد الطلبات", "Orders"),
+            select("الإيراد", "Revenue"),
+          ],
+          rows: analytics.topProducts.map((product) => [
+            product.title,
+            product.orders_count,
+            product.total_revenue,
+          ]),
+        },
+        {
+          title: select("أفضل العملاء", "Top customers"),
+          headers: [
+            select("العميل", "Customer"),
+            select("البريد", "Email"),
+            select("عدد الطلبات", "Orders"),
+            select("إجمالي الإنفاق", "Total spent"),
+          ],
+          rows: analytics.topCustomers.map((customer) => [
+            customer.name,
+            customer.email || "-",
+            customer.orders_count,
+            customer.total_spent,
+          ]),
+        },
+      ],
+    });
+  }, [analytics, filters.dateFrom, filters.dateTo, filters.preset, rangeLabel, select]);
 
   if (loading && !analytics) {
     return (
@@ -276,6 +362,15 @@ export default function Analytics() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={exportAnalytics}
+                  disabled={!analytics}
+                  className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  <Download size={16} />
+                  {select("تصدير CSV", "Export CSV")}
+                </button>
                 <button
                   type="button"
                   onClick={() => fetchAnalytics({ silent: true })}

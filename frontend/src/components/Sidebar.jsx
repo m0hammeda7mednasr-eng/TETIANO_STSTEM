@@ -362,7 +362,7 @@ export default function Sidebar() {
     <>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`lg:hidden fixed top-4 ${mobileButtonPosition} z-50 rounded-lg bg-sky-700 p-2 text-white shadow-lg hover:bg-sky-800`}
+        className={`lg:hidden fixed top-4 ${mobileButtonPosition} z-50 rounded-2xl border border-sky-400/30 bg-slate-950/90 p-2.5 text-white shadow-[0_18px_38px_-24px_rgba(15,23,42,0.8)] backdrop-blur hover:bg-slate-900`}
       >
         {isOpen ? <X size={22} /> : <Menu size={22} />}
       </button>
@@ -370,12 +370,12 @@ export default function Sidebar() {
       <aside
         className={`fixed lg:static top-0 ${sidePositionClass} h-screen ${
           isOpen ? "translate-x-0" : hiddenTransformClass
-        } lg:translate-x-0 w-72 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white transition-transform duration-300 z-40 flex flex-col overflow-visible shadow-2xl`}
+        } lg:translate-x-0 w-72 border-r border-slate-800/80 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white transition-transform duration-300 z-40 flex flex-col overflow-visible shadow-[0_30px_70px_-42px_rgba(15,23,42,0.95)]`}
       >
-        <div className="relative z-40 border-b border-slate-800 bg-slate-950/70 p-6 backdrop-blur shrink-0">
+        <div className="relative z-40 border-b border-slate-800/90 bg-slate-950/72 p-6 backdrop-blur-xl shrink-0">
           <div className={`flex items-center justify-between gap-3 ${logoRowClass}`}>
             <div className={`${headerTextAlignClass} min-w-0`}>
-              <h1 className="text-xl font-bold tracking-wide text-white">Tetiano</h1>
+              <h1 className="text-xl font-semibold tracking-[0.01em] text-white">Tetiano</h1>
               <p className="mt-1 truncate text-sm text-slate-300">
                 {user?.name || t("sidebar.userFallback", "User")}
               </p>
@@ -395,7 +395,7 @@ export default function Sidebar() {
           >
             <NotificationBell />
             {isAdmin && (
-              <span className="inline-block rounded-full bg-sky-600 px-3 py-1 text-xs font-semibold text-white">
+              <span className="inline-block rounded-full border border-sky-400/20 bg-sky-500/90 px-3 py-1 text-xs font-semibold text-white shadow-[0_12px_26px_-18px_rgba(14,165,233,0.9)]">
                 {t("sidebar.adminBadge", "Admin")}
               </span>
             )}
@@ -406,7 +406,7 @@ export default function Sidebar() {
           </div>
         </div>
 
-        <nav className="mt-2 flex-1 overflow-y-auto px-3 pb-4 space-y-4">
+        <nav className="mt-2 flex-1 overflow-y-auto px-3 pb-5 space-y-4">
           <div className="space-y-2">{visibleSharedEntries.map(renderNavEntry)}</div>
 
           {visibleEmployeeItems.length > 0 && (
@@ -441,12 +441,12 @@ export default function Sidebar() {
           )}
         </nav>
 
-        <div className="mt-auto space-y-2 border-t border-slate-800 bg-slate-950/70 p-4 backdrop-blur shrink-0">
+        <div className="mt-auto space-y-2 border-t border-slate-800/90 bg-slate-950/72 p-4 backdrop-blur-xl shrink-0">
           {canManageSettings && (
             <Link
               to="/settings"
               onClick={handleItemClick}
-              className={`w-full flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 transition hover:bg-slate-700 ${settingsTextAlignClass}`}
+              className={`w-full flex items-center gap-3 rounded-2xl border border-slate-700/90 bg-slate-800/90 px-4 py-3 transition hover:border-slate-600 hover:bg-slate-700/90 ${settingsTextAlignClass}`}
             >
               <Settings size={18} />
               <span>{t("sidebar.settings", "Settings")}</span>
@@ -455,7 +455,7 @@ export default function Sidebar() {
 
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 rounded-xl border border-red-500/70 bg-red-600 px-4 py-3 transition hover:bg-red-700"
+            className="w-full flex items-center gap-3 rounded-2xl border border-red-400/60 bg-red-600/95 px-4 py-3 transition hover:bg-red-700"
           >
             <LogOut size={18} />
             <span>{t("sidebar.logout", "Log out")}</span>
@@ -480,8 +480,8 @@ function SidebarPrimaryItem({ item, isActive, onClick, isRTL }) {
       onClick={onClick}
       className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition ${
         isActive
-          ? "border-sky-500/60 bg-sky-700/30 shadow-lg shadow-sky-900/30"
-          : "border-slate-800 bg-slate-900/70 hover:bg-slate-800/90"
+          ? "border-sky-400/60 bg-[linear-gradient(135deg,rgba(14,116,144,0.28),rgba(2,132,199,0.18))] shadow-[0_22px_36px_-28px_rgba(2,132,199,0.85)]"
+          : "border-slate-800/90 bg-slate-900/72 hover:border-slate-700 hover:bg-slate-800/90"
       } ${isRTL ? "flex-row-reverse text-right" : "text-left"}`}
     >
       <div
@@ -491,7 +491,9 @@ function SidebarPrimaryItem({ item, isActive, onClick, isRTL }) {
       >
         <div
           className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-            isActive ? "bg-sky-500/20 text-sky-100" : "bg-slate-800 text-slate-200"
+            isActive
+              ? "bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/20"
+              : "bg-slate-800/90 text-slate-200"
           }`}
         >
           <item.icon size={18} />
@@ -505,7 +507,7 @@ function SidebarPrimaryItem({ item, isActive, onClick, isRTL }) {
       </div>
       <span
         className={`h-2.5 w-2.5 rounded-full transition ${
-          isActive ? "bg-sky-300" : "bg-transparent"
+          isActive ? "bg-sky-300 shadow-[0_0_18px_rgba(125,211,252,0.8)]" : "bg-transparent"
         }`}
       />
     </Link>
@@ -525,8 +527,8 @@ function SidebarGroup({
     <div
       className={`rounded-2xl border transition ${
         isActive
-          ? "border-sky-500/60 bg-slate-900/90 shadow-lg shadow-sky-950/30"
-          : "border-slate-800 bg-slate-900/70"
+          ? "border-sky-400/55 bg-slate-900/90 shadow-[0_24px_40px_-30px_rgba(2,132,199,0.8)]"
+          : "border-slate-800/90 bg-slate-900/72"
       }`}
     >
       <button
@@ -539,7 +541,9 @@ function SidebarGroup({
         <div className="flex min-w-0 items-center gap-3">
           <div
             className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-              isActive ? "bg-sky-500/20 text-sky-100" : "bg-slate-800 text-slate-200"
+              isActive
+                ? "bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/20"
+                : "bg-slate-800/90 text-slate-200"
             }`}
           >
             <group.icon size={18} />
@@ -586,7 +590,9 @@ function SidebarSubItem({ item, isActive, onClick, isRTL }) {
       to={item.path}
       onClick={onClick}
       className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition ${
-        isActive ? "bg-sky-700/25 text-white" : "text-slate-300 hover:bg-slate-800"
+        isActive
+          ? "bg-sky-700/22 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+          : "text-slate-300 hover:bg-slate-800/80"
       } ${isRTL ? "flex-row-reverse justify-end text-right" : "text-left"}`}
     >
       <item.icon size={16} />
@@ -601,7 +607,9 @@ function SidebarListItem({ item, isActive, onClick, isRTL }) {
       to={item.path}
       onClick={onClick}
       className={`flex items-center gap-3 rounded-xl px-4 py-3 transition ${
-        isActive ? "bg-sky-700/25 text-white" : "text-slate-200 hover:bg-slate-800"
+        isActive
+          ? "bg-sky-700/22 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+          : "text-slate-200 hover:bg-slate-800/80"
       } ${isRTL ? "flex-row-reverse justify-end text-right" : "text-left"}`}
     >
       <item.icon size={17} />
@@ -612,10 +620,10 @@ function SidebarListItem({ item, isActive, onClick, isRTL }) {
 
 function NavSection({ title, isRTL, children }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
-      <div className="border-b border-slate-800 px-4 py-3">
+    <div className="overflow-hidden rounded-2xl border border-slate-800/90 bg-slate-900/72">
+      <div className="border-b border-slate-800/90 px-4 py-3">
         <p
-          className={`text-xs font-semibold tracking-[0.2em] text-slate-400 ${
+          className={`text-[11px] font-semibold tracking-[0.24em] text-slate-400 ${
             isRTL ? "" : "uppercase"
           }`}
         >

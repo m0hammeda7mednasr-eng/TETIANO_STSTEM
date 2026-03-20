@@ -17,7 +17,11 @@ import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
 import api, { getErrorMessage, suppliersAPI } from "../utils/api";
-import { formatCurrency, formatDateTime } from "../utils/helpers";
+import {
+  formatCurrency,
+  formatDateTime,
+  formatNumber,
+} from "../utils/helpers";
 import { fetchAllPages } from "../utils/pagination";
 import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
@@ -256,7 +260,8 @@ const SUPPLIER_UI_TRANSLATIONS = {
 const PRODUCTS_PAGE_SIZE = 200;
 const DEFAULT_VARIANT_TITLES = new Set(["default", "default title"]);
 const normalizeText = (value) => String(value || "").trim();
-const formatCount = (value) => toNumber(value).toLocaleString("ar-EG");
+const formatCount = (value) =>
+  formatNumber(value, { maximumFractionDigits: 0 });
 const getTodayValue = () => new Date().toISOString().slice(0, 10);
 const formatPaymentMethodLabel = (value) =>
   PAYMENT_METHOD_LABELS[normalizeText(value).toLowerCase()] || normalizeText(value) || "-";
@@ -1292,22 +1297,29 @@ export default function Suppliers() {
 
   if (typeof window !== "undefined") {
     return (
-    <div className="flex min-h-screen bg-slate-100">
+    <div className="flex min-h-screen bg-transparent">
       <Sidebar />
 
       <main className="flex-1 overflow-auto">
         <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <section className="app-toolbar rounded-[30px] p-5 sm:p-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h1 className="flex items-center gap-3 text-3xl font-bold text-slate-900">
+                <div className="app-chip inline-flex items-center gap-2 px-3 py-1 text-xs font-semibold text-slate-700">
+                  <Truck size={14} />
+                  {translateSupplierUiText(
+                    isFactorySuppliersView ? "Ù…ÙˆØ±Ø¯Ùˆ Ø§Ù„Ù…ØµØ§Ù†Ø¹" : "Ù…ÙˆØ±Ø¯ÙŠ Ø§Ù„Ù‚Ù…Ø§Ø´",
+                    locale,
+                  )}
+                </div>
+                <h1 className="mt-4 flex items-center gap-3 text-3xl font-semibold tracking-[-0.04em] text-slate-900">
                   <Truck className="text-sky-700" size={28} />
                   {translateSupplierUiText(
                     getSupplierViewTitle(supplierViewType),
                     locale,
                   )}
                 </h1>
-                <p className="mt-2 text-slate-600">
+                <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">
                   {isFactorySuppliersView
                     ? translateSupplierUiText(
                         "ملف المورد يركز على البيانات الأساسية، بينما تفاصيل الواردات والدفعات تُسجل داخل الحركات بكل تفاصيلها.",
@@ -1323,7 +1335,7 @@ export default function Suppliers() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={loadSuppliers}
-                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-white hover:bg-slate-950"
+                  className="app-button-secondary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-slate-700"
                 >
                   <RefreshCw size={18} />
                   {translateSupplierUiText("تحديث", locale)}
@@ -1331,7 +1343,7 @@ export default function Suppliers() {
                 {canManageSuppliers ? (
                   <button
                     onClick={startCreatingSupplier}
-                    className="inline-flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-white hover:bg-sky-800"
+                    className="app-button-primary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-white"
                   >
                     <Plus size={18} />
                     {translateSupplierUiText(
@@ -1429,7 +1441,23 @@ export default function Suppliers() {
 
           <section className="grid gap-6 xl:grid-cols-12">
             <div className="space-y-6 xl:col-span-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="app-surface rounded-[28px] p-4">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-slate-900">
+                      {translateSupplierUiText(
+                        isFactorySuppliersView ? "Ù…ÙˆØ±Ø¯Ùˆ Ø§Ù„Ù…ØµØ§Ù†Ø¹" : "Ù…ÙˆØ±Ø¯ÙŠ Ø§Ù„Ù‚Ù…Ø§Ø´",
+                        locale,
+                      )}
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {formatCount(filteredSuppliers.length)} / {formatCount(suppliers.length)}
+                    </p>
+                  </div>
+                  <div className="app-chip px-3 py-1 text-xs font-semibold text-slate-600">
+                    {translateSupplierUiText("Ø¢Ø®Ø± Ù†Ø´Ø§Ø·", locale)}
+                  </div>
+                </div>
                 <div className="relative">
                   <Search
                     className={`absolute top-1/2 -translate-y-1/2 text-slate-400 ${
@@ -1444,7 +1472,7 @@ export default function Suppliers() {
                       "ابحث باسم المورد أو الكود أو الهاتف",
                       locale,
                     )}
-                    className={`w-full rounded-xl border border-slate-200 py-2 focus:border-sky-400 focus:outline-none ${
+                    className={`app-input py-3 ${
                       isRTL ? "pr-9 pl-3 text-right" : "pl-9 pr-3 text-left"
                     }`}
                   />
@@ -1463,27 +1491,34 @@ export default function Suppliers() {
                         <button
                           key={supplier.id}
                           onClick={() => setSelectedSupplierId(supplier.id)}
-                          className={`w-full rounded-2xl border p-4 text-right transition ${
+                          className={`w-full rounded-[24px] border p-4 text-right transition ${
                             isActive
-                              ? "border-sky-300 bg-sky-50 shadow-sm"
-                              : "border-slate-200 bg-white hover:border-slate-300"
+                              ? "border-sky-300 bg-[linear-gradient(180deg,rgba(240,249,255,0.98),rgba(232,244,255,0.9))] shadow-[0_18px_35px_-28px_rgba(14,116,144,0.5)]"
+                              : "border-slate-200 bg-white/80 hover:border-slate-300 hover:bg-white"
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <div className="truncate text-base font-semibold text-slate-900">
-                                {supplier.name}
-                              </div>
-                              <div className="mt-1 text-xs text-slate-500">
-                                {translateSupplierUiText(
-                                  getSupplierCodeLabel(supplierViewType),
-                                  locale,
-                                )}
-                                : {supplier.code || "-"}
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+                                  <Building2 size={18} />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="truncate text-base font-semibold text-slate-900">
+                                    {supplier.name}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    {translateSupplierUiText(
+                                      getSupplierCodeLabel(supplierViewType),
+                                      locale,
+                                    )}
+                                    : {supplier.code || "-"}
+                                  </div>
+                                </div>
                               </div>
                             </div>
                             <span
-                              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
                                 supplier.is_active !== false
                                   ? "bg-emerald-100 text-emerald-700"
                                   : "bg-slate-100 text-slate-600"
@@ -1522,7 +1557,7 @@ export default function Suppliers() {
               </div>
 
               {canManageSuppliers ? (
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="app-surface rounded-[28px] p-4">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <div>
                       <h2 className="text-lg font-semibold text-slate-900">
@@ -1535,7 +1570,7 @@ export default function Suppliers() {
                     {showSupplierForm ? (
                       <button
                         onClick={closeSupplierForm}
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                        className="app-button-secondary rounded-2xl px-3 py-2 text-sm font-semibold text-slate-600"
                       >
                         إغلاق
                       </button>
@@ -1546,14 +1581,14 @@ export default function Suppliers() {
                     <div className="space-y-3">
                       <button
                         onClick={startCreatingSupplier}
-                        className="w-full rounded-xl bg-sky-700 px-4 py-3 text-sm font-medium text-white hover:bg-sky-800"
+                        className="app-button-primary w-full rounded-2xl px-4 py-3 text-sm font-semibold text-white"
                       >
                         إنشاء مورد جديد
                       </button>
                       {selectedSupplier ? (
                         <button
                           onClick={startEditingSupplier}
-                          className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                          className="app-button-secondary w-full rounded-2xl px-4 py-3 text-sm font-semibold text-slate-700"
                         >
                           تعديل المورد الحالي
                         </button>
@@ -2062,14 +2097,14 @@ function SupplierForm({ form, setForm, supplierType, saving, onSave }) {
         <TextInput label="الرصيد الافتتاحي" type="number" value={form.opening_balance} onChange={(value) => setForm((current) => ({ ...current, opening_balance: value }))} />
       </div>
       <TextArea label="ملاحظات" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
-      <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
+      <label className="app-note flex items-center gap-2 px-3 py-3 text-sm text-slate-700">
         <input type="checkbox" checked={form.is_active} onChange={(event) => setForm((current) => ({ ...current, is_active: event.target.checked }))} />
         {translateSupplierUiText("المورد نشط ويظهر في القائمة", locale)}
       </label>
       <button
         onClick={onSave}
         disabled={saving}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+        className="app-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Save size={18} />
         {saving
@@ -2124,7 +2159,7 @@ function SupplierFabricsSection({
         canManage ? (
           <button
             onClick={showForm ? onCancel : onStartCreate}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            className="app-button-secondary inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold text-slate-700"
           >
             <Plus size={16} />
             {showForm
@@ -2158,7 +2193,7 @@ function SupplierFabricsSection({
               {fabricRecords.map((fabric) => (
                 <div
                   key={fabric.id || `${fabric.code}-${fabric.name}`}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                  className="app-note rounded-[24px] p-4"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -2216,7 +2251,7 @@ function SupplierFabricsSection({
                   {canManage ? (
                     <button
                       onClick={() => onStartEdit(fabric)}
-                      className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-sky-700 hover:text-sky-800"
+                      className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-sky-700 hover:text-sky-800"
                     >
                       <Save size={14} />
                       {translateSupplierUiText("تعديل", locale)}
@@ -2231,7 +2266,7 @@ function SupplierFabricsSection({
         </div>
 
         {canManage && showForm ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="app-note rounded-[24px] p-4">
             <div className="mb-4">
               <h3 className="text-base font-semibold text-slate-900">
                 {editingFabricId ? "تعديل الخامة" : "إضافة خامة جديدة"}
@@ -2274,7 +2309,7 @@ function SupplierFabricsSection({
                   setForm((current) => ({ ...current, notes: value }))
                 }
               />
-              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+              <label className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 shadow-sm">
                 <input
                   type="checkbox"
                   checked={form.is_active}
@@ -2290,7 +2325,7 @@ function SupplierFabricsSection({
               <button
                 onClick={onSave}
                 disabled={saving}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+                className="app-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save size={18} />
                 {saving ? "جارٍ حفظ الخامة..." : "حفظ الخامة"}
@@ -3070,25 +3105,27 @@ function EntriesTimeline({ entries }) {
 function SummaryCard({ title, value, subtitle, icon: Icon, tone = "sky" }) {
   const { locale } = useLocale();
   const tones = {
-    sky: "border-sky-100 bg-sky-50 text-sky-700",
-    blue: "border-cyan-100 bg-cyan-50 text-cyan-700",
-    emerald: "border-emerald-100 bg-emerald-50 text-emerald-700",
-    amber: "border-amber-100 bg-amber-50 text-amber-700",
+    sky: "bg-sky-50 text-sky-700",
+    blue: "bg-cyan-50 text-cyan-700",
+    emerald: "bg-emerald-50 text-emerald-700",
+    amber: "bg-amber-50 text-amber-700",
   };
 
   return (
-    <div className={`rounded-2xl border p-5 shadow-sm ${tones[tone] || tones.sky}`}>
+    <div className="app-surface rounded-[28px] p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-medium opacity-80">
+          <div className="text-sm font-medium text-slate-500">
             {translateSupplierUiText(title, locale)}
           </div>
-          <div className="mt-2 text-2xl font-bold">{value}</div>
-          <div className="mt-2 text-xs opacity-80">
+          <div className="metric-number mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-900">
+            {value}
+          </div>
+          <div className="mt-2 text-xs leading-5 text-slate-500">
             {translateSupplierUiText(subtitle, locale)}
           </div>
         </div>
-        <div className="rounded-2xl bg-white/70 p-3">
+        <div className={`rounded-[20px] p-3 ${tones[tone] || tones.sky}`}>
           <Icon size={22} />
         </div>
       </div>
@@ -3099,14 +3136,14 @@ function SummaryCard({ title, value, subtitle, icon: Icon, tone = "sky" }) {
 function SectionCard({ title, subtitle, action, children }) {
   const { locale } = useLocale();
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="app-surface rounded-[30px] p-5 sm:p-6">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">
+          <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-900">
             {translateSupplierUiText(title, locale)}
           </h2>
           {subtitle ? (
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm leading-6 text-slate-500">
               {translateSupplierUiText(subtitle, locale)}
             </p>
           ) : null}
@@ -3122,14 +3159,14 @@ function TextInput({ label, value, onChange, type = "text" }) {
   const { locale, isRTL } = useLocale();
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
         {translateSupplierUiText(label, locale)}
       </span>
       <input
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className={`w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none ${
+        className={`app-input px-4 py-3 text-sm ${
           isRTL ? "text-right" : "text-left"
         }`}
       />
@@ -3141,14 +3178,14 @@ function SelectInput({ label, value, options, onChange, disabled = false }) {
   const { locale, isRTL } = useLocale();
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
         {translateSupplierUiText(label, locale)}
       </span>
       <select
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className={`w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100 ${
+        className={`app-input px-4 py-3 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 ${
           isRTL ? "text-right" : "text-left"
         }`}
       >
@@ -3180,14 +3217,14 @@ function TextArea({ label, value, onChange }) {
   const { locale, isRTL } = useLocale();
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
         {translateSupplierUiText(label, locale)}
       </span>
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
         rows={3}
-        className={`w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-sky-400 focus:outline-none ${
+        className={`app-input px-4 py-3 text-sm ${
           isRTL ? "text-right" : "text-left"
         }`}
       />
@@ -3198,7 +3235,7 @@ function TextArea({ label, value, onChange }) {
 function DetailLine({ label, value }) {
   const { locale } = useLocale();
   return (
-    <div className="rounded-xl bg-slate-50 p-3">
+    <div className="app-note px-4 py-3">
       <div className="text-xs text-slate-500">
         {translateSupplierUiText(label, locale)}
       </div>
@@ -3212,7 +3249,7 @@ function DetailLine({ label, value }) {
 function DetailLineCompact({ label, value }) {
   const { locale } = useLocale();
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
+    <div className="app-note flex items-center justify-between gap-3 px-3 py-2.5">
       <div className="text-xs text-slate-500">
         {translateSupplierUiText(label, locale)}
       </div>
@@ -3226,11 +3263,13 @@ function DetailLineCompact({ label, value }) {
 function KeyValueCompact({ label, value }) {
   const { locale } = useLocale();
   return (
-    <div className="rounded-xl bg-slate-50 px-3 py-2">
+    <div className="app-note px-3 py-2.5">
       <div className="text-[11px] text-slate-500">
         {translateSupplierUiText(label, locale)}
       </div>
-      <div className="mt-1 text-sm font-semibold text-slate-800">{value}</div>
+      <div className="metric-number mt-1 text-sm font-semibold text-slate-800">
+        {value}
+      </div>
     </div>
   );
 }
@@ -3238,7 +3277,7 @@ function KeyValueCompact({ label, value }) {
 function EmptyState({ text }) {
   const { locale } = useLocale();
   return (
-    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+    <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50/80 p-8 text-center text-sm leading-6 text-slate-500">
       {translateSupplierUiText(text, locale)}
     </div>
   );

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../../components/Sidebar";
 import api from "../../utils/api";
+import { formatDateTime, formatNumber } from "../../utils/helpers";
 import { extractArray } from "../../utils/response";
 import { subscribeToSharedDataUpdates } from "../../utils/realtime";
 import {
@@ -136,16 +137,14 @@ const AdminPage = () => {
     }
   };
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleString("ar-EG", {
+  const formatDate = (dateString) =>
+    formatDateTime(dateString, {
       year: "numeric",
       month: "short",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     });
-  };
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -163,7 +162,9 @@ const AdminPage = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <AdminCard
               title="Users Management"
-              value={usersCount}
+              value={formatNumber(usersCount, {
+                maximumFractionDigits: 0,
+              })}
               subtitle="Accounts, roles, and permissions"
               icon={Shield}
               onClick={() => navigate("/users?tab=users")}
@@ -171,7 +172,9 @@ const AdminPage = () => {
             />
             <AdminCard
               title="Access Requests"
-              value={pendingRequestsCount}
+              value={formatNumber(pendingRequestsCount, {
+                maximumFractionDigits: 0,
+              })}
               subtitle="Pending requests"
               icon={UserCheck}
               onClick={() => navigate("/users?tab=requests")}

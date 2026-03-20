@@ -22,6 +22,7 @@ const DEFAULT_ORDER_SCOPE_FILTERS = {
   search: "",
   dateFrom: "",
   dateTo: "",
+  ordersLimit: "",
   orderNumberFrom: "",
   orderNumberTo: "",
   minTotal: "",
@@ -82,6 +83,11 @@ export const normalizeOrderScopeFilters = (rawFilters = {}) => ({
   search: String(rawFilters?.search || "").trim(),
   dateFrom: String(rawFilters?.date_from || rawFilters?.dateFrom || "").trim(),
   dateTo: String(rawFilters?.date_to || rawFilters?.dateTo || "").trim(),
+  ordersLimit: String(
+    rawFilters?.orders_limit || rawFilters?.ordersLimit || "",
+  )
+    .replace(/[^\d]/g, "")
+    .trim(),
   orderNumberFrom: String(
     rawFilters?.order_number_from || rawFilters?.orderNumberFrom || "",
   ).trim(),
@@ -129,6 +135,7 @@ export const getOrderScopeFiltersCacheKey = (rawFilters = {}) => {
     filters.search,
     filters.dateFrom,
     filters.dateTo,
+    filters.ordersLimit,
     filters.orderNumberFrom,
     filters.orderNumberTo,
     filters.minTotal,
@@ -368,6 +375,20 @@ export const matchesOrderScopeFilters = (order, rawFilters = {}) => {
 };
 
 export const filterOrdersByScope = (rows = [], rawFilters = {}) =>
-  (Array.isArray(rows) ? rows : []).filter((order) =>
-    matchesOrderScopeFilters(order, rawFilters),
-  );
+  (() => {
+    const filters = normalizeOrderScopeFilters(rawFilters);
+    const filteredRows = (Array.isArray(rows) ? rows : []).filter((order) =>
+      matchesOrderScopeFilters(order, filters),
+    );
+
+    if (!filters.ordersLimit) {
+      return filteredRows;
+    }
+
+    const recentLimit = Math.max(0, parseInt(filters.ordersLimit, 10) || 0);
+    if (!recentLimit) {
+      return filteredRows;
+    }
+
+    return filteredRows.slice(0, recentLimit);
+  })();

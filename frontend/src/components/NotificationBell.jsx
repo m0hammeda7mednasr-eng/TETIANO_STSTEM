@@ -5,6 +5,7 @@ import api from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
+import { formatDateTime, formatRelativeTime } from "../utils/localeFormat";
 
 let notificationsEndpointUnsupported = false;
 let unreadCountRequestInFlight = false;
@@ -32,20 +33,20 @@ const formatTimestamp = (value, locale) => {
   const diffMinutes = Math.max(1, Math.floor(diffMs / 60000));
 
   if (diffMinutes < 60) {
-    return `${diffMinutes}m ago`;
+    return formatRelativeTime(value, { style: "short" }, locale);
   }
 
   if (diffMinutes < 24 * 60) {
-    return `${Math.floor(diffMinutes / 60)}h ago`;
+    return formatRelativeTime(value, { style: "short" }, locale);
   }
 
-  return date.toLocaleString(locale === "ar" ? "ar-EG" : "en-US", {
+  return formatDateTime(value, {
     year: "numeric",
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  });
+  }, locale);
 };
 
 const getTypeLabel = (type) => {

@@ -39,11 +39,11 @@ import {
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
 const ORDERS_PAGE_SIZE = 100;
+const ORDER_HISTORY_SEARCH_PAGE_SIZE = 200;
 const ORDERS_VISIBLE_LIMIT = 4500;
 const ORDERS_PER_PAGE = 50;
 const ORDERS_PAGINATION_WINDOW = 5;
 const ORDERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
-const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
   searchTerm: "",
@@ -268,8 +268,6 @@ const matchesOrderSearch = (searchIndex, searchTerm) => {
   });
 };
 
-const formatAmount = (value) => `${toNumber(value).toFixed(2)} ${CURRENCY_LABEL}`;
-
 const PAYMENT_METHOD_LABELS = {
   shopify: "Shopify",
   instapay: "InstaPay",
@@ -372,8 +370,17 @@ const endOfDay = (dateString) => {
 
 export default function Orders() {
   const navigate = useNavigate();
-  const { locale, select, isRTL } = useLocale();
+  const {
+    select,
+    isRTL,
+    formatCurrency: formatAmount,
+    formatDateTime,
+    formatNumber,
+    formatTime,
+  } = useLocale();
   const tableHeaderAlignClass = isRTL ? "text-right" : "text-left";
+  const stickyTableHeaderClass =
+    "sticky top-0 z-20 bg-slate-50/95 backdrop-blur supports-[backdrop-filter]:bg-slate-50/85";
   const cacheKey = useMemo(() => buildStoreScopedCacheKey("orders:list"), []);
   const initialCachedSnapshot = useMemo(() => {
     const cached = peekCachedView(cacheKey);
@@ -396,6 +403,9 @@ export default function Orders() {
     () => initialCachedSnapshot.updatedAt,
   );
   const [lastLiveEventAt, setLastLiveEventAt] = useState(null);
+  const [fullHistorySearchOrders, setFullHistorySearchOrders] = useState(null);
+  const [fullHistorySearchError, setFullHistorySearchError] = useState("");
+  const [fullHistorySearchLoading, setFullHistorySearchLoading] = useState(false);
   const [loadStatus, setLoadStatus] = useState({
     active: false,
     message: "",
@@ -404,11 +414,118 @@ export default function Orders() {
   const refreshTimeoutRef = useRef(null);
   const fetchPromiseRef = useRef(null);
   const missingFetchPromiseRef = useRef(null);
+  const fullHistorySearchRequestIdRef = useRef(0);
   const ordersRef = useRef([]);
 
   useEffect(() => {
     ordersRef.current = orders;
   }, [orders]);
+
+  useEffect(() => {
+    const query = deferredSearchTerm.trim();
+    if (!query) {
+      fullHistorySearchRequestIdRef.current += 1;
+      setFullHistorySearchOrders(null);
+      setFullHistorySearchError("");
+      setFullHistorySearchLoading(false);
+      return undefined;
+    }
+
+    const requestId = fullHistorySearchRequestIdRef.current + 1;
+    fullHistorySearchRequestIdRef.current = requestId;
+    let active = true;
+
+    setFullHistorySearchLoading(true);
+    setFullHistorySearchError("");
+    setLoadStatus({
+      active: true,
+      message: select(
+        `جاري البحث في كل أوردرات المتجر عن "${query}"...`,
+        `Searching all store orders for "${query}"...`,
+      ),
+    });
+
+    fetchAllPagesProgressively(
+      ({ limit, offset }) =>
+        api.get("/shopify/orders", {
+          params: {
+            limit,
+            offset,
+            search: query,
+            search_all: "true",
+          },
+        }),
+      {
+        limit: ORDER_HISTORY_SEARCH_PAGE_SIZE,
+        onPage: ({ rows, hasMore }) => {
+          if (!active || requestId !== fullHistorySearchRequestIdRef.current) {
+            return false;
+          }
+
+          setFullHistorySearchOrders(rows);
+          setLoadStatus({
+            active: hasMore,
+            message: hasMore
+              ? select(
+                  `تم العثور على ${formatNumber(rows.length, { maximumFractionDigits: 0 })} طلب حتى الآن من كل تاريخ المتجر...`,
+                  `Found ${formatNumber(rows.length, { maximumFractionDigits: 0 })} matching orders from full store history so far...`,
+                )
+              : select(
+                  `تم تحميل ${formatNumber(rows.length, { maximumFractionDigits: 0 })} طلب مطابق من كل تاريخ المتجر.`,
+                  `Loaded ${formatNumber(rows.length, { maximumFractionDigits: 0 })} matching orders from full store history.`,
+                ),
+          });
+
+          return true;
+        },
+      },
+    )
+      .then((rows) => {
+        if (!active || requestId !== fullHistorySearchRequestIdRef.current) {
+          return;
+        }
+
+        setFullHistorySearchOrders(rows);
+        setFullHistorySearchLoading(false);
+        setLoadStatus({
+          active: false,
+          message:
+            rows.length > 0
+              ? select(
+                  `تم تحميل ${formatNumber(rows.length, { maximumFractionDigits: 0 })} طلب مطابق من كل تاريخ المتجر.`,
+                  `Loaded ${formatNumber(rows.length, { maximumFractionDigits: 0 })} matching orders from full store history.`,
+                )
+              : select(
+                  "لم يتم العثور على طلبات مطابقة في كل تاريخ المتجر.",
+                  "No matching orders were found across full store history.",
+                ),
+        });
+      })
+      .catch((searchError) => {
+        if (!active || requestId !== fullHistorySearchRequestIdRef.current) {
+          return;
+        }
+
+        console.error("Error searching orders across full history:", searchError);
+        setFullHistorySearchOrders(null);
+        setFullHistorySearchLoading(false);
+        setFullHistorySearchError(
+          select(
+            "تعذر البحث في كل تاريخ المتجر. يتم الآن عرض النتائج من الطلبات المحملة فقط.",
+            "Couldn't search the full store history. Showing results from loaded orders only.",
+          ),
+        );
+        setLoadStatus((current) =>
+          current.active
+            ? { active: false, message: "" }
+            : current,
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [deferredSearchTerm, select]);
 
   useEffect(() => {
     let active = true;
@@ -427,7 +544,7 @@ export default function Orders() {
       );
       setLoadStatus({
         active: false,
-        message: `Showing ${cachedRows.length.toLocaleString()} cached orders`,
+        message: `Showing ${formatNumber(cachedRows.length, { maximumFractionDigits: 0 })} cached orders`,
       });
     });
 
@@ -489,8 +606,8 @@ export default function Orders() {
       setLoadStatus({
         active: true,
         message: forceSync
-          ? `Refreshing Shopify orders and loading the latest ${ORDERS_VISIBLE_LIMIT.toLocaleString()} orders...`
-          : `Loading the latest ${ORDERS_VISIBLE_LIMIT.toLocaleString()} orders...`,
+          ? `Refreshing Shopify orders and loading the latest ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} orders...`
+          : `Loading the latest ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} orders...`,
       });
 
       try {
@@ -517,7 +634,7 @@ export default function Orders() {
           active: false,
           message:
             rows.length > 0
-              ? `Loaded ${rows.length.toLocaleString()} recent orders`
+              ? `Loaded ${formatNumber(rows.length, { maximumFractionDigits: 0 })} recent orders`
               : "No orders found",
         });
         await writeCachedView(cacheKey, {
@@ -636,6 +753,11 @@ export default function Orders() {
     };
   }, [cacheKey, fetchMissingOrderIds, fetchOrders, scheduleSilentRefresh]);
 
+  const activeOrders = useMemo(
+    () => fullHistorySearchOrders ?? orders,
+    [fullHistorySearchOrders, orders],
+  );
+
   const missingOrderIdSet = useMemo(
     () => new Set(missingOrderIds),
     [missingOrderIds],
@@ -648,12 +770,12 @@ export default function Orders() {
 
   const ordersWithMeta = useMemo(
     () =>
-      orders.map((order) => ({
+      activeOrders.map((order) => ({
         ...order,
         _meta: getOrderMeta(order),
         _searchIndex: buildOrderSearchIndex(order),
       })),
-    [orders],
+    [activeOrders],
   );
 
   const normalizedDateRange = useMemo(
@@ -892,6 +1014,39 @@ export default function Orders() {
     return { start, end };
   }, [currentPage, filteredOrders.length, totalPages]);
 
+  const searchScopeHint = useMemo(() => {
+    if (!deferredSearchTerm.trim()) {
+      return select(
+        `بدون بحث، الصفحة تعرض آخر ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} طلب فقط. عند كتابة أي بحث، سيتم التفتيش في كل تاريخ أوردرات المتجر تلقائيًا.`,
+        `Without search, the page shows the latest ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} orders only. Once you type a search, the page scans the full store order history automatically.`,
+      );
+    }
+
+    if (fullHistorySearchLoading) {
+      return select(
+        "جاري البحث الآن في كل تاريخ أوردرات المتجر...",
+        "Searching the full store order history now...",
+      );
+    }
+
+    if (fullHistorySearchOrders) {
+      return select(
+        `يتم الآن عرض ${formatNumber(fullHistorySearchOrders.length, { maximumFractionDigits: 0 })} نتيجة من كل تاريخ المتجر.`,
+        `Showing ${formatNumber(fullHistorySearchOrders.length, { maximumFractionDigits: 0 })} result(s) from the full store history.`,
+      );
+    }
+
+    return select(
+      "سيتم البحث في كل تاريخ أوردرات المتجر بدل آخر الطلبات فقط.",
+      "The search will scan the full store history instead of only recent orders.",
+    );
+  }, [
+    deferredSearchTerm,
+    fullHistorySearchLoading,
+    fullHistorySearchOrders,
+    select,
+  ]);
+
   useEffect(() => {
     setCurrentPage(1);
   }, [filters]);
@@ -946,16 +1101,14 @@ export default function Orders() {
     );
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "-";
-    return new Date(dateString).toLocaleString("ar-EG", {
+  const formatDate = (dateString) =>
+    formatDateTime(dateString, {
       year: "numeric",
       month: "short",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     });
-  };
 
   const getStatusColor = (status) => {
     const normalized = String(status || "").toLowerCase();
@@ -990,6 +1143,7 @@ export default function Orders() {
   };
 
   const renderOrderItemPreview = (order) => {
+    const parsedData = parseJsonObject(order?.data);
     const previews = Array.isArray(order?.item_previews)
       ? order.item_previews.filter(
           (item) =>
@@ -1000,54 +1154,78 @@ export default function Orders() {
 
     if (previews.length === 0) {
       return (
-        <span className="text-sm text-slate-700">
-          {toNumber(order.items_count).toLocaleString()}
-        </span>
+        <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          <Package size={16} className="text-slate-400" />
+          <span>
+            {select(
+              `${formatNumber(order.items_count, { maximumFractionDigits: 0 })} عنصر`,
+              `${formatNumber(order.items_count, { maximumFractionDigits: 0 })} item(s)`,
+            )}
+          </span>
+        </div>
       );
     }
 
+    const primaryItem = previews[0];
+    const allLineItems = Array.isArray(parsedData?.line_items)
+      ? parsedData.line_items
+      : previews;
+    const allItemsCount = Math.max(previews.length, toNumber(order?.items_count));
+    const remainingItemsCount = Math.max(0, allItemsCount - 1);
+    const totalQuantity = allLineItems.reduce(
+      (sum, item) => sum + Math.max(1, toNumber(item?.quantity)),
+      0,
+    );
+
     return (
-      <div className="flex items-center gap-3">
-        <div className="grid w-[92px] shrink-0 grid-cols-2 gap-1">
-          {previews.slice(0, 4).map((item, index) => (
-            <div
-              key={`${item.id || item.title || "item"}-${index}`}
-              className="relative h-10 w-10 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-sm"
-              title={item.title || "Order item"}
-            >
-              {String(item.image_url || "").trim() ? (
-                <img
-                  src={item.image_url}
-                  alt={item.title || "Order item"}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-slate-400">
-                  <Package size={15} />
-                </div>
-              )}
+      <div className="flex min-w-[280px] items-center gap-3">
+        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm">
+          {String(primaryItem?.image_url || "").trim() ? (
+            <img
+              src={primaryItem.image_url}
+              alt={primaryItem.title || "Order item"}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-slate-400">
+              <Package size={18} />
             </div>
-          ))}
-          {previews.length > 4 ? (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 text-xs font-semibold text-slate-600">
-              +{previews.length - 4}
-            </div>
+          )}
+          {toNumber(primaryItem?.quantity) > 1 ? (
+            <span className="absolute bottom-1 left-1 rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+              x{toNumber(primaryItem.quantity)}
+            </span>
           ) : null}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-slate-800">
+          <p className="truncate text-sm font-semibold text-slate-900">
+            {primaryItem?.title || select("منتج بدون اسم", "Untitled item")}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
             {select(
-              `${toNumber(order.items_count).toLocaleString()} عنصر`,
-              `${toNumber(order.items_count).toLocaleString()} item(s)`,
+              `${formatNumber(order.items_count, { maximumFractionDigits: 0 })} بند • ${formatNumber(totalQuantity, { maximumFractionDigits: 0 })} قطعة`,
+              `${formatNumber(order.items_count, { maximumFractionDigits: 0 })} line item(s) • ${formatNumber(totalQuantity, { maximumFractionDigits: 0 })} qty`,
             )}
           </p>
-          <p className="line-clamp-2 text-xs leading-5 text-slate-500">
-            {previews
-              .slice(0, 3)
-              .map((item) => item.title)
-              .filter(Boolean)
-              .join(" • ")}
-          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {remainingItemsCount > 0 ? (
+              <span className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700">
+                {select(
+                  `+ ${remainingItemsCount} أصناف أخرى`,
+                  `+ ${remainingItemsCount} more item(s)`,
+                )}
+              </span>
+            ) : null}
+            {previews.slice(1, 3).map((item, index) => (
+              <span
+                key={`${item.id || item.title || "secondary"}-${index}`}
+                className="max-w-[120px] truncate rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600"
+                title={item.title || "Order item"}
+              >
+                {item.title}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -1075,17 +1253,19 @@ export default function Orders() {
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
                       <Clock3 size={12} />
                       {select("آخر تحديث", "Last refresh")}{" "}
-                      {lastUpdatedAt.toLocaleTimeString(
-                        locale === "ar" ? "ar-EG" : "en-US",
-                      )}
+                      {formatTime(lastUpdatedAt, {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </span>
                   )}
                   {lastLiveEventAt && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-sky-50 text-sky-700 border border-sky-200">
                       {select("آخر حدث", "Event")}{" "}
-                      {lastLiveEventAt.toLocaleTimeString(
-                        locale === "ar" ? "ar-EG" : "en-US",
-                      )}
+                      {formatTime(lastLiveEventAt, {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </span>
                   )}
                 </div>
@@ -1130,8 +1310,8 @@ export default function Orders() {
                 <div>
                   <p className="font-semibold">
                     {select(
-                      `${missingOrderIds.length.toLocaleString()} طلب خارج قائمة الطلبات الآن`,
-                      `${missingOrderIds.length.toLocaleString()} orders are now outside the main orders list`,
+                      `${formatNumber(missingOrderIds.length, { maximumFractionDigits: 0 })} طلب خارج قائمة الطلبات الآن`,
+                      `${formatNumber(missingOrderIds.length, { maximumFractionDigits: 0 })} orders are now outside the main orders list`,
                     )}
                   </p>
                   <p className="text-sm text-amber-800">
@@ -1154,7 +1334,9 @@ export default function Orders() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <SummaryCard
               label="Orders"
-              value={summary.totalOrders.toLocaleString()}
+              value={formatNumber(summary.totalOrders, {
+                maximumFractionDigits: 0,
+              })}
               icon={ShoppingCart}
               color="from-blue-500 to-blue-700"
             />
@@ -1174,19 +1356,25 @@ export default function Orders() {
             />
             <SummaryCard
               label="Paid"
-              value={summary.paidCount.toLocaleString()}
+              value={formatNumber(summary.paidCount, {
+                maximumFractionDigits: 0,
+              })}
               icon={TrendingUp}
               color="from-violet-500 to-violet-700"
             />
             <SummaryCard
               label="Fulfilled"
-              value={summary.fulfilledCount.toLocaleString()}
+              value={formatNumber(summary.fulfilledCount, {
+                maximumFractionDigits: 0,
+              })}
               icon={TrendingUp}
               color="from-teal-500 to-teal-700"
             />
             <SummaryCard
               label="Refunded"
-              value={summary.refundedCount.toLocaleString()}
+              value={formatNumber(summary.refundedCount, {
+                maximumFractionDigits: 0,
+              })}
               icon={AlertCircle}
               color="from-rose-500 to-rose-700"
             />
@@ -1227,11 +1415,13 @@ export default function Orders() {
                   />
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  {select(
-                    `يعرض آخر ${ORDERS_VISIBLE_LIMIT.toLocaleString()} طلب فقط. لو كتبت رقم أوردر من 3 إلى 6 أرقام هيتفهم كرقم أوردر أولًا. وما زال البحث يدعم أيضًا الفون، الاسم، الإيميل، المنتج، SKU، الدفع، والتنفيذ.`,
-                    `Showing the latest ${ORDERS_VISIBLE_LIMIT.toLocaleString()} orders only. If you type a 3 to 6 digit number, it will be treated as an order number first. Search still supports phone, customer name, email, product, SKU, payment, and fulfillment.`,
-                  )}
+                  {searchScopeHint}
                 </p>
+                {fullHistorySearchError ? (
+                  <p className="mt-1 text-xs text-amber-700">
+                    {fullHistorySearchError}
+                  </p>
+                ) : null}
                 {normalizedDateRange.wasSwapped && (
                   <p className="mt-1 text-xs text-amber-700">
                     {select(
@@ -1432,13 +1622,17 @@ export default function Orders() {
               <div>
                 <p className="text-sm font-semibold text-slate-900">Orders Table</p>
                 <p className="text-xs text-slate-500">
-                  {filteredOrders.length.toLocaleString()} filtered orders,{" "}
-                  {selectedOrders.length.toLocaleString()} selected for export.
+                  {formatNumber(filteredOrders.length, {
+                    maximumFractionDigits: 0,
+                  })} filtered orders,{" "}
+                  {formatNumber(selectedOrders.length, {
+                    maximumFractionDigits: 0,
+                  })} selected for export.
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
                   {select(
-                    `الصفحة ${currentPage.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} من ${totalPages.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} - 50 طلب في الصفحة`,
-                    `Page ${currentPage.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} of ${totalPages.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} - 50 orders per page`,
+                    `الصفحة ${formatNumber(currentPage, { maximumFractionDigits: 0 })} من ${formatNumber(totalPages, { maximumFractionDigits: 0 })} - 50 طلب في الصفحة`,
+                    `Page ${formatNumber(currentPage, { maximumFractionDigits: 0 })} of ${formatNumber(totalPages, { maximumFractionDigits: 0 })} - 50 orders per page`,
                   )}
                 </p>
               </div>
@@ -1462,12 +1656,25 @@ export default function Orders() {
               </div>
             </div>
 
-            <div className="hidden lg:block overflow-x-auto">
-              <table className="data-table w-full min-w-[1280px]">
+            <div className="hidden max-h-[68vh] overflow-auto lg:block">
+              <table className="data-table orders-table w-full min-w-[1600px]">
+                <colgroup>
+                  <col className="w-[56px]" />
+                  <col className="w-[120px]" />
+                  <col className="w-[260px]" />
+                  <col className="w-[320px]" />
+                  <col className="w-[130px]" />
+                  <col className="w-[120px]" />
+                  <col className="w-[150px]" />
+                  <col className="w-[130px]" />
+                  <col className="w-[120px]" />
+                  <col className="w-[180px]" />
+                  <col className="w-[110px]" />
+                </colgroup>
                 <thead>
                   <tr className="bg-slate-50 border-b">
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       <input
                         type="checkbox"
@@ -1476,52 +1683,52 @@ export default function Orders() {
                       />
                     </th>
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       {select("الطلب", "Order")}
                     </th>
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       {select("العميل", "Customer")}
                     </th>
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       {select("العناصر", "Items")}
                     </th>
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       {select("الإجمالي", "Total")}
                     </th>
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       {select("الدفع", "Payment")}
                     </th>
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       {select("طريقة الدفع", "Payment Method")}
                     </th>
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       {select("التنفيذ", "Fulfillment")}
                     </th>
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       {select("الاسترداد", "Refund")}
                     </th>
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       {select("التاريخ", "Date")}
                     </th>
                     <th
-                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass}`}
+                      className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}
                     >
                       {select("التفاصيل", "Details")}
                     </th>
@@ -1551,19 +1758,21 @@ export default function Orders() {
                             onChange={() => toggleOrderSelection(order.id)}
                           />
                         </td>
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-800">
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">
                           #{order.order_number || order.shopify_id}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-700">
-                          <p className="font-medium text-slate-800">
+                          <p className="truncate font-medium text-slate-800">
                             {order.customer_name || "Unknown"}
                           </p>
-                          <p className="text-xs text-slate-500">{order.customer_email || "-"}</p>
+                          <p className="truncate text-xs text-slate-500">
+                            {order.customer_email || "-"}
+                          </p>
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-700">
                           {renderOrderItemPreview(order)}
                         </td>
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-800">
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">
                           {formatAmount(order._meta.totalPrice)}
                         </td>
                         <td className="px-4 py-3">
@@ -1610,7 +1819,7 @@ export default function Orders() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-sm text-slate-600">
+                        <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
                           {formatDate(order.created_at)}
                         </td>
                         <td className="px-4 py-3">
@@ -1686,7 +1895,9 @@ export default function Orders() {
                         <p className="text-slate-600">
                           Items:{" "}
                           <span className="font-medium text-slate-900">
-                            {toNumber(order.items_count).toLocaleString()}
+                            {formatNumber(order.items_count, {
+                              maximumFractionDigits: 0,
+                            })}
                           </span>
                         </p>
                         <p className="text-slate-600">
@@ -1742,8 +1953,8 @@ export default function Orders() {
               <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-slate-600">
                   {select(
-                    `عرض ${visibleRange.start.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} - ${visibleRange.end.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} من ${filteredOrders.length.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} طلب`,
-                    `Showing ${visibleRange.start.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} - ${visibleRange.end.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} of ${filteredOrders.length.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} orders`,
+                    `عرض ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} من ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} طلب`,
+                    `Showing ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} of ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} orders`,
                   )}
                 </p>
 
@@ -1783,7 +1994,9 @@ export default function Orders() {
                           : "border border-slate-200 text-slate-700 hover:bg-slate-50"
                       }`}
                     >
-                      {pageNumber.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")}
+                      {formatNumber(pageNumber, {
+                        maximumFractionDigits: 0,
+                      })}
                     </button>
                   ))}
 
@@ -1797,7 +2010,9 @@ export default function Orders() {
                         onClick={() => setCurrentPage(totalPages)}
                         className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                       >
-                        {totalPages.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")}
+                        {formatNumber(totalPages, {
+                          maximumFractionDigits: 0,
+                        })}
                       </button>
                     </>
                   ) : null}

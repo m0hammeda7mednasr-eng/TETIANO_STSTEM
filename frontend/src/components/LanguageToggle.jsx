@@ -6,13 +6,13 @@ export default function LanguageToggle({ className = "" }) {
 
   return (
     <div
-      className={`inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-2 py-2 shadow-sm backdrop-blur ${className}`.trim()}
+      className={`app-surface inline-flex items-center gap-2 rounded-2xl px-2 py-2 ${className}`.trim()}
       aria-label={t("language.switcherLabel", "Interface language")}
     >
-      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100/90 text-slate-600">
         <Languages size={16} />
       </div>
-      <div className="inline-flex items-center rounded-xl bg-slate-100 p-1">
+      <div className="inline-flex items-center rounded-xl bg-slate-100/90 p-1">
         <ToggleButton
           label="AR"
           title={t("language.arabic", "Arabic")}
@@ -38,7 +38,7 @@ function ToggleButton({ label, title, isActive, onClick }) {
       onClick={onClick}
       className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
         isActive
-          ? "bg-sky-700 text-white shadow-sm"
+          ? "bg-sky-700 text-white shadow-[0_10px_24px_-16px_rgba(2,132,199,0.8)]"
           : "text-slate-600 hover:bg-white hover:text-slate-900"
       }`}
     >

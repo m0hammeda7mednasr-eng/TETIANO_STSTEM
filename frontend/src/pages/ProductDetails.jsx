@@ -10,23 +10,24 @@ import {
   Clock,
   CheckCircle,
   AlertCircle,
+  Copy,
   Image as ImageIcon,
 } from "lucide-react";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
+import {
+  formatCurrency as formatMoney,
+  formatDateTime,
+  formatNumber,
+} from "../utils/localeFormat";
 
-const CURRENCY_LABEL = "LE";
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-const formatMoney = (value) =>
-  `${toNumber(value).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} ${CURRENCY_LABEL}`;
-const formatCount = (value) => toNumber(value).toLocaleString("ar-EG");
+const formatCount = (value) =>
+  formatNumber(value, { maximumFractionDigits: 0 });
 const toArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 const formatTextList = (values, fallback = "-") => {
   const list = toArray(values)
@@ -95,7 +96,7 @@ export default function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isAdmin, hasPermission } = useAuth();
-  const { select } = useLocale();
+  const { select, currencyLabel } = useLocale();
   const canEditProducts = hasPermission("can_edit_products");
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -318,6 +319,18 @@ export default function ProductDetails() {
     setTimeout(() => setNotification(null), 5000);
   };
 
+  const handleCopyProductReference = async () => {
+    try {
+      await navigator.clipboard.writeText(String(product?.id || id || ""));
+      showNotification(
+        select("تم نسخ معرف المنتج", "Product ID copied"),
+        "success",
+      );
+    } catch {
+      showNotification(select("فشل نسخ معرف المنتج", "Failed to copy product ID"), "error");
+    }
+  };
+
   const getSyncStatusIcon = () => {
     if (product?.pending_sync) {
       return (
@@ -349,21 +362,18 @@ export default function ProductDetails() {
     return null;
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "N/A";
-    const date = new Date(dateString);
-    return date.toLocaleString("ar-EG", {
+  const formatDate = (dateString) =>
+    formatDateTime(dateString, {
       year: "numeric",
       month: "long",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     });
-  };
 
   if (loading) {
     return (
-      <div className="flex h-screen bg-gray-100">
+      <div className="flex h-screen bg-transparent">
         <Sidebar />
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center">
@@ -377,7 +387,7 @@ export default function ProductDetails() {
 
   if (!product) {
     return (
-      <div className="flex h-screen bg-gray-100">
+      <div className="flex h-screen bg-transparent">
         <Sidebar />
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center">
@@ -396,7 +406,7 @@ export default function ProductDetails() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex h-screen bg-transparent">
       <Sidebar />
 
       <main className="flex-1 overflow-auto">
@@ -423,7 +433,7 @@ export default function ProductDetails() {
             <div className="flex items-center gap-4">
               <button
                 onClick={() => navigate("/products")}
-                className="p-2 hover:bg-gray-200 rounded-lg transition"
+                className="app-button-secondary rounded-2xl p-2.5 text-slate-700"
               >
                 <ArrowLeft size={24} />
               </button>
@@ -433,6 +443,14 @@ export default function ProductDetails() {
                     {product.title}
                   </h1>
                   {getSyncStatusIcon()}
+                  <button
+                    onClick={handleCopyProductReference}
+                    className="app-button-secondary inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-slate-700"
+                    title={select("نسخ معرف المنتج", "Copy product ID")}
+                  >
+                    <Copy size={14} />
+                    {select("نسخ", "Copy")}
+                  </button>
                 </div>
                 <p className="text-gray-600">
                   تم الإنشاء في {formatDate(product.created_at)}
@@ -446,7 +464,7 @@ export default function ProductDetails() {
                     <button
                       onClick={handleCancel}
                       disabled={saving}
-                      className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition disabled:opacity-50 flex items-center gap-2"
+                      className="app-button-secondary flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-50"
                     >
                       <X size={16} />
                       إلغاء
@@ -454,7 +472,7 @@ export default function ProductDetails() {
                     <button
                       onClick={handleSave}
                       disabled={saving}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2"
+                      className="app-button-primary flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
                     >
                       {saving ? (
                         <>
@@ -472,7 +490,7 @@ export default function ProductDetails() {
                 ) : (
                   <button
                     onClick={() => setEditing(true)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+                    className="app-button-primary flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-white"
                   >
                     <Edit2 size={16} />
                     تعديل
@@ -485,11 +503,11 @@ export default function ProductDetails() {
             {/* Main Content */}
             <div className="lg:col-span-2 space-y-6">
               {/* Product Image */}
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                 <h2 className="text-xl font-bold text-gray-800 mb-4">
                   صورة المنتج
                 </h2>
-                <div className="w-full h-96 bg-gray-100 rounded-lg flex items-center justify-center overflow-hidden">
+                <div className="flex h-96 w-full items-center justify-center overflow-hidden rounded-[24px] bg-slate-100">
                   {product.image_url ? (
                     <img
                       src={product.image_url}
@@ -504,7 +522,7 @@ export default function ProductDetails() {
 
               {/* Product Description */}
               {product.body_html && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-xl font-bold text-gray-800 mb-4">
                     الوصف
                   </h2>
@@ -534,7 +552,7 @@ export default function ProductDetails() {
 
               {/* Variants */}
               {product.variants && product.variants.length > 0 && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-xl font-bold text-gray-800 mb-4">
                     الأشكال ({product.variants.length})
                   </h2>
@@ -566,7 +584,7 @@ export default function ProductDetails() {
                       return (
                         <div
                           key={index}
-                          className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+                          className="rounded-[24px] border border-slate-200 bg-white/80 p-4 transition hover:border-slate-300 hover:bg-white"
                           data-variant-inventory={displayedVariantInventory}
                         >
                           <div className="flex justify-between items-start">
@@ -592,17 +610,17 @@ export default function ProductDetails() {
                               )}
                               <div className="flex gap-4 mt-2">
                                 {variant.option1 && (
-                                  <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                  <span className="app-chip px-2.5 py-1 text-xs text-slate-700">
                                     {variant.option1}
                                   </span>
                                 )}
                                 {variant.option2 && (
-                                  <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                  <span className="app-chip px-2.5 py-1 text-xs text-slate-700">
                                     {variant.option2}
                                   </span>
                                 )}
                                 {variant.option3 && (
-                                  <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                  <span className="app-chip px-2.5 py-1 text-xs text-slate-700">
                                     {variant.option3}
                                   </span>
                                 )}
@@ -610,13 +628,13 @@ export default function ProductDetails() {
                             </div>
                             <div className="text-left">
                               <p className="text-lg font-bold text-gray-800">
-                                {displayedVariantPrice} {CURRENCY_LABEL}
+                                {formatMoney(displayedVariantPrice)}
                               </p>
                               {variant.compare_at_price &&
                                 parseFloat(variant.compare_at_price) >
                                   parseFloat(displayedVariantPrice) && (
                                   <p className="text-sm text-gray-500 line-through">
-                                    {variant.compare_at_price} {CURRENCY_LABEL}
+                                    {formatMoney(variant.compare_at_price)}
                                   </p>
                                 )}
                               <p
@@ -673,7 +691,7 @@ export default function ProductDetails() {
                                             event.target.value,
                                           )
                                         }
-                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        className="app-input w-full px-3 py-2.5 text-sm"
                                         placeholder="SKU-001"
                                       />
                                     </div>
@@ -696,7 +714,7 @@ export default function ProductDetails() {
                                             event.target.value,
                                           )
                                         }
-                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        className="app-input w-full px-3 py-2.5 text-sm"
                                       />
                                     </div>
                                     <div>
@@ -724,7 +742,7 @@ export default function ProductDetails() {
                                             event.target.value,
                                           )
                                         }
-                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        className="app-input w-full px-3 py-2.5 text-sm"
                                       />
                                     </div>
                                   </div>
@@ -750,7 +768,7 @@ export default function ProductDetails() {
 
               {/* Product Images Gallery */}
               {product.images && product.images.length > 1 && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-xl font-bold text-gray-800 mb-4">
                     معرض الصور ({product.images.length})
                   </h2>
@@ -758,7 +776,7 @@ export default function ProductDetails() {
                     {product.images.map((image, index) => (
                       <div
                         key={index}
-                        className="relative aspect-square bg-gray-100 rounded-lg overflow-hidden hover:shadow-lg transition"
+                        className="relative aspect-square overflow-hidden rounded-[22px] bg-slate-100 transition hover:shadow-lg"
                       >
                         <img
                           src={image.src}
@@ -778,7 +796,7 @@ export default function ProductDetails() {
 
               {/* Product Options */}
               {product.options && product.options.length > 0 && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-xl font-bold text-gray-800 mb-4">
                     خيارات المنتج
                   </h2>
@@ -811,7 +829,7 @@ export default function ProductDetails() {
               {(product.seo_title ||
                 product.seo_description ||
                 product.handle) && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-xl font-bold text-gray-800 mb-4">
                     معلومات SEO
                   </h2>
@@ -846,14 +864,14 @@ export default function ProductDetails() {
             {/* Sidebar */}
             <div className="space-y-6">
               {/* Price & Inventory */}
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4">
                   السعر والمخزون
                 </h2>
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      السعر ({CURRENCY_LABEL})
+                      السعر ({currencyLabel})
                     </label>
                     {editing && !hasMultipleVariants ? (
                       <input
@@ -867,12 +885,12 @@ export default function ProductDetails() {
                         }
                         min="0"
                         step="0.01"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="app-input w-full px-3 py-2.5 text-sm"
                       />
                     ) : (
                       <>
                         <p className="text-2xl font-bold text-gray-800">
-                          {product.price} {CURRENCY_LABEL}
+                          {formatMoney(product.price)}
                         </p>
                         {editing && hasMultipleVariants && (
                           <p className="mt-2 text-sm text-slate-600">
@@ -886,7 +904,7 @@ export default function ProductDetails() {
                   {isAdmin && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        سعر التكلفة ({CURRENCY_LABEL})
+                        سعر التكلفة ({currencyLabel})
                       </label>
                       {editing ? (
                         <input
@@ -900,11 +918,11 @@ export default function ProductDetails() {
                           }
                           min="0"
                           step="0.01"
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="app-input w-full px-3 py-2.5 text-sm"
                         />
                       ) : (
                         <p className="text-2xl font-bold text-gray-800">
-                          {product.cost_price || 0} {CURRENCY_LABEL}
+                          {formatMoney(product.cost_price || 0)}
                         </p>
                       )}
                     </div>
@@ -923,7 +941,7 @@ export default function ProductDetails() {
                               parseFloat(product.price) -
                               parseFloat(product.cost_price)
                             ).toFixed(2)}{" "}
-                            {CURRENCY_LABEL}
+                            {currencyLabel}
                           </span>
                         </div>
                         <div className="flex justify-between items-center">
@@ -951,7 +969,7 @@ export default function ProductDetails() {
                                   parseFloat(product.cost_price)) *
                                 displayedInventoryQuantity
                               ).toFixed(2)}{" "}
-                              {CURRENCY_LABEL}
+                              {currencyLabel}
                             </span>
                           </div>
                         )}
@@ -975,7 +993,7 @@ export default function ProductDetails() {
                         }
                         min="0"
                         step="1"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="app-input w-full px-3 py-2.5 text-sm"
                       />
                     ) : (
                       <>
@@ -1002,7 +1020,7 @@ export default function ProductDetails() {
               </div>
 
               {/* Product Info */}
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4">
                   معلومات المنتج
                 </h2>
@@ -1040,7 +1058,7 @@ export default function ProductDetails() {
                               sku: e.target.value,
                             })
                           }
-                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="app-input w-full px-3 py-2.5 text-sm"
                           placeholder="SKU-001"
                         />
                       ) : (
@@ -1074,7 +1092,7 @@ export default function ProductDetails() {
                               supplier_phone: e.target.value,
                             })
                           }
-                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="app-input w-full px-3 py-2.5 text-sm"
                           placeholder="01000000000"
                         />
                       ) : (
@@ -1100,7 +1118,7 @@ export default function ProductDetails() {
                               supplier_location: e.target.value,
                             })
                           }
-                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="app-input w-full px-3 py-2.5 text-sm"
                           placeholder="Warehouse, city, or supplier location"
                         />
                       ) : (
@@ -1175,7 +1193,7 @@ export default function ProductDetails() {
 
               {/* Price Range */}
               {product.price_varies && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
                     نطاق السعر
                   </h2>
@@ -1183,13 +1201,13 @@ export default function ProductDetails() {
                     <div>
                       <p className="text-sm text-gray-600">أقل سعر</p>
                       <p className="text-xl font-bold text-gray-800">
-                        {product.price_min} {CURRENCY_LABEL}
+                        {formatMoney(product.price_min)}
                       </p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-600">أعلى سعر</p>
                       <p className="text-xl font-bold text-gray-800">
-                        {product.price_max} {CURRENCY_LABEL}
+                        {formatMoney(product.price_max)}
                       </p>
                     </div>
                   </div>
@@ -1198,7 +1216,7 @@ export default function ProductDetails() {
 
               {/* Sale Information */}
               {product.on_sale && product.compare_at_price_min && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
                     معلومات التخفيض
                   </h2>
@@ -1211,13 +1229,13 @@ export default function ProductDetails() {
                     <div>
                       <p className="text-sm text-gray-600">السعر الأصلي</p>
                       <p className="text-lg font-bold text-gray-500 line-through">
-                        {product.compare_at_price_min} {CURRENCY_LABEL}
+                        {formatMoney(product.compare_at_price_min)}
                       </p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-600">السعر بعد التخفيض</p>
                       <p className="text-xl font-bold text-red-600">
-                        {product.price_min} {CURRENCY_LABEL}
+                        {formatMoney(product.price_min)}
                       </p>
                     </div>
                     <div>
@@ -1237,7 +1255,7 @@ export default function ProductDetails() {
 
               {/* Tags */}
               {product.tags && product.tags.length > 0 && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
                     الوسوم
                   </h2>
@@ -1255,7 +1273,7 @@ export default function ProductDetails() {
               )}
 
               {/* Status */}
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4">الحالة</h2>
                 <div className="space-y-3">
                   <div>
@@ -1307,7 +1325,7 @@ export default function ProductDetails() {
 
               {/* Sync Status */}
               {product.last_synced_at && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
                     حالة المزامنة
                   </h2>
@@ -1337,7 +1355,7 @@ export default function ProductDetails() {
               )}
 
               {/* Timestamps */}
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4">
                   التواريخ
                 </h2>
@@ -1397,7 +1415,7 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
   const miniStatsAlignClass = isRTL ? "text-right" : "text-left";
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
+    <div className="app-surface rounded-[28px] p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className={textAlignClass}>
           <h2 className="text-xl font-bold text-gray-800">
@@ -1464,7 +1482,7 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
                     {supplier.supplier_id ? (
                       <button
                         onClick={() => onOpenSupplier(supplier.supplier_id, "factory")}
-                        className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        className="app-button-secondary rounded-xl px-3 py-2 text-sm font-semibold text-slate-700"
                       >
                         {select("فتح المورد", "Open supplier")}
                       </button>
@@ -1520,7 +1538,7 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
                               onClick={() =>
                                 onOpenSupplier(supplier.supplier_id, "fabric")
                               }
-                              className="rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                              className="app-button-secondary rounded-xl px-3 py-2 text-sm font-semibold text-slate-700"
                             >
                               {select("فتح المورد", "Open supplier")}
                             </button>
@@ -1642,9 +1660,11 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
                       </div>
                       <div className="mt-1 text-xs text-gray-500">
                         {delivery.entry_date
-                          ? new Date(delivery.entry_date).toLocaleDateString(
-                              languageTag,
-                            )
+                          ? formatDateTime(delivery.entry_date, {
+                              year: "numeric",
+                              month: "2-digit",
+                              day: "2-digit",
+                            }, languageTag)
                           : select("بدون تاريخ", "No date")}
                         {delivery.reference_code
                           ? ` | ${select("مرجع", "Ref")}: ${delivery.reference_code}`

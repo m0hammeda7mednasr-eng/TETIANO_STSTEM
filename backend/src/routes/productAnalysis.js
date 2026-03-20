@@ -18,6 +18,7 @@ import {
   filterOrdersByScope,
   getOrderScopeFiltersCacheKey,
   hasActiveOrderScopeFilters,
+  normalizeOrderScopeFilters,
 } from "../helpers/orderScope.js";
 
 const router = express.Router();
@@ -840,7 +841,12 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
     loadScopedOrders(storeId),
   ]);
   const scopedOrderFiltersActive = hasActiveOrderScopeFilters(rawOrderFilters);
-  const filteredOrders = filterOrdersByScope(orders, rawOrderFilters);
+  const normalizedOrderFilters = normalizeOrderScopeFilters(rawOrderFilters);
+  const ordersInScope = filterOrdersByScope(orders, {
+    ...normalizedOrderFilters,
+    ordersLimit: "",
+  });
+  const filteredOrders = filterOrdersByScope(ordersInScope, normalizedOrderFilters);
 
   let tasks = [];
   let taskMetricsAvailable = true;
@@ -1062,6 +1068,10 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
       task_match_basis: taskMetricsAvailable ? "sku" : "unavailable",
       order_scope_active: scopedOrderFiltersActive,
       filtered_orders_count: filteredOrders.length,
+      total_orders_in_scope: ordersInScope.length,
+      applied_orders_limit: normalizedOrderFilters.ordersLimit
+        ? parseInt(normalizedOrderFilters.ordersLimit, 10) || null
+        : null,
       filters_key: getOrderScopeFiltersCacheKey(rawOrderFilters),
     },
   };

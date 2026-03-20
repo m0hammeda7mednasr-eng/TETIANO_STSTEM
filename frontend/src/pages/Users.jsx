@@ -1,44 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import {
+  CheckCircle2,
+  FileText,
+  Shield,
+  Trash2,
+  UserPlus,
+  Users as UsersIcon,
+  X,
+  XCircle,
+} from "lucide-react";
 import api, { getErrorMessage } from "../utils/api";
+import Sidebar from "../components/Sidebar";
 import { useLocale } from "../context/LocaleContext";
 import {
   getPermissionDescription,
   getPermissionLabel,
 } from "../utils/permissionLabels";
 import { extractArray } from "../utils/response";
-import Sidebar from "../components/Sidebar";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
-import {
-  Users as UsersIcon,
-  UserPlus,
-  Trash2,
-  Shield,
-  CheckCircle,
-  XCircle,
-  Save,
-  X,
-  FileText,
-} from "lucide-react";
 
 const POLLING_INTERVAL_MS = 30000;
-
-const ALL_PERMISSION_KEYS = [
-  "can_view_dashboard",
-  "can_view_products",
-  "can_edit_products",
-  "can_view_orders",
-  "can_edit_orders",
-  "can_view_customers",
-  "can_edit_customers",
-  "can_manage_users",
-  "can_manage_settings",
-  "can_view_profits",
-  "can_manage_tasks",
-  "can_view_all_reports",
-  "can_view_activity_log",
-];
-
 const DEFAULT_PERMISSION_STATE = {
   can_view_dashboard: true,
   can_view_products: true,
@@ -55,17 +37,16 @@ const DEFAULT_PERMISSION_STATE = {
   can_view_activity_log: false,
 };
 
-const getTabFromQuery = (value) => {
-  if (["users", "requests", "reports"].includes(value)) return value;
-  return "users";
-};
+const TABS = ["users", "requests", "reports"];
+
+const getTabFromQuery = (value) => (TABS.includes(value) ? value : "users");
 
 const normalizePermissions = (rawPermissions) => {
   const source = Array.isArray(rawPermissions)
     ? rawPermissions[0] || {}
     : rawPermissions || {};
 
-  return ALL_PERMISSION_KEYS.reduce((acc, key) => {
+  return Object.keys(DEFAULT_PERMISSION_STATE).reduce((acc, key) => {
     acc[key] =
       source[key] !== undefined ? Boolean(source[key]) : DEFAULT_PERMISSION_STATE[key];
     return acc;
@@ -81,196 +62,109 @@ const formatRoleLabel = (role, locale) =>
       ? "مستخدم"
       : "User";
 
-const formatRequestStatusLabel = (status, locale) => {
+const formatStatusLabel = (status, locale) => {
   const normalized = String(status || "").toLowerCase();
-  const labels = {
-    pending: locale === "ar" ? "قيد المراجعة" : "Pending Review",
-    approved: locale === "ar" ? "موافق عليه" : "Approved",
-    rejected: locale === "ar" ? "مرفوض" : "Rejected",
-  };
-
-  return labels[normalized] || status;
+  if (normalized === "approved") return locale === "ar" ? "موافق عليه" : "Approved";
+  if (normalized === "rejected") return locale === "ar" ? "مرفوض" : "Rejected";
+  return locale === "ar" ? "قيد المراجعة" : "Pending Review";
 };
 
 export default function Users() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { locale, isRTL, select } = useLocale();
+  const { locale, select, formatDate, formatNumber } = useLocale();
   const [users, setUsers] = useState([]);
   const [accessRequests, setAccessRequests] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState({ type: "", text: "" });
+  const [activeTab, setActiveTab] = useState(getTabFromQuery(searchParams.get("tab")));
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
-  const [message, setMessage] = useState({ type: "", text: "" });
-  const [activeTab, setActiveTab] = useState(getTabFromQuery(searchParams.get("tab")));
-
   const [newUser, setNewUser] = useState({
+    name: "",
     email: "",
     password: "",
-    name: "",
     role: "user",
   });
-
-  const [permissions, setPermissions] = useState({ ...DEFAULT_PERMISSION_STATE });
   const [editRole, setEditRole] = useState("user");
+  const [permissions, setPermissions] = useState({ ...DEFAULT_PERMISSION_STATE });
 
-  const tabQueryValue = useMemo(() => getTabFromQuery(searchParams.get("tab")), [searchParams]);
+  const pendingRequests = useMemo(
+    () => accessRequests.filter((item) => item.status === "pending").length,
+    [accessRequests],
+  );
 
-  const fetchUsers = useCallback(async () => {
+  const loadUsers = useCallback(async () => {
+    const response = await api.get("/users");
+    setUsers(extractArray(response.data));
+  }, []);
+
+  const loadAccessRequests = useCallback(async () => {
+    const response = await api.get("/access-requests/all");
+    setAccessRequests(extractArray(response.data));
+  }, []);
+
+  const loadDailyReports = useCallback(async () => {
+    const response = await api.get("/daily-reports/all");
+    setDailyReports(extractArray(response.data));
+  }, []);
+
+  const loadPage = useCallback(async () => {
     try {
-
-      const response = await api.get("/users");
-
-
-      setUsers(extractArray(response.data));
-    } catch (err) {
-      console.error("Error fetching users:", err);
+      setLoading(true);
+      await Promise.all([loadUsers(), loadAccessRequests(), loadDailyReports()]);
+    } catch (error) {
       setMessage({
         type: "error",
-        text:
-          select("فشل تحميل المستخدمين: ", "Failed to load users: ") +
-          getErrorMessage(err),
+        text: getErrorMessage(error),
       });
     } finally {
       setLoading(false);
     }
-  }, [select]);
-
-  const fetchAccessRequests = useCallback(async () => {
-    try {
-      const response = await api.get("/access-requests/all");
-      setAccessRequests(extractArray(response.data));
-    } catch (err) {
-      console.error("Error fetching access requests:", err);
-      setMessage({ type: "error", text: getErrorMessage(err) });
-    }
-  }, []);
-
-  const fetchDailyReports = useCallback(async () => {
-    try {
-      const response = await api.get("/daily-reports/all");
-      setDailyReports(extractArray(response.data));
-    } catch (err) {
-      console.error("Error fetching daily reports:", err);
-      setMessage({ type: "error", text: getErrorMessage(err) });
-    }
-  }, []);
+  }, [loadAccessRequests, loadDailyReports, loadUsers]);
 
   useEffect(() => {
-    fetchUsers();
-    fetchAccessRequests();
-    fetchDailyReports();
+    loadPage();
 
     const interval = setInterval(() => {
-      fetchUsers();
-      fetchAccessRequests();
-      fetchDailyReports();
+      loadUsers();
+      loadAccessRequests();
+      loadDailyReports();
     }, POLLING_INTERVAL_MS);
 
     const unsubscribe = subscribeToSharedDataUpdates(() => {
-      fetchUsers();
-      fetchAccessRequests();
-      fetchDailyReports();
+      loadUsers();
+      loadAccessRequests();
+      loadDailyReports();
     });
-
-    const onFocus = () => {
-      fetchUsers();
-      fetchAccessRequests();
-      fetchDailyReports();
-    };
-    window.addEventListener("focus", onFocus);
 
     return () => {
       clearInterval(interval);
       unsubscribe();
-      window.removeEventListener("focus", onFocus);
     };
-  }, [fetchAccessRequests, fetchDailyReports, fetchUsers]);
+  }, [loadAccessRequests, loadDailyReports, loadPage, loadUsers]);
 
   useEffect(() => {
-    setActiveTab(tabQueryValue);
-  }, [tabQueryValue]);
+    setActiveTab(getTabFromQuery(searchParams.get("tab")));
+  }, [searchParams]);
 
-  const handleTabChange = (tabKey) => {
-    setActiveTab(tabKey);
-    setSearchParams({ tab: tabKey });
-  };
-
-  const handleApproveRequest = async (requestId, status, notes = "") => {
-    try {
-      await api.put(`/access-requests/${requestId}`, {
-        status,
-        admin_notes: notes,
-      });
-      setMessage({
-        type: "success",
-        text:
-          status === "approved"
-            ? select("تم الموافقة على الطلب", "Request approved")
-            : select("تم رفض الطلب", "Request rejected"),
-      });
-      fetchAccessRequests();
-      fetchUsers();
-    } catch (err) {
-      setMessage({
-        type: "error",
-        text: getErrorMessage(err),
-      });
-    }
-  };
-
-  const handleAddUser = async (e) => {
-    e.preventDefault();
-    try {
-      await api.post("/users/create", { ...newUser, permissions });
-      setMessage({
-        type: "success",
-        text: select("تم إضافة المستخدم بنجاح", "User added successfully"),
-      });
-      setShowAddModal(false);
-      setNewUser({ email: "", password: "", name: "", role: "user" });
-      setPermissions({ ...DEFAULT_PERMISSION_STATE });
-      fetchUsers();
-    } catch (err) {
-      setMessage({
-        type: "error",
-        text: getErrorMessage(err),
-      });
-    }
-  };
-
-  const handleEditUser = async (e) => {
-    e.preventDefault();
-    try {
-      await api.put(`/users/${selectedUser.id}`, {
-        permissions,
-        role: editRole,
-      });
-      setMessage({
-        type: "success",
-        text: select("تم تحديث المستخدم بنجاح", "User updated successfully"),
-      });
-      setShowEditModal(false);
-      fetchUsers();
-    } catch (err) {
-      setMessage({
-        type: "error",
-        text: getErrorMessage(err),
-      });
-    }
+  const setTab = (tab) => {
+    setActiveTab(tab);
+    setSearchParams({ tab });
   };
 
   const handleDeleteUser = async (userId) => {
-    if (
-      !window.confirm(
-        select(
-          "هل أنت متأكد من حذف هذا المستخدم؟",
-          "Are you sure you want to delete this user?",
-        ),
-      )
-    )
+    const confirmed = window.confirm(
+      select(
+        "هل أنت متأكد من حذف هذا المستخدم؟",
+        "Are you sure you want to delete this user?",
+      ),
+    );
+
+    if (!confirmed) {
       return;
+    }
 
     try {
       await api.delete(`/users/${userId}`);
@@ -278,632 +172,612 @@ export default function Users() {
         type: "success",
         text: select("تم حذف المستخدم بنجاح", "User deleted successfully"),
       });
-      fetchUsers();
-    } catch (err) {
-      setMessage({
-        type: "error",
-        text: getErrorMessage(err),
+      await loadUsers();
+    } catch (error) {
+      setMessage({ type: "error", text: getErrorMessage(error) });
+    }
+  };
+
+  const handleApproveRequest = async (requestId, status) => {
+    try {
+      await api.put(`/access-requests/${requestId}`, {
+        status,
+        admin_notes: "",
       });
+      setMessage({
+        type: "success",
+        text:
+          status === "approved"
+            ? select("تمت الموافقة على الطلب", "Request approved")
+            : select("تم رفض الطلب", "Request rejected"),
+      });
+      await Promise.all([loadAccessRequests(), loadUsers()]);
+    } catch (error) {
+      setMessage({ type: "error", text: getErrorMessage(error) });
+    }
+  };
+
+  const handleAddUser = async (event) => {
+    event.preventDefault();
+
+    try {
+      await api.post("/users/create", { ...newUser, permissions });
+      setMessage({
+        type: "success",
+        text: select("تمت إضافة المستخدم بنجاح", "User added successfully"),
+      });
+      setShowAddModal(false);
+      setNewUser({ name: "", email: "", password: "", role: "user" });
+      setPermissions({ ...DEFAULT_PERMISSION_STATE });
+      await loadUsers();
+    } catch (error) {
+      setMessage({ type: "error", text: getErrorMessage(error) });
+    }
+  };
+
+  const handleEditUser = async (event) => {
+    event.preventDefault();
+
+    try {
+      await api.put(`/users/${selectedUser.id}`, {
+        role: editRole,
+        permissions,
+      });
+      setMessage({
+        type: "success",
+        text: select("تم تحديث المستخدم بنجاح", "User updated successfully"),
+      });
+      setShowEditModal(false);
+      await loadUsers();
+    } catch (error) {
+      setMessage({ type: "error", text: getErrorMessage(error) });
     }
   };
 
   const openEditModal = (user) => {
     setSelectedUser(user);
+    setEditRole(user.role || "user");
     setPermissions(normalizePermissions(user.permissions));
-    setEditRole(user.role);
     setShowEditModal(true);
   };
 
-  if (loading) {
-    return (
-      <div className="flex h-screen bg-gray-100">
-        <Sidebar />
-        <main className="flex-1 overflow-auto p-8">
-          <div className="text-center">{select("جاري التحميل...", "Loading...")}</div>
-        </main>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex min-h-screen bg-transparent">
       <Sidebar />
 
       <main className="flex-1 overflow-auto">
-        <div className="p-8">
-          {/* Header */}
-          <div className="flex justify-between items-center mb-8">
-            <div className={isRTL ? "text-right" : "text-left"}>
-              <h1 className="text-3xl font-bold text-gray-800">
-                {select("إدارة المستخدمين", "User Management")}
-              </h1>
-              <p className="text-gray-600">
-                {select(
-                  "إضافة وإدارة صلاحيات المستخدمين",
-                  "Add users and manage their permissions",
-                )}
-              </p>
-            </div>
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition"
-            >
-              <UserPlus size={20} />
-              {select("إضافة مستخدم جديد", "Add New User")}
-            </button>
-          </div>
+        <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+          <section className="app-toolbar rounded-[30px] p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="app-chip inline-flex items-center gap-2 px-3 py-1 text-xs font-semibold text-slate-700">
+                  <UsersIcon size={14} />
+                  {select("إدارة الفريق", "Team workspace")}
+                </div>
+                <h1 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-slate-900">
+                  {select("إدارة المستخدمين", "User Management")}
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+                  {select(
+                    "تابع المستخدمين وطلبات الصلاحيات والتقارير اليومية من واجهة أوضح وأسهل في المراجعة.",
+                    "Review users, access requests, and daily reports from a clearer management workspace.",
+                  )}
+                </p>
+              </div>
 
-          {/* Message */}
-          {message.text && (
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="app-button-primary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-white"
+              >
+                <UserPlus size={18} />
+                {select("إضافة مستخدم", "Add user")}
+              </button>
+            </div>
+          </section>
+
+          {message.text ? (
             <div
-              className={`mb-6 p-4 rounded-lg ${
+              className={`rounded-[24px] border px-4 py-3 text-sm ${
                 message.type === "error"
-                  ? "bg-red-50 text-red-800 border border-red-200"
-                  : "bg-green-50 text-green-800 border border-green-200"
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
               }`}
             >
               {message.text}
             </div>
-          )}
+          ) : null}
 
-          {/* Tabs */}
-          <div className="mb-6">
-            <div className="border-b border-gray-200">
-              <nav className="-mb-px flex gap-8">
-                <button
-                  onClick={() => handleTabChange("users")}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === "users"
-                      ? "border-blue-600 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <UsersIcon size={18} />
-                    {select("المستخدمين", "Users")} ({users.length})
-                  </div>
-                </button>
-                <button
-                  onClick={() => handleTabChange("requests")}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === "requests"
-                      ? "border-blue-600 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Shield size={18} />
-                    {select("طلبات الصلاحيات", "Access Requests")} (
-                    {
-                      accessRequests.filter((r) => r.status === "pending")
-                        .length
-                    }
-                    )
-                  </div>
-                </button>
-                <button
-                  onClick={() => handleTabChange("reports")}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === "reports"
-                      ? "border-blue-600 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <FileText size={18} />
-                    {select("التقارير اليومية", "Daily Reports")} ({dailyReports.length})
-                  </div>
-                </button>
-              </nav>
-            </div>
+          <section className="grid gap-4 md:grid-cols-3">
+            <MetricCard
+              title={select("المستخدمون", "Users")}
+              value={formatNumber(users.length, { maximumFractionDigits: 0 })}
+              subtitle={select("إجمالي الحسابات داخل النظام", "All accounts in the system")}
+              icon={UsersIcon}
+            />
+            <MetricCard
+              title={select("طلبات معلقة", "Pending requests")}
+              value={formatNumber(pendingRequests, { maximumFractionDigits: 0 })}
+              subtitle={select("طلبات صلاحيات تحتاج مراجعة", "Access requests waiting for review")}
+              icon={Shield}
+            />
+            <MetricCard
+              title={select("تقارير يومية", "Daily reports")}
+              value={formatNumber(dailyReports.length, { maximumFractionDigits: 0 })}
+              subtitle={select("تقارير الفريق المرفوعة", "Submitted team reports")}
+              icon={FileText}
+            />
+          </section>
+
+          <div className="flex flex-wrap gap-2">
+            <TabButton
+              active={activeTab === "users"}
+              label={`${select("المستخدمون", "Users")} (${formatNumber(users.length, { maximumFractionDigits: 0 })})`}
+              onClick={() => setTab("users")}
+            />
+            <TabButton
+              active={activeTab === "requests"}
+              label={`${select("طلبات الصلاحيات", "Access Requests")} (${formatNumber(pendingRequests, { maximumFractionDigits: 0 })})`}
+              onClick={() => setTab("requests")}
+            />
+            <TabButton
+              active={activeTab === "reports"}
+              label={`${select("التقارير اليومية", "Daily Reports")} (${formatNumber(dailyReports.length, { maximumFractionDigits: 0 })})`}
+              onClick={() => setTab("reports")}
+            />
           </div>
 
-          {/* Users Table */}
-          {activeTab === "users" && (
-            <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-              <table className="data-table w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("الاسم", "Name")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("البريد الإلكتروني", "Email")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("الدور", "Role")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("الحالة", "Status")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("الإجراءات", "Actions")}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {users.map((user) => (
-                    <tr key={user.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <UsersIcon size={18} className="text-gray-400" />
-                          <span className="font-medium">{user.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-gray-600">{user.email}</td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`px-3 py-1 rounded-full text-sm ${
-                            user.role === "admin"
-                              ? "bg-purple-100 text-purple-800"
-                              : "bg-blue-100 text-blue-800"
-                          }`}
-                        >
-                          {formatRoleLabel(user.role, locale)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        {user.is_active ? (
-                          <CheckCircle className="text-green-600" size={20} />
-                        ) : (
-                          <XCircle className="text-red-600" size={20} />
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => openEditModal(user)}
-                            className="text-blue-600 hover:text-blue-800 p-2 hover:bg-blue-50 rounded"
-                          >
-                            <Shield size={18} />
-                          </button>
-                          {user.role !== "admin" && (
-                            <button
-                              onClick={() => handleDeleteUser(user.id)}
-                              className="text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded"
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {loading ? (
+            <div className="app-surface rounded-[28px] p-8 text-center text-slate-500">
+              {select("جارٍ تحميل البيانات...", "Loading data...")}
             </div>
-          )}
+          ) : null}
 
-          {/* Access Requests Table */}
-          {activeTab === "requests" && (
-            <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-              <table className="data-table w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("المستخدم", "User")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("الصلاحية المطلوبة", "Requested Permission")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("السبب", "Reason")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("التاريخ", "Date")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("الحالة", "Status")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("الإجراءات", "Actions")}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {accessRequests.length === 0 ? (
+          {!loading && activeTab === "users" ? (
+            <div className="app-table-shell rounded-[30px]">
+              <div className="overflow-x-auto">
+                <table className="data-table w-full min-w-[860px]">
+                  <thead className="bg-slate-50">
                     <tr>
-                      <td
-                        colSpan="6"
-                        className="px-6 py-12 text-center text-gray-500"
-                      >
-                        <Shield
-                          size={48}
-                          className="mx-auto mb-4 text-gray-300"
-                        />
-                        <p>{select("لا توجد طلبات صلاحيات", "No access requests")}</p>
-                      </td>
+                      <th className="px-6 py-4">{select("المستخدم", "User")}</th>
+                      <th className="px-6 py-4">{select("البريد", "Email")}</th>
+                      <th className="px-6 py-4">{select("الدور", "Role")}</th>
+                      <th className="px-6 py-4">{select("الحالة", "Status")}</th>
+                      <th className="px-6 py-4">{select("إجراءات", "Actions")}</th>
                     </tr>
-                  ) : (
-                    accessRequests.map((request) => (
-                      <tr key={request.id} className="hover:bg-gray-50">
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {users.map((user) => (
+                      <tr key={user.id}>
                         <td className="px-6 py-4">
-                          <div>
-                            <p className="font-medium">
-                              {request.users?.name || select("غير معروف", "Unknown")}
-                            </p>
-                            <p className="text-sm text-gray-500">
-                              {request.users?.email}
-                            </p>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+                              <UsersIcon size={16} />
+                            </div>
+                            <div>
+                              <p className="font-medium text-slate-900">{user.name}</p>
+                              <p className="text-xs text-slate-400">#{user.id}</p>
+                            </div>
                           </div>
                         </td>
+                        <td className="px-6 py-4 text-sm text-slate-600">{user.email}</td>
                         <td className="px-6 py-4">
-                          <div className="space-y-2">
-                            <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm text-blue-800">
-                              {getPermissionLabel(request.permission_requested, locale)}
-                            </span>
-                            <p className="max-w-sm text-xs leading-5 text-gray-500">
-                              {getPermissionDescription(
-                                request.permission_requested,
-                                locale,
-                              )}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
-                          {request.reason}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-600">
-                          {new Date(request.created_at).toLocaleDateString(
-                            locale === "ar" ? "ar-EG" : "en-US",
-                          )}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span
-                            className={`px-3 py-1 rounded-full text-sm ${
-                              request.status === "pending"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : request.status === "approved"
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-red-100 text-red-800"
-                            }`}
-                          >
-                            {formatRequestStatusLabel(request.status, locale)}
+                          <span className="app-chip px-3 py-1 text-xs font-semibold text-slate-700">
+                            {formatRoleLabel(user.role, locale)}
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          {request.status === "pending" && (
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() =>
-                                  handleApproveRequest(request.id, "approved")
-                                }
-                                className="text-green-600 hover:text-green-800 p-2 hover:bg-green-50 rounded flex items-center gap-1"
-                                title={select("موافقة", "Approve")}
-                              >
-                                <CheckCircle size={18} />
-                              </button>
-                              <button
-                                onClick={() =>
-                                  handleApproveRequest(request.id, "rejected")
-                                }
-                                className="text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded flex items-center gap-1"
-                                title={select("رفض", "Reject")}
-                              >
-                                <XCircle size={18} />
-                              </button>
-                            </div>
-                          )}
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              user.is_active
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {user.is_active
+                              ? select("نشط", "Active")
+                              : select("موقوف", "Inactive")}
+                          </span>
                         </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Daily Reports Table */}
-          {activeTab === "reports" && (
-            <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-              <table className="data-table w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("المستخدم", "User")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("العنوان", "Title")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("المحتوى", "Content")}
-                    </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
-                      {select("التاريخ", "Date")}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {dailyReports.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan="4"
-                        className="px-6 py-12 text-center text-gray-500"
-                      >
-                        <FileText
-                          size={48}
-                          className="mx-auto mb-4 text-gray-300"
-                        />
-                        <p>{select("لا توجد تقارير يومية", "No daily reports")}</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    dailyReports.map((report) => (
-                      <tr key={report.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4">
-                          <div>
-                            <p className="font-medium">
-                              {report.users?.name || select("غير معروف", "Unknown")}
-                            </p>
-                            <p className="text-sm text-gray-500">
-                              {report.users?.email}
-                            </p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => openEditModal(user)}
+                              className="app-button-secondary rounded-xl px-3 py-2 text-xs font-semibold text-slate-700"
+                            >
+                              {select("تعديل", "Edit")}
+                            </button>
+                            {user.role !== "admin" ? (
+                              <button
+                                onClick={() => handleDeleteUser(user.id)}
+                                className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50"
+                              >
+                                {select("حذف", "Delete")}
+                              </button>
+                            ) : null}
                           </div>
                         </td>
-                        <td className="px-6 py-4 font-medium text-gray-800">
-                          {report.title}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          {!loading && activeTab === "requests" ? (
+            <div className="app-table-shell rounded-[30px]">
+              <div className="overflow-x-auto">
+                <table className="data-table w-full min-w-[960px]">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-6 py-4">{select("المستخدم", "User")}</th>
+                      <th className="px-6 py-4">{select("الصلاحية", "Permission")}</th>
+                      <th className="px-6 py-4">{select("السبب", "Reason")}</th>
+                      <th className="px-6 py-4">{select("التاريخ", "Date")}</th>
+                      <th className="px-6 py-4">{select("الحالة", "Status")}</th>
+                      <th className="px-6 py-4">{select("إجراءات", "Actions")}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {accessRequests.length === 0 ? (
+                      <tr>
+                        <td colSpan="6" className="px-6 py-12 text-center text-slate-500">
+                          {select("لا توجد طلبات صلاحيات", "No access requests")}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-600 max-w-md">
-                          <div className="line-clamp-2">{report.content}</div>
-                          {report.attachments &&
-                            report.attachments.length > 0 && (
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {report.attachments.map((file, idx) => (
-                                  <a
-                                    key={idx}
-                                    href={file.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 flex items-center gap-1"
-                                  >
-                                    <FileText size={12} />
-                                    {file.fileName}
-                                  </a>
-                                ))}
+                      </tr>
+                    ) : (
+                      accessRequests.map((request) => (
+                        <tr key={request.id}>
+                          <td className="px-6 py-4">
+                            <div>
+                              <p className="font-medium text-slate-900">
+                                {request.users?.name || select("غير معروف", "Unknown")}
+                              </p>
+                              <p className="text-xs text-slate-400">{request.users?.email}</p>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="space-y-2">
+                              <span className="app-chip inline-flex px-3 py-1 text-xs font-semibold text-slate-700">
+                                {getPermissionLabel(request.permission_requested, locale)}
+                              </span>
+                              <p className="max-w-sm text-xs leading-5 text-slate-500">
+                                {getPermissionDescription(request.permission_requested, locale)}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-600">{request.reason}</td>
+                          <td className="px-6 py-4 text-sm text-slate-600">
+                            {formatDate(request.created_at)}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="app-chip px-3 py-1 text-xs font-semibold text-slate-700">
+                              {formatStatusLabel(request.status, locale)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            {request.status === "pending" ? (
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleApproveRequest(request.id, "approved")}
+                                  className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+                                >
+                                  {select("موافقة", "Approve")}
+                                </button>
+                                <button
+                                  onClick={() => handleApproveRequest(request.id, "rejected")}
+                                  className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50"
+                                >
+                                  {select("رفض", "Reject")}
+                                </button>
                               </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">
+                                {select("تمت المراجعة", "Reviewed")}
+                              </span>
                             )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          {!loading && activeTab === "reports" ? (
+            <div className="app-table-shell rounded-[30px]">
+              <div className="overflow-x-auto">
+                <table className="data-table w-full min-w-[920px]">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-6 py-4">{select("المستخدم", "User")}</th>
+                      <th className="px-6 py-4">{select("العنوان", "Title")}</th>
+                      <th className="px-6 py-4">{select("المحتوى", "Content")}</th>
+                      <th className="px-6 py-4">{select("التاريخ", "Date")}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {dailyReports.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" className="px-6 py-12 text-center text-slate-500">
+                          {select("لا توجد تقارير يومية", "No daily reports")}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-600">
-                          {new Date(report.created_at).toLocaleDateString(
-                            locale === "ar" ? "ar-EG" : "en-US",
-                            {
+                      </tr>
+                    ) : (
+                      dailyReports.map((report) => (
+                        <tr key={report.id}>
+                          <td className="px-6 py-4">
+                            <div>
+                              <p className="font-medium text-slate-900">
+                                {report.users?.name || select("غير معروف", "Unknown")}
+                              </p>
+                              <p className="text-xs text-slate-400">{report.users?.email}</p>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 font-medium text-slate-900">{report.title}</td>
+                          <td className="px-6 py-4 text-sm text-slate-600">
+                            <div className="line-clamp-2">{report.content}</div>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-600">
+                            {formatDate(report.created_at, {
                               year: "numeric",
                               month: "long",
                               day: "numeric",
-                            },
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                            })}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          )}
+          ) : null}
         </div>
       </main>
 
-      {/* Add User Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold">
-                {select("إضافة مستخدم جديد", "Add New User")}
-              </h2>
+      {showAddModal ? (
+        <UserModal
+          title={select("إضافة مستخدم", "Add User")}
+          onClose={() => setShowAddModal(false)}
+        >
+          <form onSubmit={handleAddUser} className="space-y-4">
+            <Field
+              label={select("الاسم", "Name")}
+              value={newUser.name}
+              onChange={(value) => setNewUser((current) => ({ ...current, name: value }))}
+            />
+            <Field
+              label={select("البريد الإلكتروني", "Email")}
+              type="email"
+              value={newUser.email}
+              onChange={(value) => setNewUser((current) => ({ ...current, email: value }))}
+            />
+            <Field
+              label={select("كلمة المرور", "Password")}
+              type="password"
+              value={newUser.password}
+              onChange={(value) =>
+                setNewUser((current) => ({ ...current, password: value }))
+              }
+            />
+            <SelectField
+              label={select("الدور", "Role")}
+              value={newUser.role}
+              onChange={(value) => setNewUser((current) => ({ ...current, role: value }))}
+              options={[
+                { value: "user", label: select("مستخدم", "User") },
+                { value: "admin", label: select("مدير", "Admin") },
+              ]}
+            />
+            <PermissionGrid
+              locale={locale}
+              permissions={permissions}
+              setPermissions={setPermissions}
+            />
+            <div className="flex gap-3">
               <button
+                type="submit"
+                className="app-button-primary flex-1 rounded-2xl px-4 py-3 text-sm font-semibold text-white"
+              >
+                {select("حفظ المستخدم", "Save user")}
+              </button>
+              <button
+                type="button"
                 onClick={() => setShowAddModal(false)}
-                className="text-gray-500 hover:text-gray-700"
+                className="app-button-secondary flex-1 rounded-2xl px-4 py-3 text-sm font-semibold text-slate-700"
               >
-                <X size={24} />
+                {select("إلغاء", "Cancel")}
               </button>
             </div>
+          </form>
+        </UserModal>
+      ) : null}
 
-            <form onSubmit={handleAddUser} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  {select("الاسم", "Name")}
-                </label>
-                <input
-                  type="text"
-                  value={newUser.name}
-                  onChange={(e) =>
-                    setNewUser({ ...newUser, name: e.target.value })
-                  }
-                  className="w-full px-4 py-2 border rounded-lg"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  {select("البريد الإلكتروني", "Email")}
-                </label>
-                <input
-                  type="email"
-                  value={newUser.email}
-                  onChange={(e) =>
-                    setNewUser({ ...newUser, email: e.target.value })
-                  }
-                  autoComplete="username"
-                  className="w-full px-4 py-2 border rounded-lg"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  {select("كلمة المرور", "Password")}
-                </label>
-                <input
-                  type="password"
-                  value={newUser.password}
-                  onChange={(e) =>
-                    setNewUser({ ...newUser, password: e.target.value })
-                  }
-                  autoComplete="new-password"
-                  className="w-full px-4 py-2 border rounded-lg"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  {select("الدور", "Role")}
-                </label>
-                <select
-                  value={newUser.role}
-                  onChange={(e) =>
-                    setNewUser({ ...newUser, role: e.target.value })
-                  }
-                  className="w-full px-4 py-2 border rounded-lg"
-                >
-                  <option value="user">{select("مستخدم", "User")}</option>
-                  <option value="admin">{select("مدير", "Admin")}</option>
-                </select>
-              </div>
-
-              <div className="border-t pt-4">
-                <h3 className="font-semibold mb-4">
-                  {select("الصلاحيات", "Permissions")}
-                </h3>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  {Object.keys(permissions).map((key) => (
-                    <PermissionToggleCard
-                      key={key}
-                      label={getPermissionLabel(key, locale)}
-                      description={getPermissionDescription(key, locale)}
-                      checked={permissions[key]}
-                      onChange={(checked) =>
-                        setPermissions({
-                          ...permissions,
-                          [key]: checked,
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex gap-4 pt-4">
-                <button
-                  type="submit"
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg flex items-center justify-center gap-2"
-                >
-                  <Save size={20} />
-                  {select("حفظ", "Save")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-3 rounded-lg"
-                >
-                  {select("إلغاء", "Cancel")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Permissions Modal */}
-      {showEditModal && selectedUser && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-8 max-w-2xl w-full">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold">
-                {select("تعديل صلاحيات", "Edit Permissions")}: {selectedUser.name}
-              </h2>
+      {showEditModal && selectedUser ? (
+        <UserModal
+          title={`${select("تعديل المستخدم", "Edit User")}: ${selectedUser.name}`}
+          onClose={() => setShowEditModal(false)}
+        >
+          <form onSubmit={handleEditUser} className="space-y-4">
+            <SelectField
+              label={select("الدور", "Role")}
+              value={editRole}
+              onChange={setEditRole}
+              options={[
+                { value: "user", label: select("مستخدم", "User") },
+                { value: "admin", label: select("مدير", "Admin") },
+              ]}
+            />
+            <PermissionGrid
+              locale={locale}
+              permissions={permissions}
+              setPermissions={setPermissions}
+            />
+            <div className="flex gap-3">
               <button
-                onClick={() => setShowEditModal(false)}
-                className="text-gray-500 hover:text-gray-700"
+                type="submit"
+                className="app-button-primary flex-1 rounded-2xl px-4 py-3 text-sm font-semibold text-white"
               >
-                <X size={24} />
+                {select("حفظ التغييرات", "Save changes")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="app-button-secondary flex-1 rounded-2xl px-4 py-3 text-sm font-semibold text-slate-700"
+              >
+                {select("إلغاء", "Cancel")}
               </button>
             </div>
-
-            <form onSubmit={handleEditUser} className="space-y-4">
-              <div className="mb-4">
-                <label className="block text-sm font-medium mb-2">
-                  {select("الدور", "Role")}
-                </label>
-                <select
-                  value={editRole}
-                  onChange={(e) => setEditRole(e.target.value)}
-                  className="w-full px-4 py-2 border rounded-lg"
-                >
-                  <option value="user">{select("مستخدم", "User")}</option>
-                  <option value="admin">{select("مدير", "Admin")}</option>
-                </select>
-              </div>
-
-              <div className="border-t pt-4">
-                <h3 className="font-semibold mb-4">
-                  {select("الصلاحيات", "Permissions")}
-                </h3>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  {Object.keys(permissions).map((key) => (
-                    <PermissionToggleCard
-                      key={key}
-                      label={getPermissionLabel(key, locale)}
-                      description={getPermissionDescription(key, locale)}
-                      checked={permissions[key]}
-                      onChange={(checked) =>
-                        setPermissions({
-                          ...permissions,
-                          [key]: checked,
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex gap-4 pt-4">
-                <button
-                  type="submit"
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg flex items-center justify-center gap-2"
-                >
-                  <Save size={20} />
-                  {select("حفظ التغييرات", "Save Changes")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-3 rounded-lg"
-                >
-                  {select("إلغاء", "Cancel")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+          </form>
+        </UserModal>
+      ) : null}
     </div>
   );
 }
 
-function PermissionToggleCard({ checked, description, label, onChange }) {
+function MetricCard({ title, value, subtitle, icon: Icon }) {
   return (
-    <label
-      className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-3 transition ${
-        checked
-          ? "border-blue-300 bg-blue-50"
-          : "border-gray-200 bg-white hover:border-gray-300"
+    <div className="app-surface rounded-[28px] p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className="metric-number mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-900">
+            {value}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-slate-500">{subtitle}</p>
+        </div>
+        <div className="rounded-[20px] bg-slate-100 p-3 text-slate-600">
+          <Icon size={20} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabButton({ active, label, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+        active
+          ? "bg-slate-900 text-white shadow-lg shadow-slate-300/50"
+          : "app-button-secondary text-slate-700"
       }`}
     >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="mt-1 h-4 w-4"
-      />
-      <span className="space-y-1">
-        <span className="block text-sm font-medium text-gray-900">{label}</span>
-        <span className="block text-xs leading-5 text-gray-500">
-          {description}
-        </span>
+      {label}
+    </button>
+  );
+}
+
+function UserModal({ children, onClose, title }) {
+  return (
+    <div className="app-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
+      <div className="app-modal-panel max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[30px] p-6 sm:p-8">
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <h2 className="text-2xl font-semibold tracking-[-0.03em] text-slate-900">
+            {title}
+          </h2>
+          <button
+            onClick={onClose}
+            className="rounded-2xl bg-slate-100 p-2 text-slate-500 hover:bg-slate-200"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, onChange, type = "text", value }) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+        {label}
       </span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="app-input px-4 py-3 text-sm"
+        required
+      />
     </label>
+  );
+}
+
+function SelectField({ label, onChange, options, value }) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="app-input px-4 py-3 text-sm"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function PermissionGrid({ locale, permissions, setPermissions }) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-900">
+          {locale === "ar" ? "الصلاحيات" : "Permissions"}
+        </h3>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          {locale === "ar"
+            ? "اختر ما يمكن للمستخدم الوصول إليه داخل النظام."
+            : "Choose what this user can access in the system."}
+        </p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {Object.keys(permissions).map((key) => (
+          <label
+            key={key}
+            className={`cursor-pointer rounded-[22px] border px-4 py-3 transition ${
+              permissions[key]
+                ? "border-sky-200 bg-sky-50"
+                : "border-slate-200 bg-white hover:border-slate-300"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={permissions[key]}
+                onChange={(event) =>
+                  setPermissions((current) => ({
+                    ...current,
+                    [key]: event.target.checked,
+                  }))
+                }
+                className="mt-1 h-4 w-4"
+              />
+              <div>
+                <p className="text-sm font-semibold text-slate-900">
+                  {getPermissionLabel(key, locale)}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {getPermissionDescription(key, locale)}
+                </p>
+              </div>
+            </div>
+          </label>
+        ))}
+      </div>
+    </div>
   );
 }

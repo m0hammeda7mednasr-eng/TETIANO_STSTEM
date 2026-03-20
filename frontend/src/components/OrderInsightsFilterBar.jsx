@@ -40,7 +40,7 @@ export default function OrderInsightsFilterBar({
   };
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section className="app-surface rounded-[28px]">
       <div className="border-b border-slate-100 px-5 py-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
@@ -54,7 +54,7 @@ export default function OrderInsightsFilterBar({
           <button
             type="button"
             onClick={onReset}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="app-button-secondary inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-700"
           >
             <RotateCcw size={16} />
             {t("orderFilterBar.reset", "Reset")}
@@ -72,10 +72,10 @@ export default function OrderInsightsFilterBar({
                 key={preset.id}
                 type="button"
                 onClick={() => onChange({ ...preset.filters })}
-                className={`rounded-full border px-3 py-2 text-sm font-medium transition ${
+                className={`app-chip px-3 py-2 text-sm font-medium transition ${
                   isActive
-                    ? "border-sky-700 bg-sky-700 text-white shadow-sm"
-                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    ? "border-sky-700 bg-sky-700 text-white shadow-[0_12px_28px_-18px_rgba(2,132,199,0.9)]"
+                    : "text-slate-700 hover:bg-white"
                 }`}
                 title={preset.description}
               >
@@ -85,7 +85,7 @@ export default function OrderInsightsFilterBar({
           })}
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           <Field
             label={t("orderFilterBar.fromDate", "From Date")}
             icon={CalendarRange}
@@ -94,7 +94,7 @@ export default function OrderInsightsFilterBar({
               type="date"
               value={filters.dateFrom}
               onChange={(event) => updateField("dateFrom", event.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              className="app-input px-3 py-2.5 text-sm"
             />
           </Field>
 
@@ -106,8 +106,33 @@ export default function OrderInsightsFilterBar({
               type="date"
               value={filters.dateTo}
               onChange={(event) => updateField("dateTo", event.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              className="app-input px-3 py-2.5 text-sm"
             />
+          </Field>
+
+          <Field
+            label={t("orderFilterBar.ordersLimit", "Orders Count")}
+            icon={Filter}
+          >
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={filters.ordersLimit || ""}
+              onChange={(event) =>
+                updateField(
+                  "ordersLimit",
+                  String(event.target.value || "").replace(/[^\d]/g, ""),
+                )
+              }
+              placeholder={locale === "ar" ? "1000 أو 4000" : "1000 or 4000"}
+              className="app-input px-3 py-2.5 text-sm"
+            />
+            <p className="mt-2 text-xs text-slate-500">
+              {locale === "ar"
+                ? "اتركه فارغًا لتحليل كل الطلبات داخل النطاق، أو اكتب عدد الأوردرات المطلوب."
+                : "Leave empty to analyze all orders in scope, or enter the number of recent orders to analyze."}
+            </p>
           </Field>
 
           <Field
@@ -117,7 +142,7 @@ export default function OrderInsightsFilterBar({
             <select
               value={filters.paymentFilter}
               onChange={(event) => updateField("paymentFilter", event.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              className="app-input px-3 py-2.5 text-sm"
             >
               <option value="all">
                 {locale === "ar" ? "كل الحالات" : "All statuses"}
@@ -159,7 +184,7 @@ export default function OrderInsightsFilterBar({
               onChange={(event) =>
                 updateField("fulfillmentFilter", event.target.value)
               }
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              className="app-input px-3 py-2.5 text-sm"
             >
               <option value="all">
                 {locale === "ar" ? "كل الحالات" : "All statuses"}
@@ -180,7 +205,7 @@ export default function OrderInsightsFilterBar({
             <select
               value={filters.refundFilter}
               onChange={(event) => updateField("refundFilter", event.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              className="app-input px-3 py-2.5 text-sm"
             >
               <option value="all">
                 {locale === "ar" ? "كل الحالات" : "All statuses"}
@@ -204,8 +229,8 @@ export default function OrderInsightsFilterBar({
         <div
           className={`rounded-2xl border px-4 py-3 text-sm ${
             hasActiveFilters
-              ? "border-sky-200 bg-sky-50 text-sky-900"
-              : "border-slate-200 bg-slate-50 text-slate-600"
+              ? "border-sky-200 bg-sky-50/90 text-sky-900"
+              : "border-slate-200 bg-slate-50/90 text-slate-600"
           }`}
         >
           {hasActiveFilters ? (
@@ -213,7 +238,7 @@ export default function OrderInsightsFilterBar({
               {activeSummary.map((item) => (
                 <span
                   key={item}
-                  className="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm"
+                  className="app-chip inline-flex items-center bg-white px-3 py-1 text-xs font-medium text-slate-700"
                 >
                   {item}
                 </span>

@@ -84,7 +84,8 @@ const matchesSearch = (order, keyword) => {
 
 export default function MissingOrders() {
   const navigate = useNavigate();
-  const { locale, isRTL, select } = useLocale();
+  const { locale, isRTL, select, formatDateTime, formatNumber, formatTime } =
+    useLocale();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -94,10 +95,7 @@ export default function MissingOrders() {
   const formatDate = useCallback(
     (value) => {
       if (!value) return "-";
-      const parsed = new Date(value);
-      if (Number.isNaN(parsed.getTime())) return "-";
-
-      return parsed.toLocaleString(locale === "ar" ? "ar-EG" : "en-US", {
+      return formatDateTime(value, {
         year: "numeric",
         month: "short",
         day: "numeric",
@@ -105,7 +103,7 @@ export default function MissingOrders() {
         minute: "2-digit",
       });
     },
-    [locale],
+    [formatDateTime],
   );
 
   const fetchMissingOrders = useCallback(async ({ silent = false } = {}) => {
@@ -217,9 +215,10 @@ export default function MissingOrders() {
                   <div className="mt-3 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
                     <Clock3 size={12} />
                     {select("آخر تحديث", "Last refresh")}{" "}
-                    {lastUpdatedAt.toLocaleTimeString(
-                      locale === "ar" ? "ar-EG" : "en-US",
-                    )}
+                    {formatTime(lastUpdatedAt, {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
                   </div>
                 )}
               </div>
@@ -244,19 +243,25 @@ export default function MissingOrders() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <SummaryCard
               title={select("إجمالي الطلبات المفقودة", "Total Missing Orders")}
-              value={summary.total.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")}
+              value={formatNumber(summary.total, {
+                maximumFractionDigits: 0,
+              })}
               tone="blue"
               icon={Search}
             />
             <SummaryCard
               title={select("تحتاج متابعة", "Need Follow-up")}
-              value={summary.missing.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")}
+              value={formatNumber(summary.missing, {
+                maximumFractionDigits: 0,
+              })}
               tone="amber"
               icon={AlertTriangle}
             />
             <SummaryCard
               title={select("حالات خطر", "Critical Cases")}
-              value={summary.escalated.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")}
+              value={formatNumber(summary.escalated, {
+                maximumFractionDigits: 0,
+              })}
               tone="red"
               icon={ShieldAlert}
             />
@@ -349,9 +354,9 @@ export default function MissingOrders() {
                             </span>
                             <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
                               {select("بدون أكشن", "No action for")}{" "}
-                              {Number(order.days_without_action || 0).toLocaleString(
-                                locale === "ar" ? "ar-EG" : "en-US",
-                              )}{" "}
+                              {formatNumber(order.days_without_action || 0, {
+                                maximumFractionDigits: 0,
+                              })}{" "}
                               {select("يوم", "days")}
                             </span>
                           </div>

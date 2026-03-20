@@ -6,13 +6,20 @@ import {
   useState,
 } from "react";
 import { getNestedLocaleValue } from "../i18n/appStrings";
+import {
+  formatCurrency as formatCurrencyValue,
+  formatDate as formatDateValue,
+  formatDateTime as formatDateTimeValue,
+  formatNumber as formatNumberValue,
+  formatPercent as formatPercentValue,
+  formatRelativeTime as formatRelativeTimeValue,
+  formatTime as formatTimeValue,
+  getCurrencyLabel,
+  resolveLanguageTag,
+} from "../utils/localeFormat";
 import { decodeMaybeMojibake } from "../utils/text";
 
 const LOCALE_STORAGE_KEY = "tetiano_locale";
-const LOCALE_TO_LANGUAGE_TAG = {
-  ar: "ar-EG",
-  en: "en-US",
-};
 
 const LocaleContext = createContext(null);
 
@@ -57,12 +64,13 @@ export function LocaleProvider({ children }) {
   const value = useMemo(() => {
     const isArabic = locale === "ar";
     const direction = isArabic ? "rtl" : "ltr";
-    const languageTag = LOCALE_TO_LANGUAGE_TAG[locale] || "en-US";
+    const languageTag = resolveLanguageTag(locale);
 
     return {
       locale,
       direction,
       languageTag,
+      currencyLabel: getCurrencyLabel(locale),
       isArabic,
       isRTL: isArabic,
       setLocale: (nextLocale) => {
@@ -78,30 +86,20 @@ export function LocaleProvider({ children }) {
       },
       select: (arabicValue, englishValue) =>
         decodeMaybeMojibake(isArabic ? arabicValue : englishValue),
-      formatDateTime: (value, options = {}) => {
-        if (!value) {
-          return "-";
-        }
-
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) {
-          return "-";
-        }
-
-        return date.toLocaleString(languageTag, options);
-      },
-      formatDate: (value, options = {}) => {
-        if (!value) {
-          return "-";
-        }
-
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) {
-          return "-";
-        }
-
-        return date.toLocaleDateString(languageTag, options);
-      },
+      formatNumber: (value, options = {}) =>
+        formatNumberValue(value, options, locale),
+      formatCurrency: (value, options = {}) =>
+        formatCurrencyValue(value, options, locale),
+      formatPercent: (value, options = {}) =>
+        formatPercentValue(value, options, locale),
+      formatDateTime: (value, options = {}) =>
+        formatDateTimeValue(value, options, locale),
+      formatDate: (value, options = {}) =>
+        formatDateValue(value, options, locale),
+      formatTime: (value, options = {}) =>
+        formatTimeValue(value, options, locale),
+      formatRelativeTime: (value, options = {}) =>
+        formatRelativeTimeValue(value, options, locale),
     };
   }, [locale]);
 

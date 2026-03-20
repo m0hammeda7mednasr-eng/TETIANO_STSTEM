@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Loader, Save, X } from "lucide-react";
+import { Loader, Package, Save, Wallet, X } from "lucide-react";
 import { useLocale } from "../context/LocaleContext";
 
 const CURRENCY_LABEL = "LE";
@@ -63,157 +63,205 @@ export default function ProductEditModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-        <div className="flex justify-between items-center p-6 border-b">
-          <h2 className="text-xl font-bold text-gray-800">Edit Product</h2>
+    <div className="app-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="app-modal-panel w-full max-w-2xl overflow-hidden rounded-[30px]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200/80 px-6 py-5 sm:px-7">
+          <div>
+            <div className="app-chip inline-flex items-center gap-2 px-3 py-1 text-xs font-semibold text-slate-700">
+              <Package size={14} />
+              {select("تعديل المنتج", "Product editor")}
+            </div>
+            <h2 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-slate-950">
+              {select("تعديل بيانات المنتج", "Edit product details")}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">{product.title}</p>
+          </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition"
+            className="app-button-secondary flex h-11 w-11 items-center justify-center rounded-2xl text-slate-500"
           >
-            <X size={24} />
+            <X size={18} />
           </button>
         </div>
 
-        <div className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Product Name
-            </label>
-            <p className="text-gray-900 font-semibold">{product.title}</p>
+        <div className="space-y-6 px-6 py-6 sm:px-7">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="app-note px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                {select("السعر", "Price")}
+              </p>
+              <p className="metric-number mt-2 text-lg font-semibold text-slate-950">
+                {price || "0.00"} {CURRENCY_LABEL}
+              </p>
+            </div>
+            <div className="app-note px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                SKU
+              </p>
+              <p className="mt-2 truncate text-sm font-medium text-slate-700">
+                {sku || select("غير محدد", "Not set")}
+              </p>
+            </div>
+            <div className="app-note px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                {select("المخزون", "Inventory")}
+              </p>
+              <p className="metric-number mt-2 text-lg font-semibold text-slate-950">
+                {inventory === "" ? "-" : inventory}
+              </p>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Price ({CURRENCY_LABEL})
-            </label>
-            <input
-              type="number"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              min="0"
-              step="0.01"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="0.00"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              SKU
-            </label>
-            <input
-              type="text"
-              value={sku}
-              onChange={(e) => setSku(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="SKU-001"
-            />
-          </div>
-
-          {canEditCost && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Cost Price ({CURRENCY_LABEL})
-              </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={`${select("السعر", "Price")} (${CURRENCY_LABEL})`}>
               <input
                 type="number"
-                value={costPrice}
-                onChange={(e) => setCostPrice(e.target.value)}
+                value={price}
+                onChange={(event) => setPrice(event.target.value)}
                 min="0"
                 step="0.01"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="app-input px-4 py-3 text-sm"
                 placeholder="0.00"
               />
+            </Field>
+
+            <Field label="SKU">
+              <input
+                type="text"
+                value={sku}
+                onChange={(event) => setSku(event.target.value)}
+                className="app-input px-4 py-3 text-sm"
+                placeholder="SKU-001"
+              />
+            </Field>
+
+            {canEditCost && (
+              <Field label={`${select("سعر التكلفة", "Cost price")} (${CURRENCY_LABEL})`}>
+                <input
+                  type="number"
+                  value={costPrice}
+                  onChange={(event) => setCostPrice(event.target.value)}
+                  min="0"
+                  step="0.01"
+                  className="app-input px-4 py-3 text-sm"
+                  placeholder="0.00"
+                />
+              </Field>
+            )}
+
+            <Field
+              label={
+                hasMultipleVariants
+                  ? select("إجمالي المخزون", "Total inventory")
+                  : select("المخزون", "Inventory")
+              }
+            >
+              <input
+                type="number"
+                value={inventory}
+                onChange={(event) => setInventory(event.target.value)}
+                min="0"
+                step="1"
+                disabled={hasMultipleVariants}
+                className="app-input px-4 py-3 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                placeholder="0"
+              />
+            </Field>
+          </div>
+
+          {hasMultipleVariants && (
+            <div className="app-note px-4 py-4 text-sm leading-6 text-slate-600">
+              {select(
+                "المنتجات متعددة الـ variants يتم تعديل مخزونها من صفحة تفاصيل المنتج لكل Variant على حدة.",
+                "Products with multiple variants should have inventory updated from the product details page for each variant separately.",
+              )}
             </div>
           )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {hasMultipleVariants ? "Total Inventory" : "Inventory"}
-            </label>
-            <input
-              type="number"
-              value={inventory}
-              onChange={(e) => setInventory(e.target.value)}
-              min="0"
-              step="1"
-              disabled={hasMultipleVariants}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
-              placeholder="0"
-            />
-            {hasMultipleVariants && (
-              <p className="mt-2 text-xs text-slate-500">
-                {select(
-                  "المنتجات متعددة الفاريانتس يتم تعديل مخزونها من صفحة تفاصيل المنتج لكل Variant على حدة.",
-                  "Products with multiple variants should have inventory updated from the product details page for each variant separately.",
-                )}
-              </p>
-            )}
-          </div>
-
           {canEditCost && price && costPrice && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <p className="text-sm font-semibold text-green-800 mb-2">
-                Profit Preview
-              </p>
-              <div className="space-y-1 text-sm text-green-700">
-                <div className="flex justify-between">
-                  <span>Unit Profit:</span>
-                  <span className="font-bold">
+            <div className="rounded-[24px] border border-emerald-200 bg-emerald-50/90 px-5 py-4">
+              <div className="flex items-center gap-2 text-emerald-800">
+                <Wallet size={16} />
+                <p className="text-sm font-semibold">
+                  {select("معاينة الربح", "Profit preview")}
+                </p>
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl bg-white/80 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700/70">
+                    {select("ربح القطعة", "Unit profit")}
+                  </p>
+                  <p className="metric-number mt-2 text-lg font-semibold text-emerald-900">
                     {profit} {CURRENCY_LABEL}
-                  </span>
+                  </p>
                 </div>
-                <div className="flex justify-between">
-                  <span>Profit Margin:</span>
-                  <span className="font-bold">{profitMargin}%</span>
+                <div className="rounded-2xl bg-white/80 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700/70">
+                    {select("هامش الربح", "Profit margin")}
+                  </p>
+                  <p className="metric-number mt-2 text-lg font-semibold text-emerald-900">
+                    {profitMargin}%
+                  </p>
                 </div>
               </div>
             </div>
           )}
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+            <div className="rounded-[22px] border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-700">
               {error}
             </div>
           )}
 
-          <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg text-sm">
-            <p className="font-semibold mb-1">Note:</p>
-            <p>
-              Changes are applied only after successful Shopify sync. If sync
-              fails, no local change is kept.
+          <div className="app-note px-4 py-4 text-sm leading-6 text-slate-600">
+            <p className="font-semibold text-slate-800">
+              {select("ملاحظة", "Note")}
+            </p>
+            <p className="mt-1">
+              {select(
+                "التغييرات يتم تثبيتها فقط بعد نجاح المزامنة مع Shopify. لو المزامنة فشلت لن يتم حفظ تعديل محلي.",
+                "Changes are applied only after a successful Shopify sync. If sync fails, no local change is kept.",
+              )}
             </p>
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 p-6 border-t bg-gray-50">
+        <div className="flex flex-col-reverse gap-3 border-t border-slate-200/80 bg-slate-50/70 px-6 py-5 sm:flex-row sm:justify-end sm:px-7">
           <button
             onClick={onClose}
             disabled={loading}
-            className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition disabled:opacity-50"
+            className="app-button-secondary rounded-2xl px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-50"
           >
-            Cancel
+            {select("إلغاء", "Cancel")}
           </button>
           <button
             onClick={handleSave}
             disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2"
+            className="app-button-primary flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
           >
             {loading ? (
               <>
                 <Loader size={16} className="animate-spin" />
-                Saving...
+                {select("جاري الحفظ...", "Saving...")}
               </>
             ) : (
               <>
                 <Save size={16} />
-                Save Changes
+                {select("حفظ التغييرات", "Save changes")}
               </>
             )}
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+function Field({ children, label }) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-sm font-medium text-slate-700">{label}</span>
+      {children}
+    </label>
   );
 }

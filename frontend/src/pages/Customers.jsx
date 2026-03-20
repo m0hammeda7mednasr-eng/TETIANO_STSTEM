@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Clock3,
+  Download,
   Mail,
   MapPin,
   Phone,
@@ -27,19 +28,56 @@ import {
   HEAVY_VIEW_CACHE_FRESH_MS,
   shouldAutoRefreshView,
 } from "../utils/refreshPolicy";
+import { buildCsvFilename, downloadCsvSections } from "../utils/csv";
+import {
+  formatCurrency as formatAmount,
+  formatDate,
+  formatNumber,
+  formatTime,
+} from "../utils/localeFormat";
 
 const CUSTOMERS_PAGE_SIZE = 200;
 const ORDERS_PAGE_SIZE = 200;
 const CUSTOMER_ORDER_SCAN_PAGES = 4;
 const CUSTOMERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
-const CURRENCY_LABEL = "LE";
+const CITY_STOP_WORDS = new Set([
+  "el",
+  "al",
+  "governorate",
+  "governorat",
+  "gov",
+  "محافظة",
+  "محافظه",
+]);
+const KNOWN_CITY_GROUPS = [
+  ["cairo", ["cairo", "القاهرة", "القاهره"]],
+  ["giza", ["giza", "جيزة", "الجيزة", "الجيزه"]],
+  ["alexandria", ["alexandria", "alex", "الإسكندرية", "الاسكندرية", "اسكندرية"]],
+  ["nasr city", ["nasr city", "مدينة نصر", "مدينه نصر", "madinet nasr", "madinat nasr"]],
+  ["maadi", ["maadi", "المعادي", "المعادى", "el maadi"]],
+  ["heliopolis", ["heliopolis", "مصر الجديدة", "مصر الجديده", "masr el gdida", "masr el gedida"]],
+  ["new cairo", ["new cairo", "القاهرة الجديدة", "القاهره الجديده", "التجمع", "التجمع الخامس", "tagamoa", "tagamo3"]],
+  ["6 october", ["6 october", "6th october", "october", "اكتوبر", "٦ اكتوبر", "السادس من اكتوبر"]],
+  ["sheikh zayed", ["sheikh zayed", "zayed", "الشيخ زايد"]],
+  ["faisal", ["faisal", "فيصل"]],
+  ["haram", ["haram", "الهرم"]],
+  ["mansoura", ["mansoura", "المنصورة", "المنصوره"]],
+  ["tanta", ["tanta", "طنطا"]],
+  ["zagazig", ["zagazig", "الزقازيق", "زقازيق"]],
+  ["ismailia", ["ismailia", "الإسماعيلية", "الاسماعيلية", "اسماعيلية"]],
+  ["port said", ["port said", "بورسعيد", "portsaid"]],
+  ["suez", ["suez", "السويس", "سويس"]],
+  ["damietta", ["damietta", "دمياط"]],
+  ["minya", ["minya", "المنيا", "منيا"]],
+  ["asyut", ["asyut", "أسيوط", "اسيوط"]],
+  ["luxor", ["luxor", "الأقصر", "الاقصر", "اقصر"]],
+  ["aswan", ["aswan", "أسوان", "اسوان"]],
+];
 
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-
-const formatAmount = (value) => `${toNumber(value).toFixed(2)} ${CURRENCY_LABEL}`;
 
 const parseJson = (value) => {
   if (!value) return {};
@@ -51,6 +89,288 @@ const parseJson = (value) => {
     }
   }
   return value;
+};
+
+const normalizeRepeatedCharacters = (value) =>
+  String(value || "").replace(/(.)\1{2,}/g, "$1$1");
+
+const normalizeCityText = (value) =>
+  normalizeRepeatedCharacters(
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]/g, "")
+      .replace(/[إأآٱ]/g, "ا")
+      .replace(/ى/g, "ي")
+      .replace(/ة/g, "ه")
+      .replace(/ؤ/g, "و")
+      .replace(/ئ/g, "ي")
+      .replace(/چ/g, "ج")
+      .replace(/گ/g, "ك")
+      .replace(/[^a-z0-9\u0600-\u06ff\s]/g, " ")
+      .replace(/\s+/g, " "),
+  ).trim();
+
+const tokenizeCity = (value) =>
+  normalizeCityText(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .filter((token) => !CITY_STOP_WORDS.has(token));
+
+const buildCityKey = (value) => tokenizeCity(value).join(" ");
+
+const buildSortedCityKey = (value) => [...tokenizeCity(value)].sort().join(" ");
+
+const compactCityKey = (value) => buildCityKey(value).replace(/\s+/g, "");
+
+const levenshteinDistance = (left, right) => {
+  if (left === right) return 0;
+  if (!left) return right.length;
+  if (!right) return left.length;
+
+  const matrix = Array.from({ length: left.length + 1 }, () =>
+    new Array(right.length + 1).fill(0),
+  );
+
+  for (let row = 0; row <= left.length; row += 1) {
+    matrix[row][0] = row;
+  }
+  for (let column = 0; column <= right.length; column += 1) {
+    matrix[0][column] = column;
+  }
+
+  for (let row = 1; row <= left.length; row += 1) {
+    for (let column = 1; column <= right.length; column += 1) {
+      const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+      matrix[row][column] = Math.min(
+        matrix[row - 1][column] + 1,
+        matrix[row][column - 1] + 1,
+        matrix[row - 1][column - 1] + cost,
+      );
+    }
+  }
+
+  return matrix[left.length][right.length];
+};
+
+const computeStringSimilarity = (left, right) => {
+  const safeLeft = String(left || "").trim();
+  const safeRight = String(right || "").trim();
+  if (!safeLeft || !safeRight) return 0;
+  if (safeLeft === safeRight) return 1;
+
+  const distance = levenshteinDistance(safeLeft, safeRight);
+  return 1 - distance / Math.max(safeLeft.length, safeRight.length, 1);
+};
+
+const pickMostFrequentLabel = (labelCounts = new Map()) =>
+  [...labelCounts.entries()].sort((left, right) => {
+    const countDelta = right[1] - left[1];
+    if (countDelta !== 0) return countDelta;
+    return String(left[0] || "").localeCompare(String(right[0] || ""));
+  })[0]?.[0] || "";
+
+const resolveKnownCityKey = (value) => {
+  const key = buildCityKey(value);
+  const sortedKey = buildSortedCityKey(value);
+  const compactKey = compactCityKey(value);
+
+  if (!key && !compactKey) {
+    return "";
+  }
+
+  for (const [groupKey, aliases] of KNOWN_CITY_GROUPS) {
+    const matched = aliases.some((alias) => {
+      const aliasKey = buildCityKey(alias);
+      const aliasSortedKey = buildSortedCityKey(alias);
+      const aliasCompactKey = compactCityKey(alias);
+
+      return (
+        aliasKey === key ||
+        aliasSortedKey === sortedKey ||
+        aliasCompactKey === compactKey
+      );
+    });
+
+    if (matched) {
+      return groupKey;
+    }
+  }
+
+  return "";
+};
+
+const createCityCandidate = (value) => ({
+  raw: String(value || "").trim(),
+  key: buildCityKey(value),
+  sortedKey: buildSortedCityKey(value),
+  compactKey: compactCityKey(value),
+});
+
+const getCitySimilarityScore = (leftValue, rightValue) => {
+  const left = typeof leftValue === "string" ? createCityCandidate(leftValue) : leftValue;
+  const right =
+    typeof rightValue === "string" ? createCityCandidate(rightValue) : rightValue;
+
+  if (!left.key || !right.key) {
+    return 0;
+  }
+
+  if (
+    left.key === right.key ||
+    left.sortedKey === right.sortedKey ||
+    left.compactKey === right.compactKey
+  ) {
+    return 1;
+  }
+
+  if (
+    left.key.includes(right.key) ||
+    right.key.includes(left.key) ||
+    left.compactKey.includes(right.compactKey) ||
+    right.compactKey.includes(left.compactKey)
+  ) {
+    return 0.94;
+  }
+
+  return Math.max(
+    computeStringSimilarity(left.compactKey, right.compactKey),
+    computeStringSimilarity(left.sortedKey, right.sortedKey),
+  );
+};
+
+const buildCityRegistry = (customers = []) => {
+  const groups = new Map();
+
+  (customers || []).forEach((customer) => {
+    const rawCity = String(customer?.city || "").trim();
+    if (!rawCity) {
+      return;
+    }
+
+    const knownKey = resolveKnownCityKey(rawCity);
+    const candidate = createCityCandidate(rawCity);
+
+    let groupKey = knownKey || candidate.key || candidate.compactKey;
+
+    if (!knownKey) {
+      const bestGroup = [...groups.values()].reduce(
+        (best, currentGroup) => {
+          const score = getCitySimilarityScore(candidate, currentGroup.candidate);
+          if (!best || score > best.score) {
+            return { group: currentGroup, score };
+          }
+          return best;
+        },
+        null,
+      );
+
+      if (bestGroup && bestGroup.score >= 0.83) {
+        groupKey = bestGroup.group.key;
+      }
+    }
+
+    const currentGroup = groups.get(groupKey) || {
+      key: groupKey,
+      candidate,
+      labelCounts: new Map(),
+      variants: new Set(),
+      searchKeys: new Set(),
+      count: 0,
+    };
+
+    currentGroup.count += 1;
+    currentGroup.variants.add(rawCity);
+    currentGroup.searchKeys.add(candidate.key);
+    currentGroup.searchKeys.add(candidate.sortedKey);
+    currentGroup.searchKeys.add(candidate.compactKey);
+    currentGroup.labelCounts.set(
+      rawCity,
+      (currentGroup.labelCounts.get(rawCity) || 0) + 1,
+    );
+
+    groups.set(groupKey, currentGroup);
+  });
+
+  return [...groups.values()]
+    .map((group) => ({
+      key: group.key,
+      count: group.count,
+      label: pickMostFrequentLabel(group.labelCounts) || group.candidate.raw,
+      variants: [...group.variants].sort((a, b) => a.localeCompare(b)),
+      searchKeys: [...group.searchKeys].filter(Boolean),
+      candidate: group.candidate,
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+};
+
+const resolveCityOption = (value, cityOptions = []) => {
+  const query = String(value || "").trim();
+  if (!query) return null;
+
+  const candidate = createCityCandidate(query);
+  if (!candidate.key && !candidate.compactKey) {
+    return null;
+  }
+
+  const bestMatch = (cityOptions || []).reduce((best, option) => {
+    const optionScore = Math.max(
+      getCitySimilarityScore(candidate, option.candidate),
+      ...option.searchKeys.map((searchKey) =>
+        computeStringSimilarity(candidate.compactKey, String(searchKey || "").replace(/\s+/g, "")),
+      ),
+    );
+
+    if (!best || optionScore > best.score) {
+      return { option, score: optionScore };
+    }
+    return best;
+  }, null);
+
+  if (!bestMatch) {
+    return null;
+  }
+
+  const requiredScore = candidate.compactKey.length <= 4 ? 0.88 : 0.72;
+  return bestMatch.score >= requiredScore ? bestMatch.option : null;
+};
+
+const matchesCityFilter = (customer, query, resolvedOption) => {
+  const normalizedQuery = createCityCandidate(query);
+  if (!normalizedQuery.key && !normalizedQuery.compactKey) {
+    return true;
+  }
+
+  const customerSearchKeys = [
+    customer?.city_group_key,
+    createCityCandidate(customer?.city || "").key,
+    createCityCandidate(customer?.city || "").compactKey,
+    createCityCandidate(customer?.city_display || "").key,
+    createCityCandidate(customer?.city_display || "").compactKey,
+  ].filter(Boolean);
+
+  if (
+    resolvedOption &&
+    customerSearchKeys.some((value) => String(value) === resolvedOption.key)
+  ) {
+    return true;
+  }
+
+  return customerSearchKeys.some((value) => {
+    const safeValue = String(value || "");
+    return (
+      safeValue.includes(normalizedQuery.key) ||
+      safeValue.includes(normalizedQuery.compactKey) ||
+      normalizedQuery.key.includes(safeValue) ||
+      computeStringSimilarity(
+        normalizedQuery.compactKey,
+        safeValue.replace(/\s+/g, ""),
+      ) >= 0.72
+    );
+  });
 };
 
 const resolveCustomerPhone = (customer) => {
@@ -130,7 +450,7 @@ export default function Customers() {
   const [, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [cityFilter, setCityFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("");
   const [countryFilter, setCountryFilter] = useState("all");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [relatedOrdersLoading, setRelatedOrdersLoading] = useState(false);
@@ -167,7 +487,9 @@ export default function Customers() {
       );
       setLoadStatus({
         active: false,
-        message: `Showing ${cachedCustomers.length.toLocaleString()} cached customers`,
+        message: `Showing ${formatNumber(cachedCustomers.length, {
+          maximumFractionDigits: 0,
+        })} cached customers`,
       });
     });
 
@@ -212,8 +534,12 @@ export default function Customers() {
                 setLoadStatus({
                   active: hasMore,
                   message: hasMore
-                    ? `Loaded ${accumulatedRows.length.toLocaleString()} customers so far...`
-                    : `Loaded ${accumulatedRows.length.toLocaleString()} customers`,
+                    ? `Loaded ${formatNumber(accumulatedRows.length, {
+                        maximumFractionDigits: 0,
+                      })} customers so far...`
+                    : `Loaded ${formatNumber(accumulatedRows.length, {
+                        maximumFractionDigits: 0,
+                      })} customers`,
                 });
               },
             },
@@ -229,7 +555,9 @@ export default function Customers() {
             active: false,
             message:
               normalizedCustomers.length > 0
-                ? `Loaded ${normalizedCustomers.length.toLocaleString()} customers`
+                ? `Loaded ${formatNumber(normalizedCustomers.length, {
+                    maximumFractionDigits: 0,
+                  })} customers`
                 : "No customers found",
           });
           await writeCachedView(cacheKey, {
@@ -405,16 +733,41 @@ export default function Customers() {
     loadSelectedCustomerOrders(selectedCustomer);
   }, [loadSelectedCustomerOrders, selectedCustomer]);
 
-  const cityOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          customers
-            .map((customer) => String(customer.city || "").trim())
-            .filter(Boolean),
-        ),
-      ).sort((a, b) => a.localeCompare(b)),
-    [customers],
+  const cityOptions = useMemo(() => buildCityRegistry(customers), [customers]);
+
+  const customersWithResolvedCities = useMemo(() => {
+    const resolutionCache = new Map();
+
+    const resolveCustomerCity = (city) => {
+      const rawCity = String(city || "").trim();
+      if (!rawCity) {
+        return null;
+      }
+
+      if (!resolutionCache.has(rawCity)) {
+        resolutionCache.set(rawCity, resolveCityOption(rawCity, cityOptions));
+      }
+
+      return resolutionCache.get(rawCity);
+    };
+
+    return customers.map((customer) => {
+      const resolvedCity = resolveCustomerCity(customer.city);
+      const fallbackKey =
+        buildCityKey(customer.city) || compactCityKey(customer.city) || "";
+
+      return {
+        ...customer,
+        city_display: resolvedCity?.label || customer.city,
+        city_group_key: resolvedCity?.key || fallbackKey,
+        city_variants: resolvedCity?.variants || [],
+      };
+    });
+  }, [cityOptions, customers]);
+
+  const resolvedCityFilter = useMemo(
+    () => resolveCityOption(cityFilter, cityOptions),
+    [cityFilter, cityOptions],
   );
 
   const countryOptions = useMemo(
@@ -430,7 +783,7 @@ export default function Customers() {
   );
 
   const filteredCustomers = useMemo(() => {
-    let result = [...customers];
+    let result = [...customersWithResolvedCities];
 
     if (searchTerm.trim()) {
       const query = normalizeText(searchTerm);
@@ -438,15 +791,23 @@ export default function Customers() {
         const name = normalizeText(customer.name);
         const email = normalizeText(customer.email);
         const phone = normalizeText(customer.phone);
+        const city = normalizeText(customer.city);
+        const cityDisplay = normalizeText(customer.city_display);
+        const country = normalizeText(customer.country);
         return (
-          name.includes(query) || email.includes(query) || phone.includes(query)
+          name.includes(query) ||
+          email.includes(query) ||
+          phone.includes(query) ||
+          city.includes(query) ||
+          cityDisplay.includes(query) ||
+          country.includes(query)
         );
       });
     }
 
-    if (cityFilter !== "all") {
+    if (cityFilter.trim()) {
       result = result.filter(
-        (customer) => normalizeText(customer.city) === normalizeText(cityFilter),
+        (customer) => matchesCityFilter(customer, cityFilter, resolvedCityFilter),
       );
     }
 
@@ -459,7 +820,44 @@ export default function Customers() {
 
     result.sort((a, b) => toNumber(b.total_spent) - toNumber(a.total_spent));
     return result;
-  }, [cityFilter, countryFilter, customers, searchTerm]);
+  }, [
+    cityFilter,
+    countryFilter,
+    customersWithResolvedCities,
+    resolvedCityFilter,
+    searchTerm,
+  ]);
+
+  const cityFilterHint = useMemo(() => {
+    if (!cityFilter.trim()) {
+      return select(
+        "اكتب المدينة بالعربي أو الإنجليزي وسيتم تجميع الكتابات المتشابهة تلقائيًا.",
+        "Type the city in Arabic or English. Similar spellings will be grouped automatically.",
+      );
+    }
+
+    if (resolvedCityFilter) {
+      return select(
+        `سيتم الفلترة على ${resolvedCityFilter.label} ويشمل ${formatNumber(
+          resolvedCityFilter.variants.length,
+          {
+            maximumFractionDigits: 0,
+          },
+        )} كتابة مشابهة.`,
+        `Filtering by ${resolvedCityFilter.label} across ${formatNumber(
+          resolvedCityFilter.variants.length,
+          {
+            maximumFractionDigits: 0,
+          },
+        )} similar spellings.`,
+      );
+    }
+
+    return select(
+      "سيتم البحث بأقرب مطابقة متاحة حتى لو كانت الكتابة غير دقيقة.",
+      "The closest available city match will be used even if the spelling is not exact.",
+    );
+  }, [cityFilter, resolvedCityFilter, select]);
 
   const summary = useMemo(() => {
     const totalCustomers = filteredCustomers.length;
@@ -480,6 +878,65 @@ export default function Customers() {
       avgSpent,
     };
   }, [filteredCustomers]);
+
+  const exportCustomers = useCallback(() => {
+    downloadCsvSections({
+      filename: buildCsvFilename("customers-view"),
+      sections: [
+        {
+          title: select("بيانات التصفية", "Filter metadata"),
+          headers: [select("الحقل", "Field"), select("القيمة", "Value")],
+          rows: [
+            [select("البحث", "Search"), searchTerm.trim() || "-"],
+            [
+              select("المدينة", "City"),
+              resolvedCityFilter?.label || cityFilter.trim() || select("الكل", "All"),
+            ],
+            [
+              select("الدولة", "Country"),
+              countryFilter === "all" ? select("الكل", "All") : countryFilter,
+            ],
+            [select("النتائج", "Results"), filteredCustomers.length],
+            [select("وقت التصدير", "Exported at"), new Date().toISOString()],
+          ],
+        },
+        {
+          title: select("العملاء الظاهرون", "Visible customers"),
+          headers: [
+            select("الاسم", "Name"),
+            select("البريد", "Email"),
+            select("الهاتف", "Phone"),
+            select("المدينة المعروضة", "Resolved city"),
+            select("المدينة الأصلية", "Original city"),
+            select("الدولة", "Country"),
+            select("العنوان", "Address"),
+            select("عدد الطلبات", "Orders"),
+            select("إجمالي الإنفاق", "Total spent"),
+            select("تاريخ الانضمام", "Joined"),
+          ],
+          rows: filteredCustomers.map((customer) => [
+            customer.name || "Unknown",
+            customer.email || "",
+            customer.phone || "",
+            customer.city_display || customer.city || "",
+            customer.city || "",
+            customer.country || "",
+            customer.default_address || "",
+            toNumber(customer.orders_count),
+            toNumber(customer.total_spent),
+            customer.created_at || "",
+          ]),
+        },
+      ],
+    });
+  }, [
+    cityFilter,
+    countryFilter,
+    filteredCustomers,
+    resolvedCityFilter?.label,
+    searchTerm,
+    select,
+  ]);
 
   const selectedCustomerMeta = useMemo(() => {
     if (!selectedCustomer) return null;
@@ -514,17 +971,29 @@ export default function Customers() {
               {lastUpdatedAt && (
                 <p className="mt-2 text-xs text-slate-500 flex items-center gap-1">
                   <Clock3 size={12} />
-                  Last refresh: {lastUpdatedAt.toLocaleTimeString("ar-EG")}
+                  Last refresh: {formatTime(lastUpdatedAt, {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </p>
               )}
             </div>
-            <button
-              onClick={() => fetchData()}
-              className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
-            >
-              <RefreshCw size={18} />
-              Refresh
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={exportCustomers}
+                className="bg-slate-900 hover:bg-slate-950 text-white px-4 py-2 rounded-lg flex items-center gap-2"
+              >
+                <Download size={18} />
+                {select("تصدير CSV", "Export CSV")}
+              </button>
+              <button
+                onClick={() => fetchData()}
+                className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
+              >
+                <RefreshCw size={18} />
+                Refresh
+              </button>
+            </div>
           </div>
 
           {error && (
@@ -537,12 +1006,16 @@ export default function Customers() {
             <SummaryCard
               icon={Users}
               label="Customers"
-              value={summary.totalCustomers.toLocaleString()}
+              value={formatNumber(summary.totalCustomers, {
+                maximumFractionDigits: 0,
+              })}
             />
             <SummaryCard
               icon={ShoppingCart}
               label="Orders"
-              value={summary.totalOrders.toLocaleString()}
+              value={formatNumber(summary.totalOrders, {
+                maximumFractionDigits: 0,
+              })}
             />
             <SummaryCard
               icon={ShoppingCart}
@@ -559,12 +1032,17 @@ export default function Customers() {
           <div className="bg-white rounded-xl shadow p-4 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div className="md:col-span-2">
-                <label className="block text-xs text-slate-500 mb-1">Search</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  {select("بحث", "Search")}
+                </label>
                 <div className="relative">
                   <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
                   <input
                     type="text"
-                    placeholder="Name, email, phone..."
+                    placeholder={select(
+                      "اسم، بريد، هاتف، مدينة...",
+                      "Name, email, phone, city...",
+                    )}
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                     className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
@@ -573,29 +1051,40 @@ export default function Customers() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">City</label>
-                <select
+                <label className="block text-xs text-slate-500 mb-1">
+                  {select("المدينة", "City")}
+                </label>
+                <input
+                  type="text"
+                  list="customer-city-options"
                   value={cityFilter}
                   onChange={(event) => setCityFilter(event.target.value)}
+                  placeholder={select(
+                    "القاهرة، المعادي، مدينة نصر...",
+                    "Cairo, Maadi, Nasr City...",
+                  )}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
-                >
-                  <option value="all">All</option>
+                />
+                <datalist id="customer-city-options">
                   {cityOptions.map((city) => (
-                    <option key={city} value={city}>
-                      {city}
+                    <option key={city.key} value={city.label}>
+                      {`${city.label} (${city.count})`}
                     </option>
                   ))}
-                </select>
+                </datalist>
+                <p className="mt-1 text-xs text-slate-500">{cityFilterHint}</p>
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Country</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  {select("الدولة", "Country")}
+                </label>
                 <select
                   value={countryFilter}
                   onChange={(event) => setCountryFilter(event.target.value)}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
                 >
-                  <option value="all">All</option>
+                  <option value="all">{select("الكل", "All")}</option>
                   {countryOptions.map((country) => (
                     <option key={country} value={country}>
                       {country}
@@ -663,18 +1152,40 @@ export default function Customers() {
                           {customer.phone || "-"}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-600">
-                          {[customer.city, customer.country].filter(Boolean).join(", ") || "-"}
+                          {customer.city_display || customer.country ? (
+                            <div className="space-y-0.5">
+                              <div className="font-medium text-slate-700">
+                                {customer.city_display || customer.city || "-"}
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                {customer.country || select("بدون دولة", "No country")}
+                              </div>
+                              {customer.city &&
+                              customer.city_display &&
+                              normalizeCityText(customer.city) !==
+                                normalizeCityText(customer.city_display) ? (
+                                <div
+                                  className="text-[11px] text-amber-600"
+                                  title={customer.city}
+                                >
+                                  {select("الاسم الأصلي", "Original")}: {customer.city}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            "-"
+                          )}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-800">
-                          {toNumber(customer.orders_count).toLocaleString()}
+                          {formatNumber(customer.orders_count, {
+                            maximumFractionDigits: 0,
+                          })}
                         </td>
                         <td className="px-4 py-3 text-sm font-semibold text-slate-800">
                           {formatAmount(customer.total_spent)}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-600">
-                          {customer.created_at
-                            ? new Date(customer.created_at).toLocaleDateString("ar-EG")
-                            : "-"}
+                          {customer.created_at ? formatDate(customer.created_at) : "-"}
                         </td>
                       </tr>
                     ))
@@ -712,7 +1223,9 @@ export default function Customers() {
                   label="Location"
                   value={
                     [
-                      selectedCustomer.city || selectedCustomerMeta.defaultAddress?.city,
+                      selectedCustomer.city_display ||
+                        selectedCustomer.city ||
+                        selectedCustomerMeta.defaultAddress?.city,
                       selectedCustomer.country ||
                         selectedCustomerMeta.defaultAddress?.country,
                     ]
@@ -723,7 +1236,9 @@ export default function Customers() {
                 <InfoItem
                   icon={ShoppingCart}
                   label="Orders / Spent"
-                  value={`${toNumber(selectedCustomer.orders_count)} / ${formatAmount(
+                  value={`${formatNumber(selectedCustomer.orders_count, {
+                    maximumFractionDigits: 0,
+                  })} / ${formatAmount(
                     selectedCustomer.total_spent,
                   )}`}
                 />
@@ -750,7 +1265,7 @@ export default function Customers() {
                   <p className="text-sm text-slate-600">
                     Joined:{" "}
                     {selectedCustomer.created_at
-                      ? new Date(selectedCustomer.created_at).toLocaleDateString("ar-EG")
+                      ? formatDate(selectedCustomer.created_at)
                       : "-"}
                   </p>
                   <p className="text-sm text-slate-600">
@@ -792,9 +1307,7 @@ export default function Customers() {
                                 #{order.order_number || order.shopify_id}
                               </td>
                               <td className="py-2 text-sm text-slate-600">
-                                {order.created_at
-                                  ? new Date(order.created_at).toLocaleDateString("ar-EG")
-                                  : "-"}
+                                {order.created_at ? formatDate(order.created_at) : "-"}
                               </td>
                               <td className="py-2 text-sm text-slate-700">
                                 {formatAmount(order.total_price)}

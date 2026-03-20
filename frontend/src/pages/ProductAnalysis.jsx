@@ -10,7 +10,12 @@ import {
 import Sidebar from "../components/Sidebar";
 import OrderInsightsFilterBar from "../components/OrderInsightsFilterBar";
 import { productAnalysisAPI } from "../utils/api";
-import { formatCurrency, formatDateTime } from "../utils/helpers";
+import {
+  formatCurrency,
+  formatDateTime,
+  formatNumber,
+  formatPercent as formatLocalePercent,
+} from "../utils/helpers";
 import { extractArray, extractObject } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import {
@@ -37,12 +42,13 @@ const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-const formatCount = (value) => toNumber(value).toLocaleString("ar-EG");
+const formatCount = (value) =>
+  formatNumber(value, { maximumFractionDigits: 0 });
 const formatPercent = (value) =>
-  `${Math.max(0, toNumber(value)).toLocaleString("ar-EG", {
+  formatLocalePercent(Math.max(0, toNumber(value)), {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
-  })}%`;
+  });
 const normalizeSummary = (summary) =>
   Object.fromEntries(
     Object.keys(EMPTY_SUMMARY).map((key) => [key, toNumber(summary?.[key])]),
@@ -349,7 +355,19 @@ export default function ProductAnalysis() {
               عرض {formatCount(filteredProducts.length)} منتج من أصل {formatCount(products.length)}.
               {meta?.filtered_orders_count !== undefined ? (
                 <span className="mr-2 inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
-                  {formatCount(meta.filtered_orders_count)} طلب داخل النطاق الحالي
+                  {meta?.applied_orders_limit ? (
+                    <>
+                      تحليل آخر {formatCount(meta.filtered_orders_count)} طلب
+                      {meta?.total_orders_in_scope !== undefined
+                        ? ` من أصل ${formatCount(meta.total_orders_in_scope)}`
+                        : ""}
+                      {" "}داخل النطاق الحالي
+                    </>
+                  ) : (
+                    <>
+                      {formatCount(meta.filtered_orders_count)} طلب داخل النطاق الحالي
+                    </>
+                  )}
                 </span>
               ) : null}
             </div>

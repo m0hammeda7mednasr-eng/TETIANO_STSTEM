@@ -36,7 +36,7 @@ export function SkeletonBlock({
 
 export function StatCardSkeleton() {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="app-surface rounded-[26px] p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 space-y-3">
           <SkeletonBlock className="h-3.5 w-24" />
@@ -51,7 +51,7 @@ export function StatCardSkeleton() {
 
 export function TableSkeleton({ rows = 5, columns = 5 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="app-table-shell rounded-[30px]">
       <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
         <div className="flex flex-wrap gap-3">
           {Array.from({ length: columns }).map((_, index) => (
@@ -170,7 +170,7 @@ export function EmptyState({
   const resolvedTitle = title || select("لا توجد بيانات", "No data found");
 
   return (
-    <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center shadow-sm">
+    <div className="app-surface rounded-[28px] border-dashed border-slate-300 p-12 text-center">
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
         <Icon size={30} />
       </div>
@@ -188,7 +188,7 @@ export function Pagination({ page, totalPages, onPageChange }) {
   const nextIcon = isRTL ? <ChevronLeft size={16} /> : <ChevronRight size={16} />;
 
   return (
-    <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+    <div className="app-surface mt-6 flex flex-col gap-3 rounded-[24px] p-4 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-sm text-slate-600">
         {select("الصفحة", "Page")} {page} {select("من", "of")} {totalPages}
       </p>
@@ -197,7 +197,7 @@ export function Pagination({ page, totalPages, onPageChange }) {
           type="button"
           disabled={page === 1}
           onClick={() => onPageChange(page - 1)}
-          className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="app-button-secondary inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {previousIcon}
           <span>{select("السابق", "Previous")}</span>
@@ -206,7 +206,7 @@ export function Pagination({ page, totalPages, onPageChange }) {
           type="button"
           disabled={page === totalPages}
           onClick={() => onPageChange(page + 1)}
-          className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="app-button-secondary inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <span>{select("التالي", "Next")}</span>
           {nextIcon}

@@ -13,6 +13,7 @@ import { useLocale } from "../context/LocaleContext";
 import api, { getErrorMessage } from "../utils/api";
 import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
+import { formatDate, formatNumber } from "../utils/localeFormat";
 
 const DEFAULT_FORM = {
   title: "",
@@ -296,9 +297,7 @@ export default function MyReports() {
                   <div className="flex items-center justify-between text-sm text-slate-500">
                     <span className="inline-flex items-center gap-1">
                       <Calendar size={14} />
-                      {new Date(
-                        report.report_date || report.created_at,
-                      ).toLocaleDateString(locale === "ar" ? "ar-EG" : "en-US")}
+                      {formatDate(report.report_date || report.created_at)}
                     </span>
                     <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
                       {getStatusLabel(report.status, locale)}
@@ -318,7 +317,9 @@ export default function MyReports() {
                         <p className="flex items-center gap-1 text-xs font-medium text-slate-700">
                           <Paperclip size={12} />
                           {select("المرفقات", "Attachments")} (
-                          {report.attachments.length})
+                          {formatNumber(report.attachments.length, {
+                            maximumFractionDigits: 0,
+                          })})
                         </p>
                         <div className="mt-1 space-y-1">
                           {normalizeAttachments(report.attachments)

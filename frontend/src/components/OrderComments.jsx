@@ -19,6 +19,7 @@ import {
   User,
 } from "lucide-react";
 import api from "../utils/api";
+import { formatDateTime, formatNumber } from "../utils/helpers";
 
 const TYPE_STYLES = {
   blue: {
@@ -217,7 +218,7 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
     commentTypes.find((item) => item.value === type) || commentTypes[0];
 
   const formatDate = (dateString) =>
-    new Date(dateString).toLocaleString("ar-EG", {
+    formatDateTime(dateString, {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -239,7 +240,7 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow p-6">
+      <div className="app-surface rounded-[28px] p-6">
         <div className="animate-pulse">
           <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
           <div className="space-y-3">
@@ -252,8 +253,8 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow">
-      <div className="border-b border-gray-200 p-6">
+    <div className="app-surface rounded-[28px]">
+      <div className="border-b border-slate-200 p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <MessageCircle className="text-blue-600" size={24} />
@@ -262,7 +263,9 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
                 تعليقات الطلب #{orderNumber}
               </h3>
               <p className="text-sm text-gray-600">
-                {filteredComments.length} تعليق
+                {formatNumber(filteredComments.length, {
+                  maximumFractionDigits: 0,
+                })} تعليق
               </p>
             </div>
           </div>
@@ -279,7 +282,7 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
                 className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium transition ${
                   showInternal
                     ? "bg-red-100 text-red-700 hover:bg-red-200"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    : "app-button-secondary text-slate-700"
                 }`}
               >
                 {showInternal ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -361,14 +364,14 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
         ) : null}
       </div>
 
-      <div className="border-t border-gray-200 p-6">
+      <div className="border-t border-slate-200 p-6">
         <form onSubmit={handleSubmit} className="space-y-4">
           {canUseAdvancedFeatures && (
             <div className="flex gap-4">
               <select
                 value={commentType}
                 onChange={(e) => setCommentType(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="app-input max-w-[220px] px-3 py-2.5 text-sm"
               >
                 {commentTypes.map((type) => (
                   <option key={type.value} value={type.value}>
@@ -397,13 +400,13 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
               onChange={(e) => setNewComment(e.target.value)}
               placeholder="اكتب تعليقك هنا..."
               rows={3}
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              className="app-input flex-1 resize-none px-4 py-3 text-sm"
               disabled={submitting || !orderId}
             />
             <button
               type="submit"
               disabled={submitting || !newComment.trim() || !orderId}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition"
+              className="app-button-primary flex items-center gap-2 rounded-2xl px-6 py-3 text-white transition disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Send size={16} />
               {submitting ? "جاري الإرسال..." : "إرسال"}
@@ -438,12 +441,12 @@ const CommentItem = ({
 
   return (
     <div
-      className={`p-4 rounded-lg border-l-4 ${
+      className={`rounded-[22px] border-l-4 p-4 shadow-sm ${
         comment.is_pinned
           ? "bg-amber-50 border-amber-400"
           : comment.is_internal
             ? "bg-red-50 border-red-400"
-            : "bg-gray-50 border-gray-300"
+            : "bg-slate-50 border-slate-300"
       }`}
     >
       <div className="flex items-start justify-between mb-3">
@@ -490,7 +493,7 @@ const CommentItem = ({
             {isAdmin && (
               <button
                 onClick={() => onPin(comment.id, comment.is_pinned)}
-                className={`p-1 rounded hover:bg-gray-200 transition ${
+                className={`rounded-lg p-1.5 transition hover:bg-slate-200 ${
                   comment.is_pinned ? "text-amber-600" : "text-gray-400"
                 }`}
                 title={comment.is_pinned ? "إلغاء التثبيت" : "تثبيت"}
@@ -503,14 +506,14 @@ const CommentItem = ({
                 setEditingId(comment.id);
                 setEditText(comment.comment_text);
               }}
-              className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-blue-600 transition"
+              className="rounded-lg p-1.5 text-gray-400 transition hover:bg-slate-200 hover:text-blue-600"
               title="تعديل"
             >
               <Edit3 size={16} />
             </button>
             <button
               onClick={() => onDelete(comment.id)}
-              className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-red-600 transition"
+              className="rounded-lg p-1.5 text-gray-400 transition hover:bg-slate-200 hover:text-red-600"
               title="حذف"
             >
               <Trash2 size={16} />
@@ -524,13 +527,13 @@ const CommentItem = ({
           <textarea
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            className="app-input w-full resize-none px-3 py-2.5 text-sm"
             rows={3}
           />
           <div className="flex gap-2">
             <button
               onClick={() => onEdit(comment.id)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition"
+              className="app-button-primary rounded-xl px-4 py-2 text-sm font-semibold text-white"
             >
               حفظ
             </button>
@@ -539,7 +542,7 @@ const CommentItem = ({
                 setEditingId(null);
                 setEditText("");
               }}
-              className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 text-sm transition"
+              className="app-button-secondary rounded-xl px-4 py-2 text-sm font-semibold text-slate-700"
             >
               إلغاء
             </button>

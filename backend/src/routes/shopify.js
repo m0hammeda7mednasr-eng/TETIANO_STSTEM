@@ -1874,7 +1874,11 @@ const getNormalizedQueryDateRange = (dateFrom, dateTo) => {
   };
 };
 
-const applyOrdersQueryFilters = (rows, query = {}) => {
+const applyOrdersQueryFilters = (
+  rows,
+  query = {},
+  { maxVisible = ORDER_LIST_MAX_VISIBLE, paginate = true } = {},
+) => {
   let filtered = [...(rows || [])];
   const normalizedDateRange = getNormalizedQueryDateRange(
     query.date_from,
@@ -2039,7 +2043,13 @@ const applyOrdersQueryFilters = (rows, query = {}) => {
     );
   });
 
-  filtered = filtered.slice(0, ORDER_LIST_MAX_VISIBLE);
+  if (Number.isFinite(maxVisible) && maxVisible > 0) {
+    filtered = filtered.slice(0, maxVisible);
+  }
+
+  if (!paginate) {
+    return filtered;
+  }
 
   const offset = Math.max(0, parseInt(query.offset, 10) || 0);
   const limitValue = parseInt(query.limit, 10);
@@ -3397,7 +3407,12 @@ router.get(
   requirePermission("can_view_orders"),
   async (req, res) => {
     try {
-      const pagination = getOrdersListPagination(req.query);
+      const searchAllHistory =
+        String(req.query.search_all || "").toLowerCase().trim() === "true" &&
+        Boolean(String(req.query.search || "").trim());
+      const pagination = searchAllHistory
+        ? getListPagination(req.query)
+        : getOrdersListPagination(req.query);
       pagination.limit = Math.min(pagination.limit, ORDER_LIST_PAGE_LIMIT);
       const sortOptions = getListSortOptions(
         req.query,
@@ -3442,6 +3457,41 @@ router.get(
           );
           liveSyncResult = { triggered: true, reason: "queued_background" };
         }
+      }
+
+      if (searchAllHistory) {
+        const scopedRowsResult = await getScopedEntityRows(req, Order);
+        if (scopedRowsResult?.error) {
+          console.error("Error fetching full-history orders search:", scopedRowsResult.error);
+          return res
+            .status(500)
+            .json({ error: scopedRowsResult.error.message || "Failed to search orders" });
+        }
+
+        const matchedOrders = applyOrdersQueryFilters(
+          scopedRowsResult?.data || [],
+          req.query,
+          {
+            maxVisible: null,
+            paginate: false,
+          },
+        ).map((order) => buildOrderListItem(order));
+
+        if (liveSyncResult) {
+          res.setHeader(
+            "X-Orders-Live-Sync",
+            liveSyncResult.reason || "attempted",
+          );
+        }
+
+        res.setHeader("X-Orders-Search-Scope", "full_history");
+        return res.json(
+          buildSlicedPaginatedCollection(matchedOrders, pagination, {
+            meta: {
+              search_scope: "full_history",
+            },
+          }),
+        );
       }
 
       let data = [];

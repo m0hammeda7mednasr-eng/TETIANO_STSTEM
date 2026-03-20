@@ -12,13 +12,14 @@ import {
   Clock,
   CheckCircle,
   AlertCircle,
+  Copy,
   TrendingUp,
 } from "lucide-react";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
 import { markSharedDataUpdated } from "../utils/realtime";
 
-const CURRENCY_LABEL = "LE";
 const PAYMENT_METHOD_LABELS = {
   shopify: "Shopify",
   instapay: "InstaPay",
@@ -121,6 +122,7 @@ export default function OrderDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isAdmin, hasPermission } = useAuth();
+  const { currencyLabel, formatCurrency, formatDateTime, select } = useLocale();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
@@ -540,6 +542,20 @@ export default function OrderDetails() {
     setTimeout(() => setNotification(null), 5000);
   };
 
+  const handleCopyOrderReference = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        String(order?.order_number || order?.shopify_id || id || ""),
+      );
+      showNotification(
+        select("تم نسخ رقم الطلب", "Order reference copied"),
+        "success",
+      );
+    } catch {
+      showNotification(select("فشل نسخ رقم الطلب", "Failed to copy order reference"), "error");
+    }
+  };
+
   const getStatusColor = (status) => {
     if (!status) return "bg-gray-100 text-gray-800";
     const statusLower = status.toLowerCase();
@@ -569,17 +585,14 @@ export default function OrderDetails() {
     return "bg-slate-100 text-slate-700";
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "N/A";
-    const date = new Date(dateString);
-    return date.toLocaleString("ar-EG", {
+  const formatDate = (dateString) =>
+    formatDateTime(dateString, {
       year: "numeric",
       month: "long",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     });
-  };
 
   const getSyncStatusIcon = () => {
     if (order?.pending_sync) {
@@ -622,7 +635,7 @@ export default function OrderDetails() {
 
   if (loading) {
     return (
-      <div className="flex h-screen bg-gray-100">
+      <div className="flex h-screen bg-transparent">
         <Sidebar />
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center">
@@ -636,7 +649,7 @@ export default function OrderDetails() {
 
   if (!order) {
     return (
-      <div className="flex h-screen bg-gray-100">
+      <div className="flex h-screen bg-transparent">
         <Sidebar />
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center">
@@ -655,7 +668,7 @@ export default function OrderDetails() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex h-screen bg-transparent">
       <Sidebar />
 
       <main className="flex-1 overflow-auto">
@@ -682,7 +695,7 @@ export default function OrderDetails() {
             <div className="flex items-center gap-4">
               <button
                 onClick={() => navigate("/orders")}
-                className="p-2 hover:bg-gray-200 rounded-lg transition"
+                className="app-button-secondary rounded-2xl p-2.5 text-slate-700"
               >
                 <ArrowLeft size={24} />
               </button>
@@ -692,6 +705,14 @@ export default function OrderDetails() {
                     طلب #{order.order_number || order.shopify_id}
                   </h1>
                   {getSyncStatusIcon()}
+                  <button
+                    onClick={handleCopyOrderReference}
+                    className="app-button-secondary inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-slate-700"
+                    title={select("نسخ رقم الطلب", "Copy order reference")}
+                  >
+                    <Copy size={14} />
+                    {select("نسخ", "Copy")}
+                  </button>
                 </div>
                 <p className="text-gray-600">
                   تم الإنشاء في {formatDate(order.created_at)}
@@ -708,7 +729,7 @@ export default function OrderDetails() {
                   value={getEffectivePaymentMethod(order)}
                   onChange={(e) => handlePaymentMethodChange(e.target.value)}
                   disabled={!canEditOrders || updatingPaymentMethod || isShopifyPaidOrder(order)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="app-input w-full px-4 py-2.5 text-sm disabled:opacity-50"
                 >
                   {isShopifyPaidOrder(order) && (
                     <option value="shopify">{PAYMENT_METHOD_LABELS.shopify}</option>
@@ -742,7 +763,7 @@ export default function OrderDetails() {
                   value={order.status}
                   onChange={(e) => handleStatusChange(e.target.value)}
                   disabled={!canEditOrders || updatingStatus}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="app-input w-full px-4 py-2.5 text-sm disabled:opacity-50"
                 >
                   <option value="pending">Pending</option>
                   <option value="authorized">Authorized</option>
@@ -771,7 +792,7 @@ export default function OrderDetails() {
                   value={getOrderFulfillmentStatus(order)}
                   onChange={(e) => handleFulfillmentChange(e.target.value)}
                   disabled={!canEditOrders || updatingFulfillment}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="app-input w-full px-4 py-2.5 text-sm disabled:opacity-50"
                 >
                   {getFulfillmentOptions(order).map((option) => (
                     <option key={option.value} value={option.value}>
@@ -799,7 +820,7 @@ export default function OrderDetails() {
             {/* Main Content */}
             <div className="lg:col-span-2 space-y-6">
               {/* Line Items */}
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                 <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Package size={20} />
                   المنتجات ({order.line_items?.length || 0})
@@ -820,7 +841,7 @@ export default function OrderDetails() {
                       <button
                         type="button"
                         onClick={toggleSelectAllLineItems}
-                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                        className="app-button-secondary rounded-xl px-3 py-2 text-sm font-semibold text-slate-700"
                       >
                         {allOrderLineItemsSelected ? "Unselect all" : "Select all"}
                       </button>
@@ -828,7 +849,7 @@ export default function OrderDetails() {
                         type="button"
                         onClick={clearSelectedLineItems}
                         disabled={selectedLineItems.length === 0}
-                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="app-button-secondary rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Clear
                       </button>
@@ -900,7 +921,7 @@ export default function OrderDetails() {
                             Fulfilled: {fulfilledQuantity}
                           </span>
                           <span className="text-sm font-semibold text-gray-800">
-                            {item.price} {CURRENCY_LABEL}
+                            {formatCurrency(item.price)}
                           </span>
                         </div>
                         {isSelected && (
@@ -912,7 +933,7 @@ export default function OrderDetails() {
                       <div className="text-left">
                         <p className="text-lg font-bold text-gray-800">
                           {(item.quantity * parseFloat(item.price)).toFixed(2)}{" "}
-                          {CURRENCY_LABEL}
+                          {currencyLabel}
                         </p>
                       </div>
                     </div>
@@ -925,14 +946,14 @@ export default function OrderDetails() {
                   <div className="flex justify-between text-gray-600">
                     <span>المجموع الفرعي:</span>
                     <span>
-                      {order.subtotal_price} {CURRENCY_LABEL}
+                      {formatCurrency(order.subtotal_price)}
                     </span>
                   </div>
                   {order.total_tax > 0 && (
                     <div className="flex justify-between text-gray-600">
                       <span>الضرائب:</span>
                       <span>
-                        {order.total_tax} {CURRENCY_LABEL}
+                        {formatCurrency(order.total_tax)}
                       </span>
                     </div>
                   )}
@@ -940,7 +961,7 @@ export default function OrderDetails() {
                     <div className="flex justify-between text-gray-600">
                       <span>الشحن:</span>
                       <span>
-                        {order.total_shipping} {CURRENCY_LABEL}
+                        {formatCurrency(order.total_shipping)}
                       </span>
                     </div>
                   )}
@@ -948,14 +969,14 @@ export default function OrderDetails() {
                     <div className="flex justify-between text-green-600">
                       <span>الخصم:</span>
                       <span>
-                        -{order.total_discounts} {CURRENCY_LABEL}
+                        {formatCurrency(-Math.abs(order.total_discounts || 0))}
                       </span>
                     </div>
                   )}
                   <div className="flex justify-between text-xl font-bold text-gray-800 pt-2 border-t">
                     <span>الإجمالي:</span>
                     <span>
-                      {order.total_price} {CURRENCY_LABEL}
+                      {formatCurrency(order.total_price)}
                     </span>
                   </div>
 
@@ -984,7 +1005,7 @@ export default function OrderDetails() {
                                     0,
                                   )
                                   .toFixed(2)}{" "}
-                                {CURRENCY_LABEL}
+                                {currencyLabel}
                               </span>
                             </div>
                             {refund.note && (
@@ -1009,7 +1030,7 @@ export default function OrderDetails() {
                         <div className="flex justify-between text-red-800 font-bold pt-2 border-t border-red-200">
                           <span>إجمالي المرتجعات:</span>
                           <span>
-                            -{order.total_refunded?.toFixed(2)} {CURRENCY_LABEL}
+                            {formatCurrency(-Math.abs(order.total_refunded || 0))}
                           </span>
                         </div>
                       </div>
@@ -1051,7 +1072,7 @@ export default function OrderDetails() {
                         <span className="font-medium">إجمالي الإيرادات:</span>
                         <span className="font-semibold">
                           {parseFloat(profitData.total_revenue || 0).toFixed(2)}{" "}
-                          {CURRENCY_LABEL}
+                          {currencyLabel}
                         </span>
                       </div>
 
@@ -1060,7 +1081,7 @@ export default function OrderDetails() {
                         <span className="font-medium">تكلفة المنتجات:</span>
                         <span className="font-semibold">
                           -{parseFloat(profitData.total_cost || 0).toFixed(2)}{" "}
-                          {CURRENCY_LABEL}
+                          {currencyLabel}
                         </span>
                       </div>
 
@@ -1069,7 +1090,7 @@ export default function OrderDetails() {
                         <span className="font-medium">الربح الإجمالي:</span>
                         <span className="font-semibold">
                           {parseFloat(profitData.gross_profit || 0).toFixed(2)}{" "}
-                          {CURRENCY_LABEL}
+                          {currencyLabel}
                         </span>
                       </div>
 
@@ -1084,7 +1105,7 @@ export default function OrderDetails() {
                             {parseFloat(
                               profitData.total_operational_costs || 0,
                             ).toFixed(2)}{" "}
-                            {CURRENCY_LABEL}
+                            {currencyLabel}
                           </span>
                         </div>
                       )}
@@ -1094,7 +1115,7 @@ export default function OrderDetails() {
                         <span className="font-bold text-lg">صافي الربح:</span>
                         <span className="font-bold text-xl">
                           {parseFloat(profitData.net_profit || 0).toFixed(2)}{" "}
-                          {CURRENCY_LABEL}
+                          {currencyLabel}
                         </span>
                       </div>
 
@@ -1141,7 +1162,7 @@ export default function OrderDetails() {
             {/* Sidebar */}
             <div className="space-y-6">
               {/* Customer Info */}
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <User size={18} />
                   معلومات العميل
@@ -1181,7 +1202,7 @@ export default function OrderDetails() {
                             إجمالي المشتريات
                           </p>
                           <p className="text-gray-800">
-                            {order.customer_info.total_spent} {CURRENCY_LABEL}
+                            {formatCurrency(order.customer_info.total_spent)}
                           </p>
                         </div>
                       )}
@@ -1208,7 +1229,7 @@ export default function OrderDetails() {
 
               {/* Shipping Address */}
               {order.shipping_address && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <MapPin size={18} />
                     عنوان الشحن
@@ -1254,7 +1275,7 @@ export default function OrderDetails() {
                 </div>
               )}
 
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-bold text-gray-800">
@@ -1272,7 +1293,7 @@ export default function OrderDetails() {
                           ? handleCancelContactEdit()
                           : setEditingContact(true)
                       }
-                      className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      className="app-button-secondary rounded-xl px-3 py-2 text-sm font-semibold text-slate-700"
                     >
                       {editingContact ? "إلغاء" : "تعديل"}
                     </button>
@@ -1505,7 +1526,7 @@ export default function OrderDetails() {
 
               {/* Billing Address */}
               {order.billing_address && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <CreditCard size={18} />
                     عنوان الفواتير
@@ -1552,7 +1573,7 @@ export default function OrderDetails() {
               )}
 
               {/* Payment Status */}
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <CreditCard size={18} />
                   حالة الدفع
@@ -1582,7 +1603,7 @@ export default function OrderDetails() {
               </div>
 
               {/* Fulfillment Status */}
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Truck size={18} />
                   حالة التوصيل
@@ -1647,7 +1668,7 @@ export default function OrderDetails() {
 
               {/* Shipping Method */}
               {order.shipping_lines && order.shipping_lines.length > 0 && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
                     طريقة الشحن
                   </h2>
@@ -1657,7 +1678,7 @@ export default function OrderDetails() {
                         {line.title}
                       </p>
                       <p className="text-sm text-gray-600">
-                        {line.price} {CURRENCY_LABEL}
+                        {formatCurrency(line.price)}
                       </p>
                       {line.code && (
                         <p className="text-xs text-gray-500">
@@ -1671,7 +1692,7 @@ export default function OrderDetails() {
 
               {/* Discount Codes */}
               {order.discount_codes && order.discount_codes.length > 0 && (
-                <div className="bg-white rounded-lg shadow p-6">
+              <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
                     أكواد الخصم
                   </h2>
@@ -1684,7 +1705,7 @@ export default function OrderDetails() {
                         {discount.code}
                       </p>
                       <p className="text-sm text-green-700">
-                        {discount.amount} {CURRENCY_LABEL}
+                        {formatCurrency(discount.amount)}
                       </p>
                       {discount.type && (
                         <p className="text-xs text-green-600">
@@ -1698,7 +1719,7 @@ export default function OrderDetails() {
 
               {/* Tags */}
               {order.tags && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
                     التصنيفات
                   </h2>
@@ -1717,7 +1738,7 @@ export default function OrderDetails() {
 
               {/* Customer Note */}
               {order.customer_note && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
                     ملاحظة العميل
                   </h2>
@@ -1729,7 +1750,7 @@ export default function OrderDetails() {
 
               {/* Source Information */}
               {order.source_name && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
                     مصدر الطلب
                   </h2>
@@ -1756,7 +1777,7 @@ export default function OrderDetails() {
 
               {/* Sync Status */}
               {order.last_synced_at && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="app-surface rounded-[28px] p-6">
                   <h2 className="text-lg font-bold text-gray-800 mb-4">
                     حالة المزامنة
                   </h2>

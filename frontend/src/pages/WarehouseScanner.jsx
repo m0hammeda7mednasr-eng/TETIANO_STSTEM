@@ -13,7 +13,7 @@ import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
 import { warehouseAPI } from "../utils/api";
-import { formatDateTime } from "../utils/helpers";
+import { formatDateTime, formatNumber } from "../utils/helpers";
 import { extractArray, extractObject } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
@@ -22,7 +22,8 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const formatCount = (value) => toNumber(value).toLocaleString("ar-EG");
+const formatCount = (value) =>
+  formatNumber(value, { maximumFractionDigits: 0 });
 
 const isWarehouseEvent = (event) =>
   String(event?.source || "").toLowerCase().includes("/warehouse");

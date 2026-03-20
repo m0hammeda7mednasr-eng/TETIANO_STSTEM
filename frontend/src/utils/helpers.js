@@ -1,3 +1,12 @@
+import {
+  formatCurrency as formatCurrencyValue,
+  formatDateTime as formatDateTimeValue,
+  formatNumber as formatNumberValue,
+  formatPercent as formatPercentValue,
+  formatTime as formatTimeValue,
+  getCurrencyLabel,
+} from "./localeFormat";
+
 // Auth utilities
 export const getToken = () => localStorage.getItem("token");
 
@@ -10,32 +19,19 @@ export const isAuthenticated = () => {
 };
 
 // Format utilities
-export const CURRENCY_LABEL = "LE";
+export const CURRENCY_LABEL = getCurrencyLabel();
 
-export const formatCurrency = (amount) => {
-  const numericAmount = Number(amount);
-  const safeAmount = Number.isFinite(numericAmount) ? numericAmount : 0;
-  return `${new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(safeAmount)} ${CURRENCY_LABEL}`;
-};
+export const formatNumber = (value, options = {}) =>
+  formatNumberValue(value, options);
 
-const formatDateValue = (date, options) => {
-  if (!date) {
-    return "-";
-  }
+export const formatCurrency = (amount, options = {}) =>
+  formatCurrencyValue(amount, options);
 
-  const parsed = new Date(date);
-  if (Number.isNaN(parsed.getTime())) {
-    return "-";
-  }
-
-  return parsed.toLocaleString("ar-EG", options);
-};
+export const formatPercent = (value, options = {}) =>
+  formatPercentValue(value, options);
 
 export const formatDate = (date) =>
-  formatDateValue(date, {
+  formatDateTimeValue(date, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -43,15 +39,19 @@ export const formatDate = (date) =>
     minute: "2-digit",
   });
 
-export const formatDateTime = (date) =>
-  formatDateValue(date, {
+export const formatDateTime = (date, options = {}) =>
+  formatDateTimeValue(date, {
     year: "numeric",
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    ...options,
   });
+
+export const formatTime = (date, options = {}) =>
+  formatTimeValue(date, options);
 
 // Validation utilities
 export const validateEmail = (email) => {

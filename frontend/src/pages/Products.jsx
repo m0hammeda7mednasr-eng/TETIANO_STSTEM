@@ -40,7 +40,11 @@ import {
   HEAVY_VIEW_CACHE_FRESH_MS,
   shouldAutoRefreshView,
 } from "../utils/refreshPolicy";
-import { formatDateTime } from "../utils/helpers";
+import {
+  formatCurrency as formatAmount,
+  formatDateTime,
+  formatNumber,
+} from "../utils/helpers";
 import {
   buildCatalogCounts,
   buildVariantRows,
@@ -50,7 +54,6 @@ import {
 
 const PRODUCTS_PAGE_SIZE = 200;
 const PRODUCTS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
-const CURRENCY_LABEL = "LE";
 
 const INITIAL_FILTERS = {
   searchTerm: "",
@@ -113,7 +116,6 @@ const buildSearchParamsFromFilters = (filters, currentSearchParams) => {
   return nextSearchParams;
 };
 
-const formatAmount = (value) => `${toNumber(value).toFixed(2)} ${CURRENCY_LABEL}`;
 const PRODUCT_FILTER_LABELS = {
   stockStatus: {
     in_stock: "In stock",
@@ -223,7 +225,7 @@ export default function Products() {
       );
       setLoadStatus({
         active: false,
-        message: `Showing ${cachedRows.length.toLocaleString()} cached products`,
+        message: `Showing ${formatNumber(cachedRows.length, { maximumFractionDigits: 0 })} cached products`,
       });
     });
 
@@ -273,8 +275,8 @@ export default function Products() {
                 setLoadStatus({
                   active: hasMore,
                   message: hasMore
-                    ? `Loaded ${accumulatedRows.length.toLocaleString()} products so far...`
-                    : `Loaded ${accumulatedRows.length.toLocaleString()} products`,
+                    ? `Loaded ${formatNumber(accumulatedRows.length, { maximumFractionDigits: 0 })} products so far...`
+                    : `Loaded ${formatNumber(accumulatedRows.length, { maximumFractionDigits: 0 })} products`,
                 });
               },
             },
@@ -286,7 +288,7 @@ export default function Products() {
             active: false,
             message:
               rows.length > 0
-                ? `Loaded ${rows.length.toLocaleString()} products`
+                ? `Loaded ${formatNumber(rows.length, { maximumFractionDigits: 0 })} products`
                 : "No products found",
           });
           await writeCachedView(cacheKey, { rows });
@@ -806,7 +808,9 @@ export default function Products() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold">
-                    {summary.lowStock.toLocaleString()} low-stock variants need follow-up
+                    {formatNumber(summary.lowStock, {
+                      maximumFractionDigits: 0,
+                    })} low-stock variants need follow-up
                   </p>
                   <p className="mt-1 text-xs text-amber-800/90">
                     Focus this view on products below the stock threshold to restock faster.
@@ -826,37 +830,49 @@ export default function Products() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <SummaryCard
               label="Products"
-              value={summary.uniqueProducts.toLocaleString()}
+              value={formatNumber(summary.uniqueProducts, {
+                maximumFractionDigits: 0,
+              })}
               icon={Package}
               color="from-sky-500 to-sky-700"
             />
             <SummaryCard
               label="Variants"
-              value={summary.totalVariants.toLocaleString()}
+              value={formatNumber(summary.totalVariants, {
+                maximumFractionDigits: 0,
+              })}
               icon={Package}
               color="from-indigo-500 to-indigo-700"
             />
             <SummaryCard
               label="Total Stock"
-              value={summary.totalInventory.toLocaleString()}
+              value={formatNumber(summary.totalInventory, {
+                maximumFractionDigits: 0,
+              })}
               icon={TrendingUp}
               color="from-emerald-500 to-emerald-700"
             />
             <SummaryCard
               label="Low Stock"
-              value={summary.lowStock.toLocaleString()}
+              value={formatNumber(summary.lowStock, {
+                maximumFractionDigits: 0,
+              })}
               icon={AlertCircle}
               color="from-amber-500 to-amber-700"
             />
             <SummaryCard
               label="Out of Stock"
-              value={summary.outOfStock.toLocaleString()}
+              value={formatNumber(summary.outOfStock, {
+                maximumFractionDigits: 0,
+              })}
               icon={AlertCircle}
               color="from-rose-500 to-rose-700"
             />
             <SummaryCard
               label="Synced"
-              value={summary.syncedCount.toLocaleString()}
+              value={formatNumber(summary.syncedCount, {
+                maximumFractionDigits: 0,
+              })}
               icon={CheckCircle}
               color="from-cyan-500 to-cyan-700"
             />
@@ -882,13 +898,21 @@ export default function Products() {
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                 <span>
-                  Showing <strong>{catalogCounts.filteredProducts.toLocaleString()}</strong> products
+                  Showing <strong>{formatNumber(catalogCounts.filteredProducts, {
+                    maximumFractionDigits: 0,
+                  })}</strong> products
                 </span>
                 <span>
-                  and <strong>{catalogCounts.filteredVariants.toLocaleString()}</strong> variants
+                  and <strong>{formatNumber(catalogCounts.filteredVariants, {
+                    maximumFractionDigits: 0,
+                  })}</strong> variants
                 </span>
                 <span className="text-slate-500">
-                  from {catalogCounts.totalProducts.toLocaleString()} total products / {catalogCounts.totalVariants.toLocaleString()} total variants
+                  from {formatNumber(catalogCounts.totalProducts, {
+                    maximumFractionDigits: 0,
+                  })} total products / {formatNumber(catalogCounts.totalVariants, {
+                    maximumFractionDigits: 0,
+                  })} total variants
                 </span>
               </div>
               {normalizedUpdatedRange.wasSwapped && (
@@ -1179,7 +1203,9 @@ export default function Products() {
                       <DetailItem label="Price" value={formatAmount(variant.price)} />
                       <DetailItem
                         label="Stock"
-                        value={toNumber(variant.inventory_quantity).toLocaleString()}
+                        value={formatNumber(variant.inventory_quantity, {
+                          maximumFractionDigits: 0,
+                        })}
                         valueClassName={
                           variant._meta.stockState === "in_stock"
                             ? "text-emerald-600"

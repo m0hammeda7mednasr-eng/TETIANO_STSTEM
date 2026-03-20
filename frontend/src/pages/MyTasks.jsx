@@ -16,6 +16,7 @@ import {
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
 import { normalizeTaskRecord } from "../utils/taskGroups";
+import { formatDate, formatNumber } from "../utils/localeFormat";
 
 const POLLING_INTERVAL_MS = 30000;
 
@@ -168,7 +169,7 @@ function TaskColumn({ title, icon: Icon, color, tasks, onStatusChange, onUpload 
     <div className="bg-white rounded-xl shadow p-4">
       <h2 className={`text-lg font-bold mb-3 flex items-center gap-2 ${color}`}>
         <Icon size={18} />
-        {title} ({tasks.length})
+        {title} ({formatNumber(tasks.length, { maximumFractionDigits: 0 })})
       </h2>
       <div className="space-y-3">
         {tasks.map((task) => (
@@ -208,7 +209,7 @@ function TaskCard({ task, onStatusChange, onUpload }) {
         {task.due_date && (
           <p className="flex items-center gap-1">
             <Calendar size={12} />
-            {new Date(task.due_date).toLocaleDateString("ar-EG")}
+            {formatDate(task.due_date)}
           </p>
         )}
       </div>
@@ -217,7 +218,9 @@ function TaskCard({ task, onStatusChange, onUpload }) {
         <div className="mt-3 border-t pt-2">
           <p className="text-xs font-medium text-slate-700 flex items-center gap-1">
             <Paperclip size={12} />
-            Attachments ({task.attachments.length})
+            Attachments ({formatNumber(task.attachments.length, {
+              maximumFractionDigits: 0,
+            })})
           </p>
           <div className="mt-1 space-y-1">
             {task.attachments.map((item) => (

@@ -20,6 +20,7 @@ import Sidebar from "../components/Sidebar";
 import api, { getErrorMessage } from "../utils/api";
 import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
+import { formatDate, formatNumber, formatPercent } from "../utils/localeFormat";
 
 const RANGE_OPTIONS = [
   { label: "7 Days", value: 7 },
@@ -237,25 +238,34 @@ export default function Reports() {
           <StatCard
             icon={FileText}
             title="Total Reports"
-            value={cards.reportsCount}
+            value={formatNumber(cards.reportsCount, {
+              maximumFractionDigits: 0,
+            })}
             subtitle={`Last ${days} days`}
           />
           <StatCard
             icon={Users}
             title="Active Employees"
-            value={cards.usersCount}
+            value={formatNumber(cards.usersCount, {
+              maximumFractionDigits: 0,
+            })}
             subtitle="Submitted at least once"
           />
           <StatCard
             icon={Paperclip}
             title="Total Attachments"
-            value={cards.attachmentsCount}
+            value={formatNumber(cards.attachmentsCount, {
+              maximumFractionDigits: 0,
+            })}
             subtitle="Uploaded files"
           />
           <StatCard
             icon={TrendingUp}
             title="On-time Rate"
-            value={`${cards.onTimeRate.toFixed(2)}%`}
+            value={formatPercent(cards.onTimeRate, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
             subtitle="Delivery discipline"
           />
         </div>
@@ -377,16 +387,27 @@ export default function Reports() {
                           <p className="text-slate-500">{employee.email}</p>
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-700">
-                          {employee.reports_count}
+                          {formatNumber(employee.reports_count, {
+                            maximumFractionDigits: 0,
+                          })}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-700">
-                          {employee.on_time_rate.toFixed(1)}%
+                          {formatPercent(employee.on_time_rate, {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 1,
+                          })}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-700">
-                          {employee.submission_rate.toFixed(1)}%
+                          {formatPercent(employee.submission_rate, {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 1,
+                          })}
                         </td>
                         <td className="px-4 py-3 text-sm font-semibold text-slate-900">
-                          {employee.discipline_score.toFixed(1)}
+                          {formatNumber(employee.discipline_score, {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 1,
+                          })}
                         </td>
                         <td className="px-4 py-3 text-sm">
                           <span
@@ -399,7 +420,9 @@ export default function Reports() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-700">
-                          {employee.attachments_count}
+                          {formatNumber(employee.attachments_count, {
+                            maximumFractionDigits: 0,
+                          })}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-700">
                           {employee.last_report_date || "-"}
@@ -459,7 +482,7 @@ export default function Reports() {
                     <td className="px-4 py-3 text-sm text-slate-600">
                       <span className="inline-flex items-center gap-1">
                         <Calendar size={14} />
-                        {new Date(report.report_date || report.created_at).toLocaleDateString()}
+                        {formatDate(report.report_date || report.created_at)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm">

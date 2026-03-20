@@ -1425,7 +1425,6 @@ router.get(
           pendingAmount: parseFloat(pendingAmount.toFixed(2)),
           netRevenue: parseFloat(netRevenue.toFixed(2)),
         },
-        monthlyTrends,
         topProducts,
         topCustomers,
         summary: {

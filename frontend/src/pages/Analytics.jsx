@@ -1,23 +1,33 @@
-import React, { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  BarChart3,
+  CheckCircle2,
+  Clock3,
+  DollarSign,
+  Package,
+  RefreshCw,
+  RotateCcw,
+  ShoppingCart,
+  Target,
+  Users,
+  XCircle,
+} from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { dashboardAPI } from "../utils/api";
-import {
-  TrendingUp,
-  DollarSign,
-  ShoppingCart,
-  RefreshCw,
-  XCircle,
-  CheckCircle,
-  Clock,
-  BarChart3,
-  Package,
-  Users,
-  Target,
-  Award,
-  AlertCircle,
-  Eye,
-  Download,
-} from "lucide-react";
+import { useLocale } from "../context/LocaleContext";
+
+const DEFAULT_PRESET = "6months";
+
+const RANGE_PRESETS = [
+  { id: "day", ar: "يوم", en: "Day" },
+  { id: "week", ar: "أسبوع", en: "Week" },
+  { id: "month", ar: "شهر", en: "Month" },
+  { id: "3months", ar: "3 شهور", en: "3 Months" },
+  { id: "6months", ar: "6 شهور", en: "6 Months" },
+  { id: "year", ar: "سنة", en: "Year" },
+  { id: "custom", ar: "مدة مخصصة", en: "Custom" },
+];
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -26,21 +36,72 @@ const toNumber = (value) => {
 
 const toArray = (value) => (Array.isArray(value) ? value : []);
 
-const percentage = (part, total) => {
-  const safeTotal = toNumber(total);
-  if (safeTotal <= 0) return 0;
-  return (toNumber(part) / safeTotal) * 100;
+const formatDateInput = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
+
+const shiftDays = (value, amount) => {
+  const date = new Date(value);
+  date.setDate(date.getDate() + amount);
+  return date;
+};
+
+const shiftMonths = (value, amount) => {
+  const date = new Date(value);
+  date.setMonth(date.getMonth() + amount);
+  return date;
+};
+
+const resolvePresetRange = (presetId) => {
+  const today = new Date();
+  let from = new Date(today);
+
+  switch (presetId) {
+    case "day":
+      from = new Date(today);
+      break;
+    case "week":
+      from = shiftDays(today, -6);
+      break;
+    case "month":
+      from = shiftMonths(today, -1);
+      break;
+    case "3months":
+      from = shiftMonths(today, -3);
+      break;
+    case "year":
+      from = shiftMonths(today, -12);
+      break;
+    case "6months":
+    default:
+      from = shiftMonths(today, -6);
+      break;
+  }
+
+  return {
+    dateFrom: formatDateInput(from),
+    dateTo: formatDateInput(today),
+  };
+};
+
+const createDefaultFilters = () => ({
+  preset: DEFAULT_PRESET,
+  ...resolvePresetRange(DEFAULT_PRESET),
+});
 
 const normalizeAnalyticsResponse = (raw = {}) => {
   const financial = raw?.financial || {};
   const summary = raw?.summary || {};
   const ordersByStatus = raw?.ordersByStatus || {};
-
-  const totalOrders = toNumber(summary.totalOrders);
-  const paidOrders = toNumber(ordersByStatus.paid);
-  const cancelledOrders = toNumber(ordersByStatus.cancelled);
-  const refundedOrders = toNumber(ordersByStatus.refunded);
+  const meta = raw?.meta || {};
 
   return {
     financial: {
@@ -50,163 +111,144 @@ const normalizeAnalyticsResponse = (raw = {}) => {
       netRevenue: toNumber(financial.netRevenue),
     },
     summary: {
-      totalOrders,
-      successRate: toNumber(
-        summary.successRate || percentage(paidOrders, totalOrders),
-      ),
-      cancellationRate: toNumber(
-        summary.cancellationRate || percentage(cancelledOrders, totalOrders),
-      ),
-      refundRate: toNumber(
-        summary.refundRate || percentage(refundedOrders, totalOrders),
-      ),
+      totalOrders: toNumber(summary.totalOrders),
+      successRate: toNumber(summary.successRate),
+      cancellationRate: toNumber(summary.cancellationRate),
+      refundRate: toNumber(summary.refundRate),
     },
     ordersByStatus: {
       pending: toNumber(ordersByStatus.pending),
-      paid: paidOrders,
-      refunded: refundedOrders,
-      cancelled: cancelledOrders,
+      paid: toNumber(ordersByStatus.paid),
+      refunded: toNumber(ordersByStatus.refunded),
+      cancelled: toNumber(ordersByStatus.cancelled),
       fulfilled: toNumber(ordersByStatus.fulfilled),
       unfulfilled: toNumber(ordersByStatus.unfulfilled),
     },
-    monthlyTrends: toArray(raw?.monthlyTrends).map((month) => ({
-      month: month?.month || "-",
-      orders: toNumber(month?.orders),
-      revenue: toNumber(month?.revenue),
-      cancelled: toNumber(month?.cancelled),
-      refunded: toNumber(month?.refunded),
+    trends: toArray(raw?.monthlyTrends).map((entry) => ({
+      label: entry?.label || entry?.month || "-",
+      periodStart: entry?.period_start || null,
+      orders: toNumber(entry?.orders),
+      revenue: toNumber(entry?.revenue),
+      cancelled: toNumber(entry?.cancelled),
+      refunded: toNumber(entry?.refunded),
     })),
     topProducts: toArray(raw?.topProducts).map((product) => ({
-      ...product,
       title: product?.title || "Unknown Product",
-      total_quantity: toNumber(product?.total_quantity),
       orders_count: toNumber(product?.orders_count),
       total_revenue: toNumber(product?.total_revenue),
     })),
     topCustomers: toArray(raw?.topCustomers).map((customer) => ({
-      ...customer,
-      email: customer?.email || customer?.name || "Unknown Customer",
+      name: customer?.name || customer?.email || "Unknown Customer",
+      email: customer?.email || "",
       orders_count: toNumber(customer?.orders_count),
       total_spent: toNumber(customer?.total_spent),
     })),
+    meta: {
+      trendGranularity: String(meta?.trendGranularity || "month"),
+      dateRange: meta?.dateRange || null,
+    },
   };
 };
 
-const Analytics = () => {
+export default function Analytics() {
+  const { select, languageTag, formatDate } = useLocale();
+  const [filters, setFilters] = useState(createDefaultFilters);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [selectedPeriod, setSelectedPeriod] = useState("6months");
+
+  const apiParams = useMemo(
+    () => ({
+      ...(filters.dateFrom ? { date_from: filters.dateFrom } : {}),
+      ...(filters.dateTo ? { date_to: filters.dateTo } : {}),
+    }),
+    [filters.dateFrom, filters.dateTo],
+  );
+
+  const fetchAnalytics = useCallback(
+    async ({ silent = false } = {}) => {
+      try {
+        if (silent) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
+
+        const response = await dashboardAPI.getAnalytics(apiParams);
+        setAnalytics(normalizeAnalyticsResponse(response?.data));
+        setError("");
+      } catch (requestError) {
+        console.error("Error fetching analytics:", requestError);
+        setError(
+          requestError?.response?.data?.error ||
+            select("فشل تحميل التحليلات", "Failed to load analytics"),
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [apiParams, select],
+  );
 
   useEffect(() => {
     fetchAnalytics();
-  }, []);
+  }, [fetchAnalytics]);
 
-  const fetchAnalytics = async () => {
-    try {
-      setLoading(true);
-      const response = await dashboardAPI.getAnalytics();
-      setAnalytics(normalizeAnalyticsResponse(response.data));
-      setError("");
-    } catch (err) {
-      console.error("Error fetching analytics:", err);
-      setError("فشل تحميل التحليلات");
-    } finally {
-      setLoading(false);
+  const formatCurrency = useCallback(
+    (value) =>
+      new Intl.NumberFormat(languageTag, {
+        style: "currency",
+        currency: "EGP",
+        maximumFractionDigits: 2,
+      }).format(toNumber(value)),
+    [languageTag],
+  );
+
+  const formatNumber = useCallback(
+    (value) => new Intl.NumberFormat(languageTag).format(toNumber(value)),
+    [languageTag],
+  );
+
+  const formatPercent = useCallback(
+    (value) =>
+      `${toNumber(value).toLocaleString(languageTag, {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      })}%`,
+    [languageTag],
+  );
+
+  const rangeLabel = useMemo(() => {
+    const dateRange = analytics?.meta?.dateRange;
+    if (!dateRange?.from || !dateRange?.to) {
+      return filters.dateFrom && filters.dateTo
+        ? `${filters.dateFrom} - ${filters.dateTo}`
+        : select("كل الفترة", "Full period");
     }
-  };
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat("ar-EG", {
-      style: "currency",
-      currency: "EGP",
-    }).format(amount);
-  };
+    return `${formatDate(dateRange.from, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    })} - ${formatDate(dateRange.to, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    })}`;
+  }, [analytics?.meta?.dateRange, filters.dateFrom, filters.dateTo, formatDate, select]);
 
-  const formatPercentage = (value) => {
-    return `${value}%`;
-  };
-
-  const formatNumber = (num) => {
-    return new Intl.NumberFormat("ar-EG").format(num);
-  };
-
-  const StatCard = ({
-    title,
-    value,
-    icon: Icon,
-    color,
-    subtitle,
-    trend,
-    trendValue,
-  }) => (
-    <div
-      className="bg-white rounded-xl shadow-lg p-6 border-l-4"
-      style={{
-        borderLeftColor: color.replace("text-", "").replace("-600", ""),
-      }}
-    >
-      <div className="flex items-center justify-between mb-4">
-        <div
-          className={`p-3 rounded-full ${color.replace("text-", "bg-").replace("-600", "-100")}`}
-        >
-          <Icon className={color} size={24} />
-        </div>
-        {trend && (
-          <div
-            className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${
-              trend === "up"
-                ? "bg-green-100 text-green-600"
-                : "bg-red-100 text-red-600"
-            }`}
-          >
-            <TrendingUp
-              size={12}
-              className={trend === "down" ? "rotate-180" : ""}
-            />
-            {trendValue}
-          </div>
-        )}
-      </div>
-      <div>
-        <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
-        <p className={`text-2xl font-bold ${color} mb-1`}>{value}</p>
-        {subtitle && <p className="text-xs text-gray-500">{subtitle}</p>}
-      </div>
-    </div>
-  );
-
-  const MetricCard = ({ title, value, change, changeType, icon: Icon }) => (
-    <div className="bg-white rounded-lg shadow p-4">
-      <div className="flex items-center justify-between mb-2">
-        <Icon className="text-gray-400" size={20} />
-        <span
-          className={`text-xs font-semibold px-2 py-1 rounded-full ${
-            changeType === "positive"
-              ? "bg-green-100 text-green-600"
-              : changeType === "negative"
-                ? "bg-red-100 text-red-600"
-                : "bg-gray-100 text-gray-600"
-          }`}
-        >
-          {change}
-        </span>
-      </div>
-      <p className="text-xs text-gray-600 mb-1">{title}</p>
-      <p className="text-lg font-bold text-gray-800">{value}</p>
-    </div>
-  );
-
-  if (loading) {
+  if (loading && !analytics) {
     return (
-      <div className="flex h-screen bg-gray-50">
+      <div className="flex h-screen bg-slate-100">
         <Sidebar />
         <main className="flex-1 overflow-auto">
-          <div className="flex items-center justify-center h-full">
+          <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-              <p className="text-gray-600 text-lg">
-                جاري تحميل التحليلات المتقدمة...
+              <div className="mx-auto mb-4 h-14 w-14 animate-spin rounded-full border-4 border-slate-200 border-t-sky-700" />
+              <p className="text-base text-slate-600">
+                {select("جارٍ تحميل التحليلات...", "Loading analytics...")}
               </p>
             </div>
           </div>
@@ -215,552 +257,471 @@ const Analytics = () => {
     );
   }
 
-  if (error) {
-    return (
-      <div className="flex h-screen bg-gray-50">
-        <Sidebar />
-        <main className="flex-1 overflow-auto">
-          <div className="p-8">
-            <div className="bg-red-50 border border-red-200 rounded-lg p-6 flex items-center gap-3">
-              <AlertCircle className="text-red-600" size={24} />
-              <div>
-                <p className="text-red-800 font-semibold">{error}</p>
-                <button
-                  onClick={fetchAnalytics}
-                  className="text-red-600 hover:text-red-700 text-sm underline mt-1"
-                >
-                  إعادة المحاولة
-                </button>
-              </div>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-slate-100">
       <Sidebar />
-
       <main className="flex-1 overflow-auto">
-        <div className="p-8">
-          {/* Header */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between">
+        <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center gap-3">
-                  <BarChart3 className="text-blue-600" size={32} />
-                  التحليلات المتقدمة
+                <div className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800">
+                  <BarChart3 size={14} />
+                  {select("تحليلات المتجر", "Store analytics")}
+                </div>
+                <h1 className="mt-3 flex items-center gap-3 text-3xl font-bold text-slate-900">
+                  <BarChart3 className="text-sky-700" size={28} />
+                  {select("التحليلات", "Analytics")}
                 </h1>
-                <p className="text-gray-600">
-                  تحليل شامل ومفصل لأداء المتجر والمبيعات والعملاء
-                </p>
               </div>
-              <div className="flex items-center gap-3">
-                <select
-                  value={selectedPeriod}
-                  onChange={(e) => setSelectedPeriod(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fetchAnalytics({ silent: true })}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
-                  <option value="1month">آخر شهر</option>
-                  <option value="3months">آخر 3 شهور</option>
-                  <option value="6months">آخر 6 شهور</option>
-                  <option value="1year">آخر سنة</option>
-                </select>
-                <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
-                  <Download size={16} />
-                  تصدير التقرير
+                  <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
+                  {select("تحديث", "Refresh")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilters(createDefaultFilters())}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <RotateCcw size={16} />
+                  {select("إعادة الضبط", "Reset")}
                 </button>
               </div>
             </div>
-          </div>
 
-          {analytics && (
-            <div className="space-y-8">
-              {/* Key Performance Indicators */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <StatCard
-                  title="إجمالي الإيرادات"
+            <div className="mt-5 flex flex-wrap gap-2">
+              {RANGE_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    if (preset.id === "custom") {
+                      setFilters((current) => ({ ...current, preset: "custom" }));
+                      return;
+                    }
+
+                    setFilters({
+                      preset: preset.id,
+                      ...resolvePresetRange(preset.id),
+                    });
+                  }}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                    filters.preset === preset.id
+                      ? "bg-sky-700 text-white shadow-sm"
+                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  {select(preset.ar, preset.en)}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="space-y-2 text-sm text-slate-600">
+                <span>{select("من تاريخ", "From date")}</span>
+                <input
+                  type="date"
+                  value={filters.dateFrom}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      preset: "custom",
+                      dateFrom: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-slate-900 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                />
+              </label>
+              <label className="space-y-2 text-sm text-slate-600">
+                <span>{select("إلى تاريخ", "To date")}</span>
+                <input
+                  type="date"
+                  value={filters.dateTo}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      preset: "custom",
+                      dateTo: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-slate-900 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                />
+              </label>
+            </div>
+
+            <p className="mt-3 text-sm text-slate-500">
+              {select("النطاق الحالي", "Current range")}: {rangeLabel}
+            </p>
+
+            {error ? (
+              <div className="mt-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-800">
+                <AlertCircle className="mt-0.5 shrink-0" size={18} />
+                <div className="space-y-1">
+                  <p className="font-semibold">{error}</p>
+                  <button
+                    type="button"
+                    onClick={() => fetchAnalytics()}
+                    className="text-sm font-medium underline"
+                  >
+                    {select("إعادة المحاولة", "Try again")}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          {analytics ? (
+            <>
+              <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <KpiCard
+                  title={select("إجمالي الإيراد", "Total revenue")}
                   value={formatCurrency(analytics.financial.totalRevenue)}
+                  subtitle={select("إجمالي المبيعات المحققة", "Gross revenue in range")}
                   icon={DollarSign}
-                  color="text-green-600"
-                  subtitle="الإيرادات المحققة"
-                  trend="up"
-                  trendValue="+12.5%"
+                  accent="from-emerald-500 to-emerald-700"
                 />
-                <StatCard
-                  title="إجمالي الطلبات"
-                  value={formatNumber(analytics.summary.totalOrders)}
-                  icon={ShoppingCart}
-                  color="text-blue-600"
-                  subtitle="جميع الطلبات"
-                  trend="up"
-                  trendValue="+8.3%"
-                />
-                <StatCard
-                  title="معدل النجاح"
-                  value={formatPercentage(analytics.summary.successRate)}
-                  icon={CheckCircle}
-                  color="text-emerald-600"
-                  subtitle="الطلبات المدفوعة"
-                  trend="up"
-                  trendValue="+2.1%"
-                />
-                <StatCard
-                  title="صافي الربح"
+                <KpiCard
+                  title={select("صافي الإيراد", "Net revenue")}
                   value={formatCurrency(analytics.financial.netRevenue)}
+                  subtitle={select("بعد خصم المرتجعات", "After refunds are deducted")}
                   icon={Target}
-                  color="text-purple-600"
-                  subtitle="بعد خصم الاستردادات"
-                  trend="up"
-                  trendValue="+15.7%"
+                  accent="from-sky-500 to-sky-700"
                 />
-              </div>
+                <KpiCard
+                  title={select("عدد الطلبات", "Orders")}
+                  value={formatNumber(analytics.summary.totalOrders)}
+                  subtitle={select("كل الطلبات داخل النطاق", "All orders in range")}
+                  icon={ShoppingCart}
+                  accent="from-slate-700 to-slate-900"
+                />
+                <KpiCard
+                  title={select("معدل النجاح", "Success rate")}
+                  value={formatPercent(analytics.summary.successRate)}
+                  subtitle={select("نسبة الطلبات المدفوعة", "Share of paid orders")}
+                  icon={CheckCircle2}
+                  accent="from-amber-500 to-orange-600"
+                />
+              </section>
 
-              {/* Performance Metrics Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                <MetricCard
-                  title="معدل الإلغاء"
-                  value={formatPercentage(analytics.summary.cancellationRate)}
-                  change="-1.2%"
-                  changeType="positive"
-                  icon={XCircle}
-                />
-                <MetricCard
-                  title="معدل الاسترداد"
-                  value={formatPercentage(analytics.summary.refundRate)}
-                  change="-0.8%"
-                  changeType="positive"
-                  icon={RefreshCw}
-                />
-                <MetricCard
-                  title="متوسط قيمة الطلب"
-                  value={formatCurrency(
-                    analytics.summary.totalOrders > 0
-                      ? analytics.financial.totalRevenue /
-                          analytics.summary.totalOrders
-                      : 0,
-                  )}
-                  change="+5.3%"
-                  changeType="positive"
-                  icon={TrendingUp}
-                />
-                <MetricCard
-                  title="الطلبات المعلقة"
-                  value={formatNumber(analytics.ordersByStatus.pending)}
-                  change="3"
-                  changeType="neutral"
-                  icon={Clock}
-                />
-                <MetricCard
-                  title="العملاء النشطين"
-                  value={formatNumber(analytics.topCustomers.length)}
-                  change="+12"
-                  changeType="positive"
-                  icon={Users}
-                />
-                <MetricCard
-                  title="المنتجات الأكثر مبيعاً"
-                  value={formatNumber(analytics.topProducts.length)}
-                  change="5"
-                  changeType="neutral"
-                  icon={Award}
-                />
-              </div>
-
-              {/* Order Status Analysis */}
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <ShoppingCart size={24} />
-                    تحليل حالة الطلبات
-                  </h3>
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <Eye size={16} />
-                    عرض تفصيلي
+              <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                  <h2 className="text-xl font-bold text-slate-900">
+                    {select("حالة الطلبات", "Order status")}
+                  </h2>
+                  <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-3">
+                    <StatusTile
+                      label={select("مدفوعة", "Paid")}
+                      value={formatNumber(analytics.ordersByStatus.paid)}
+                      icon={CheckCircle2}
+                      tone="emerald"
+                    />
+                    <StatusTile
+                      label={select("معلقة", "Pending")}
+                      value={formatNumber(analytics.ordersByStatus.pending)}
+                      icon={Clock3}
+                      tone="amber"
+                    />
+                    <StatusTile
+                      label={select("ملغية", "Cancelled")}
+                      value={formatNumber(analytics.ordersByStatus.cancelled)}
+                      icon={XCircle}
+                      tone="rose"
+                    />
+                    <StatusTile
+                      label={select("مستردة", "Refunded")}
+                      value={formatNumber(analytics.ordersByStatus.refunded)}
+                      icon={RefreshCw}
+                      tone="orange"
+                    />
+                    <StatusTile
+                      label={select("تم تسليمها", "Fulfilled")}
+                      value={formatNumber(analytics.ordersByStatus.fulfilled)}
+                      icon={Package}
+                      tone="sky"
+                    />
+                    <StatusTile
+                      label={select("غير مسلمة", "Unfulfilled")}
+                      value={formatNumber(analytics.ordersByStatus.unfulfilled)}
+                      icon={ShoppingCart}
+                      tone="slate"
+                    />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-                  <div className="text-center p-6 bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-xl border border-yellow-200">
-                    <Clock className="mx-auto text-yellow-600 mb-3" size={32} />
-                    <p className="text-3xl font-bold text-yellow-700 mb-1">
-                      {analytics.ordersByStatus.pending}
-                    </p>
-                    <p className="text-sm text-yellow-600 font-medium">معلقة</p>
-                    <p className="text-xs text-yellow-500 mt-1">
-                      في انتظار الدفع
-                    </p>
-                  </div>
-
-                  <div className="text-center p-6 bg-gradient-to-br from-green-50 to-green-100 rounded-xl border border-green-200">
-                    <CheckCircle
-                      className="mx-auto text-green-600 mb-3"
-                      size={32}
+                <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                  <h2 className="text-xl font-bold text-slate-900">
+                    {select("أفضل العملاء والمنتجات", "Top customers and products")}
+                  </h2>
+                  <div className="mt-4 space-y-4">
+                    <MiniMetric
+                      label={select("أفضل المنتجات", "Top products")}
+                      value={formatNumber(analytics.topProducts.length)}
+                      helper={select("عدد المنتجات الظاهرة في القائمة", "Products shown in ranking")}
+                      icon={Package}
                     />
-                    <p className="text-3xl font-bold text-green-700 mb-1">
-                      {analytics.ordersByStatus.paid}
-                    </p>
-                    <p className="text-sm text-green-600 font-medium">مدفوعة</p>
-                    <p className="text-xs text-green-500 mt-1">
-                      تم الدفع بنجاح
-                    </p>
-                  </div>
-
-                  <div className="text-center p-6 bg-gradient-to-br from-red-50 to-red-100 rounded-xl border border-red-200">
-                    <XCircle className="mx-auto text-red-600 mb-3" size={32} />
-                    <p className="text-3xl font-bold text-red-700 mb-1">
-                      {analytics.ordersByStatus.cancelled}
-                    </p>
-                    <p className="text-sm text-red-600 font-medium">ملغية</p>
-                    <p className="text-xs text-red-500 mt-1">تم إلغاؤها</p>
-                  </div>
-
-                  <div className="text-center p-6 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border border-orange-200">
-                    <RefreshCw
-                      className="mx-auto text-orange-600 mb-3"
-                      size={32}
+                    <MiniMetric
+                      label={select("أفضل العملاء", "Top customers")}
+                      value={formatNumber(analytics.topCustomers.length)}
+                      helper={select("عدد العملاء الظاهرين في القائمة", "Customers shown in ranking")}
+                      icon={Users}
                     />
-                    <p className="text-3xl font-bold text-orange-700 mb-1">
-                      {analytics.ordersByStatus.refunded}
-                    </p>
-                    <p className="text-sm text-orange-600 font-medium">
-                      مستردة
-                    </p>
-                    <p className="text-xs text-orange-500 mt-1">تم الاسترداد</p>
-                  </div>
-
-                  <div className="text-center p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200">
-                    <Package className="mx-auto text-blue-600 mb-3" size={32} />
-                    <p className="text-3xl font-bold text-blue-700 mb-1">
-                      {analytics.ordersByStatus.fulfilled}
-                    </p>
-                    <p className="text-sm text-blue-600 font-medium">مُسلمة</p>
-                    <p className="text-xs text-blue-500 mt-1">تم التسليم</p>
-                  </div>
-
-                  <div className="text-center p-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200">
-                    <Clock className="mx-auto text-gray-600 mb-3" size={32} />
-                    <p className="text-3xl font-bold text-gray-700 mb-1">
-                      {analytics.ordersByStatus.unfulfilled}
-                    </p>
-                    <p className="text-sm text-gray-600 font-medium">
-                      غير مُسلمة
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      في انتظار التسليم
-                    </p>
                   </div>
                 </div>
+              </section>
 
-                {/* Order Status Chart Visualization */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
-                    <span>توزيع الطلبات</span>
-                    <span>إجمالي: {analytics.summary.totalOrders} طلب</span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
-                    <div className="h-full flex">
-                      <div
-                        className="bg-green-500"
-                        style={{
-                          width: `${percentage(
-                            analytics.ordersByStatus.paid,
-                            analytics.summary.totalOrders,
-                          )}%`,
-                        }}
-                      ></div>
-                      <div
-                        className="bg-yellow-500"
-                        style={{
-                          width: `${percentage(
-                            analytics.ordersByStatus.pending,
-                            analytics.summary.totalOrders,
-                          )}%`,
-                        }}
-                      ></div>
-                      <div
-                        className="bg-blue-500"
-                        style={{
-                          width: `${percentage(
-                            analytics.ordersByStatus.fulfilled,
-                            analytics.summary.totalOrders,
-                          )}%`,
-                        }}
-                      ></div>
-                      <div
-                        className="bg-red-500"
-                        style={{
-                          width: `${percentage(
-                            analytics.ordersByStatus.cancelled,
-                            analytics.summary.totalOrders,
-                          )}%`,
-                        }}
-                      ></div>
-                      <div
-                        className="bg-orange-500"
-                        style={{
-                          width: `${percentage(
-                            analytics.ordersByStatus.refunded,
-                            analytics.summary.totalOrders,
-                          )}%`,
-                        }}
-                      ></div>
+              <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+                <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-900">
+                        {select(
+                          analytics.meta.trendGranularity === "day"
+                            ? "اتجاه الأداء اليومي"
+                            : "اتجاه الأداء الشهري",
+                          analytics.meta.trendGranularity === "day"
+                            ? "Daily performance trend"
+                            : "Monthly performance trend",
+                        )}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {select(
+                          "الإيراد وعدد الطلبات عبر الفترة المختارة.",
+                          "Revenue and order count across the selected range.",
+                        )}
+                      </p>
+                    </div>
+                    <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                      {rangeLabel}
                     </div>
                   </div>
-                </div>
-              </div>
 
-              {/* Financial Overview */}
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                  <DollarSign size={24} />
-                  نظرة عامة مالية
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  <div className="text-center p-6 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-200">
-                    <DollarSign
-                      className="mx-auto text-green-600 mb-3"
-                      size={28}
-                    />
-                    <p className="text-sm text-gray-600 mb-1">
-                      إجمالي الإيرادات
-                    </p>
-                    <p className="text-2xl font-bold text-green-600 mb-2">
-                      {formatCurrency(analytics.financial.totalRevenue)}
-                    </p>
-                    <p className="text-xs text-green-500">من جميع المبيعات</p>
-                  </div>
+                  <div className="mt-5 space-y-3">
+                    {analytics.trends.length > 0 ? (
+                      analytics.trends.map((trend) => {
+                        const maxRevenue = Math.max(
+                          1,
+                          ...analytics.trends.map((item) => toNumber(item.revenue)),
+                        );
+                        const label = trend.periodStart
+                          ? formatDate(trend.periodStart, {
+                              year:
+                                analytics.meta.trendGranularity === "day"
+                                  ? undefined
+                                  : "numeric",
+                              month: "short",
+                              day:
+                                analytics.meta.trendGranularity === "day"
+                                  ? "numeric"
+                                  : undefined,
+                            })
+                          : trend.label;
 
-                  <div className="text-center p-6 bg-gradient-to-br from-red-50 to-pink-50 rounded-xl border border-red-200">
-                    <RefreshCw
-                      className="mx-auto text-red-600 mb-3"
-                      size={28}
-                    />
-                    <p className="text-sm text-gray-600 mb-1">
-                      المبالغ المستردة
-                    </p>
-                    <p className="text-2xl font-bold text-red-600 mb-2">
-                      {formatCurrency(analytics.financial.refundedAmount)}
-                    </p>
-                    <p className="text-xs text-red-500">استردادات العملاء</p>
-                  </div>
-
-                  <div className="text-center p-6 bg-gradient-to-br from-yellow-50 to-amber-50 rounded-xl border border-yellow-200">
-                    <Clock className="mx-auto text-yellow-600 mb-3" size={28} />
-                    <p className="text-sm text-gray-600 mb-1">
-                      المبالغ المعلقة
-                    </p>
-                    <p className="text-2xl font-bold text-yellow-600 mb-2">
-                      {formatCurrency(analytics.financial.pendingAmount)}
-                    </p>
-                    <p className="text-xs text-yellow-500">في انتظار الدفع</p>
-                  </div>
-
-                  <div className="text-center p-6 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border border-purple-200">
-                    <Target
-                      className="mx-auto text-purple-600 mb-3"
-                      size={28}
-                    />
-                    <p className="text-sm text-gray-600 mb-1">صافي الإيرادات</p>
-                    <p className="text-2xl font-bold text-purple-600 mb-2">
-                      {formatCurrency(analytics.financial.netRevenue)}
-                    </p>
-                    <p className="text-xs text-purple-500">الربح الصافي</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Monthly Trends */}
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                  <TrendingUp size={24} />
-                  الاتجاهات الشهرية (آخر 6 شهور)
-                </h3>
-                <div className="overflow-x-auto">
-                  <table className="data-table min-w-full">
-                    <thead>
-                      <tr className="border-b-2 border-gray-200">
-                        <th className="text-right py-4 px-4 font-semibold text-gray-700">
-                          الشهر
-                        </th>
-                        <th className="text-right py-4 px-4 font-semibold text-gray-700">
-                          الطلبات
-                        </th>
-                        <th className="text-right py-4 px-4 font-semibold text-gray-700">
-                          الإيرادات
-                        </th>
-                        <th className="text-right py-4 px-4 font-semibold text-gray-700">
-                          ملغية
-                        </th>
-                        <th className="text-right py-4 px-4 font-semibold text-gray-700">
-                          مستردة
-                        </th>
-                        <th className="text-right py-4 px-4 font-semibold text-gray-700">
-                          معدل النجاح
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {analytics.monthlyTrends.map((month, index) => (
-                        <tr
-                          key={index}
-                          className="border-b border-gray-100 hover:bg-gray-50 transition"
-                        >
-                          <td className="py-4 px-4 font-medium">
-                            {month.month}
-                          </td>
-                          <td className="py-4 px-4">
-                            {formatNumber(month.orders)}
-                          </td>
-                          <td className="py-4 px-4 text-green-600 font-semibold">
-                            {formatCurrency(month.revenue)}
-                          </td>
-                          <td className="py-4 px-4 text-red-600">
-                            {formatNumber(month.cancelled)}
-                          </td>
-                          <td className="py-4 px-4 text-orange-600">
-                            {formatNumber(month.refunded)}
-                          </td>
-                          <td className="py-4 px-4">
-                            <span
-                              className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                ((month.orders -
-                                  month.cancelled -
-                                  month.refunded) /
-                                  month.orders) *
-                                  100 >
-                                80
-                                  ? "bg-green-100 text-green-600"
-                                  : "bg-yellow-100 text-yellow-600"
-                              }`}
-                            >
-                              {month.orders > 0
-                                ? formatPercentage(
-                                    (
-                                      ((month.orders -
-                                        month.cancelled -
-                                        month.refunded) /
-                                        month.orders) *
-                                      100
-                                    ).toFixed(1),
-                                  )
-                                : "0%"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Top Products & Customers */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Top Products */}
-                <div className="bg-white rounded-xl shadow-lg p-6">
-                  <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                    <Award size={24} />
-                    أفضل المنتجات (حسب الإيرادات)
-                  </h3>
-                  <div className="space-y-4">
-                    {analytics.topProducts.slice(0, 8).map((product, index) => (
-                      <div
-                        key={
-                          product.product_id ||
-                          product.shopify_id ||
-                          `${product.title || "product"}-${index}`
-                        }
-                        className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition"
-                      >
-                        <div className="flex items-center gap-4">
-                          <span
-                            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white ${
-                              index === 0
-                                ? "bg-yellow-500"
-                                : index === 1
-                                  ? "bg-gray-400"
-                                  : index === 2
-                                    ? "bg-amber-600"
-                                    : "bg-blue-500"
-                            }`}
+                        return (
+                          <div
+                            key={`${trend.periodStart || trend.label}-${trend.orders}`}
+                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
                           >
-                            #{index + 1}
-                          </span>
-                          <div>
-                            <p className="font-medium text-gray-800">
-                              {product.title}
-                            </p>
-                            <p className="text-sm text-gray-600">
-                              {formatNumber(product.total_quantity)} قطعة •{" "}
-                              {formatNumber(product.orders_count)} طلب
-                            </p>
-                          </div>
-                        </div>
-                        <p className="font-bold text-green-600 text-lg">
-                          {formatCurrency(product.total_revenue)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Top Customers */}
-                <div className="bg-white rounded-xl shadow-lg p-6">
-                  <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                    <Users size={24} />
-                    أفضل العملاء (حسب الإنفاق)
-                  </h3>
-                  <div className="space-y-4">
-                    {analytics.topCustomers
-                      .slice(0, 8)
-                      .map((customer, index) => (
-                        <div
-                          key={
-                            customer.customer_id ||
-                            customer.email ||
-                            `${customer.name || "customer"}-${index}`
-                          }
-                          className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition"
-                        >
-                          <div className="flex items-center gap-4">
-                            <span
-                              className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white ${
-                                index === 0
-                                  ? "bg-purple-500"
-                                  : index === 1
-                                    ? "bg-indigo-500"
-                                    : index === 2
-                                      ? "bg-pink-500"
-                                      : "bg-blue-500"
-                              }`}
-                            >
-                              #{index + 1}
-                            </span>
-                            <div>
-                              <p className="font-medium text-gray-800">
-                                {customer.email}
-                              </p>
-                              <p className="text-sm text-gray-600">
-                                {formatNumber(customer.orders_count)} طلب
-                              </p>
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="font-semibold text-slate-900">{label}</p>
+                                <p className="mt-1 text-sm text-slate-500">
+                                  {select("طلبات", "Orders")}:{" "}
+                                  {formatNumber(trend.orders)}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-semibold text-emerald-700">
+                                  {formatCurrency(trend.revenue)}
+                                </p>
+                                <p className="mt-1 text-sm text-slate-500">
+                                  {select("مرتجع", "Refunded")}:{" "}
+                                  {formatNumber(trend.refunded)}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="mt-4 h-2 rounded-full bg-slate-200">
+                              <div
+                                className="h-2 rounded-full bg-sky-600"
+                                style={{
+                                  width: `${Math.max(
+                                    6,
+                                    (toNumber(trend.revenue) / maxRevenue) * 100,
+                                  )}%`,
+                                }}
+                              />
                             </div>
                           </div>
-                          <p className="font-bold text-green-600 text-lg">
-                            {formatCurrency(customer.total_spent)}
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })
+                    ) : (
+                      <EmptyState
+                        title={select("لا توجد بيانات", "No data")}
+                        description={select(
+                          "لا توجد طلبات داخل النطاق الحالي.",
+                          "No orders were found inside the current range.",
+                        )}
+                      />
+                    )}
                   </div>
                 </div>
-              </div>
-            </div>
-          )}
+
+                <div className="grid gap-6">
+                  <RankListCard
+                    title={select("أفضل المنتجات", "Top products")}
+                    emptyTitle={select("لا توجد منتجات", "No products")}
+                    emptyDescription={select(
+                      "لا توجد بيانات منتجات في النطاق الحالي.",
+                      "No product data is available for the current range.",
+                    )}
+                    rows={analytics.topProducts}
+                    renderRow={(product, index) => (
+                      <div
+                        key={`${product.title}-${index}`}
+                        className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-slate-900">
+                            {product.title}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {select("طلبات", "Orders")}:{" "}
+                            {formatNumber(product.orders_count)}
+                          </p>
+                        </div>
+                        <span className="text-sm font-semibold text-emerald-700">
+                          {formatCurrency(product.total_revenue)}
+                        </span>
+                      </div>
+                    )}
+                  />
+
+                  <RankListCard
+                    title={select("أفضل العملاء", "Top customers")}
+                    emptyTitle={select("لا يوجد عملاء", "No customers")}
+                    emptyDescription={select(
+                      "لا توجد بيانات عملاء في النطاق الحالي.",
+                      "No customer data is available for the current range.",
+                    )}
+                    rows={analytics.topCustomers}
+                    renderRow={(customer, index) => (
+                      <div
+                        key={`${customer.email || customer.name}-${index}`}
+                        className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-slate-900">
+                            {customer.name}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {customer.email || "-"} • {select("طلبات", "Orders")}:{" "}
+                            {formatNumber(customer.orders_count)}
+                          </p>
+                        </div>
+                        <span className="text-sm font-semibold text-sky-700">
+                          {formatCurrency(customer.total_spent)}
+                        </span>
+                      </div>
+                    )}
+                  />
+                </div>
+              </section>
+            </>
+          ) : null}
         </div>
       </main>
     </div>
   );
-};
+}
 
-export default Analytics;
+function KpiCard({ title, value, subtitle, icon: Icon, accent }) {
+  return (
+    <div className={`rounded-3xl bg-gradient-to-br ${accent} p-5 text-white shadow-sm`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm text-white/85">{title}</p>
+          <p className="mt-2 text-3xl font-bold">{value}</p>
+          <p className="mt-2 text-sm text-white/75">{subtitle}</p>
+        </div>
+        <div className="rounded-2xl bg-white/10 p-3">
+          <Icon size={24} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusTile({ label, value, icon: Icon, tone }) {
+  const toneClasses = {
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    amber: "border-amber-200 bg-amber-50 text-amber-700",
+    rose: "border-rose-200 bg-rose-50 text-rose-700",
+    orange: "border-orange-200 bg-orange-50 text-orange-700",
+    sky: "border-sky-200 bg-sky-50 text-sky-700",
+    slate: "border-slate-200 bg-slate-50 text-slate-700",
+  };
+
+  return (
+    <div className={`rounded-2xl border p-4 ${toneClasses[tone] || toneClasses.slate}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">{label}</p>
+          <p className="mt-2 text-2xl font-bold">{value}</p>
+        </div>
+        <Icon size={22} />
+      </div>
+    </div>
+  );
+}
+
+function MiniMetric({ label, value, helper, icon: Icon }) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm text-slate-500">{label}</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">{helper}</p>
+        </div>
+        <div className="rounded-2xl bg-white p-3 text-slate-700">
+          <Icon size={20} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RankListCard({
+  title,
+  rows,
+  renderRow,
+  emptyTitle,
+  emptyDescription,
+}) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+      <div className="mt-4 space-y-3">
+        {rows.length > 0 ? (
+          rows.map((row, index) => renderRow(row, index))
+        ) : (
+          <EmptyState title={emptyTitle} description={emptyDescription} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ title, description }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
+      <p className="font-semibold text-slate-800">{title}</p>
+      <p className="mt-2 text-sm text-slate-500">{description}</p>
+    </div>
+  );
+}

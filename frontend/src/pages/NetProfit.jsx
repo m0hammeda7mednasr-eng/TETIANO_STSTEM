@@ -35,6 +35,7 @@ const EMPTY_COST_FORM = {
 const COST_TYPE_LABELS = {
   ads: "Ads",
   shipping: "Shipping",
+  workshop: "Workshop",
   operations: "Operations",
   packaging: "Packaging",
   other: "Other",
@@ -42,6 +43,7 @@ const COST_TYPE_LABELS = {
 const COST_TYPE_DEFAULT_NAMES = {
   ads: "Ads Cost",
   shipping: "Shipping Cost",
+  workshop: "Workshop Cost",
   operations: "Operational Cost",
   packaging: "Packaging Cost",
   other: "Other Cost",
@@ -49,6 +51,7 @@ const COST_TYPE_DEFAULT_NAMES = {
 const COST_TYPE_GROUPS = {
   ads: "ads",
   shipping: "shipping",
+  workshop: "operations",
   operations: "operations",
   packaging: "other",
   other: "other",
@@ -122,11 +125,9 @@ export default function NetProfit() {
   const [message, setMessage] = useState({ type: "", text: "" });
   const [searchTerm, setSearchTerm] = useState("");
 
-  const [editingProductId, setEditingProductId] = useState(null);
-  const [editingCostPrice, setEditingCostPrice] = useState("");
-
   const [showCostModal, setShowCostModal] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState(null);
+  const [productCostDraft, setProductCostDraft] = useState("");
   const [editingOperationalCostId, setEditingOperationalCostId] =
     useState(null);
   const [newCost, setNewCost] = useState(EMPTY_COST_FORM);
@@ -211,20 +212,13 @@ export default function NetProfit() {
     [products, selectedProductId],
   );
 
-  const startEditCost = (product) => {
-    setEditingProductId(product.id);
-    setEditingCostPrice(
-      hasCostPrice(product.cost_price) ? String(product.cost_price) : "",
-    );
-  };
+  const selectedProductCosts = useMemo(
+    () => (selectedProductId ? operationalCostsByProduct.get(selectedProductId) || [] : []),
+    [operationalCostsByProduct, selectedProductId],
+  );
 
-  const cancelEditCost = () => {
-    setEditingProductId(null);
-    setEditingCostPrice("");
-  };
-
-  const saveCostPrice = async (productId) => {
-    const normalizedCostPrice = String(editingCostPrice || "").trim();
+  const saveProductCostPrice = async () => {
+    const normalizedCostPrice = String(productCostDraft || "").trim();
     const parsedCostPrice = parseFloat(normalizedCostPrice);
 
     if (!normalizedCostPrice) {
@@ -241,11 +235,10 @@ export default function NetProfit() {
     }
 
     try {
-      await api.put(`/dashboard/products/${productId}`, {
+      await api.put(`/dashboard/products/${selectedProductId}`, {
         cost_price: parsedCostPrice,
       });
       setMessage({ type: "success", text: "Cost price updated successfully" });
-      cancelEditCost();
       await fetchProfitability();
     } catch (error) {
       setMessage({
@@ -256,7 +249,11 @@ export default function NetProfit() {
   };
 
   const openCostModal = (productId, cost = null) => {
+    const product = products.find((item) => item.id === productId) || null;
     setSelectedProductId(productId);
+    setProductCostDraft(
+      hasCostPrice(product?.cost_price) ? String(product.cost_price) : "",
+    );
     setEditingOperationalCostId(cost?.id || null);
     setNewCost(
       cost
@@ -275,6 +272,12 @@ export default function NetProfit() {
   const closeCostModal = () => {
     setShowCostModal(false);
     setSelectedProductId(null);
+    setProductCostDraft("");
+    setEditingOperationalCostId(null);
+    setNewCost(EMPTY_COST_FORM);
+  };
+
+  const prepareNewOperationalCost = () => {
     setEditingOperationalCostId(null);
     setNewCost(EMPTY_COST_FORM);
   };
@@ -312,8 +315,8 @@ export default function NetProfit() {
           ? "Operational cost updated successfully"
           : "Operational cost added successfully",
       });
-      closeCostModal();
       await Promise.all([fetchProfitability(), fetchOperationalCosts()]);
+      prepareNewOperationalCost();
     } catch (error) {
       setMessage({
         type: "error",
@@ -485,7 +488,6 @@ export default function NetProfit() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {filteredProducts.map((product) => {
-                    const isEditing = editingProductId === product.id;
                     const opCosts = getProductCosts(product.id);
                     const breakdown = buildProductCostBreakdown(
                       product,
@@ -549,25 +551,13 @@ export default function NetProfit() {
                               <BreakdownMetric
                                 label="Product Cost"
                                 value={
-                                  isEditing ? (
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      value={editingCostPrice}
-                                      onChange={(e) =>
-                                        setEditingCostPrice(e.target.value)
-                                      }
-                                      className="w-full rounded-lg border px-2 py-1.5 text-right"
-                                    />
-                                  ) : productCostMissing ? (
-                                    "Missing"
-                                  ) : (
-                                    `${formatAmount(product.cost_price)} / unit`
-                                  )
+                                  productCostMissing
+                                    ? "Missing"
+                                    : `${formatAmount(product.cost_price)} / unit`
                                 }
                                 note={
                                   productCostMissing
-                                    ? "Set it to calculate the real product cost"
+                                    ? "Set it from Edit to calculate the real product cost"
                                     : `Base total ${formatAmount(product.total_cost)}`
                                 }
                                 valueClassName={
@@ -689,49 +679,31 @@ export default function NetProfit() {
                         </td>
                         <td className="px-4 py-4">
                           <div className="flex items-center justify-center gap-1">
-                            {isEditing ? (
-                              <>
-                                <button
-                                  onClick={() => saveCostPrice(product.id)}
-                                  className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"
-                                  title="Save"
-                                >
-                                  <Save size={16} />
-                                </button>
-                                <button
-                                  onClick={cancelEditCost}
-                                  className="p-1 text-gray-600 hover:bg-gray-100 rounded"
-                                  title="Cancel"
-                                >
-                                  <X size={16} />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => startEditCost(product)}
-                                  className={`rounded p-1 ${
-                                    productCostMissing
-                                      ? "text-amber-600 hover:bg-amber-50"
-                                      : "text-blue-600 hover:bg-blue-50"
-                                  }`}
-                                  title={
-                                    productCostMissing
-                                      ? "Set product cost"
-                                      : "Edit cost price"
-                                  }
-                                >
-                                  <Edit size={16} />
-                                </button>
-                                <button
-                                  onClick={() => openCostModal(product.id)}
-                                  className="rounded p-1 text-emerald-600 hover:bg-emerald-50"
-                                  title="Add operational cost"
-                                >
-                                  <Plus size={16} />
-                                </button>
-                              </>
-                            )}
+                            <button
+                              onClick={() => openCostModal(product.id)}
+                              className={`rounded p-1 ${
+                                productCostMissing
+                                  ? "text-amber-600 hover:bg-amber-50"
+                                  : "text-blue-600 hover:bg-blue-50"
+                              }`}
+                              title={
+                                productCostMissing
+                                  ? "Set product cost and manage costs"
+                                  : "Manage product cost and operational costs"
+                              }
+                            >
+                              <Edit size={16} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                openCostModal(product.id);
+                                prepareNewOperationalCost();
+                              }}
+                              className="rounded p-1 text-emerald-600 hover:bg-emerald-50"
+                              title="Add operational cost"
+                            >
+                              <Plus size={16} />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -752,91 +724,282 @@ export default function NetProfit() {
       </main>
 
       {showCostModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">
-              {editingOperationalCostId
-                ? "Edit Product Cost"
-                : "Add Product Cost"}
-            </h2>
-            {selectedProduct && (
-              <p className="mb-4 text-sm text-gray-500">
-                {selectedProduct.title}
-              </p>
-            )}
-            <div className="space-y-3">
-              <input
-                type="text"
-                placeholder="Cost name (optional)"
-                value={newCost.cost_name}
-                onChange={(e) =>
-                  setNewCost((prev) => ({ ...prev, cost_name: e.target.value }))
-                }
-                className="w-full px-3 py-2 border rounded-lg"
-              />
-              <select
-                value={newCost.cost_type}
-                onChange={(e) =>
-                  setNewCost((prev) => ({ ...prev, cost_type: e.target.value }))
-                }
-                className="w-full px-3 py-2 border rounded-lg"
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-5">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">
+                  Manage Product Costs
+                </h2>
+                {selectedProduct && (
+                  <p className="mt-1 text-sm text-gray-500">
+                    {selectedProduct.title}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={closeCostModal}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                title="Close"
               >
-                <option value="operations">Operations</option>
-                <option value="ads">Ads</option>
-                <option value="shipping">Shipping</option>
-                <option value="packaging">Packaging</option>
-                <option value="other">Other</option>
-              </select>
-              <input
-                type="number"
-                step="0.01"
-                placeholder="Amount"
-                value={newCost.amount}
-                onChange={(e) =>
-                  setNewCost((prev) => ({ ...prev, amount: e.target.value }))
-                }
-                className="w-full px-3 py-2 border rounded-lg"
-              />
-              <select
-                value={newCost.apply_to}
-                onChange={(e) =>
-                  setNewCost((prev) => ({ ...prev, apply_to: e.target.value }))
-                }
-                className="w-full px-3 py-2 border rounded-lg"
-              >
-                <option value="per_unit">Per Unit</option>
-                <option value="per_order">Per Order</option>
-                <option value="fixed">Fixed</option>
-              </select>
-              <p className="text-xs text-gray-500">
-                Per unit is multiplied by sold quantity. Per order is multiplied
-                by the number of orders.
-              </p>
-              <textarea
-                rows={3}
-                placeholder="Description"
-                value={newCost.description}
-                onChange={(e) =>
-                  setNewCost((prev) => ({
-                    ...prev,
-                    description: e.target.value,
-                  }))
-                }
-                className="w-full px-3 py-2 border rounded-lg"
-              />
+                <X size={18} />
+              </button>
             </div>
-            <div className="flex gap-2 mt-4">
+
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+                <section className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        Product Cost Per Unit
+                      </h3>
+                      <p className="mt-1 text-sm text-gray-500">
+                        Add the real product cost here if it is missing from the
+                        product data.
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        hasCostPrice(selectedProduct?.cost_price)
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      {hasCostPrice(selectedProduct?.cost_price)
+                        ? `Saved ${formatAmount(selectedProduct?.cost_price)} / unit`
+                        : "Cost missing"}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={productCostDraft}
+                      onChange={(e) => setProductCostDraft(e.target.value)}
+                      placeholder="Product cost"
+                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-right"
+                    />
+                    <button
+                      onClick={saveProductCostPrice}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700"
+                    >
+                      <Save size={16} />
+                      Save Product Cost
+                    </button>
+                  </div>
+
+                  {selectedProduct && (
+                    <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                      <InfoBadge
+                        label="Revenue"
+                        value={formatAmount(selectedProduct.total_revenue)}
+                      />
+                      <InfoBadge
+                        label="Sold Qty"
+                        value={String(selectedProduct.sold_quantity || 0)}
+                      />
+                      <InfoBadge
+                        label="Orders"
+                        value={String(selectedProduct.orders_count || 0)}
+                      />
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-2xl border border-gray-200 bg-white p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        Tracked Operational Costs
+                      </h3>
+                      <p className="mt-1 text-sm text-gray-500">
+                        Ads, workshop, shipping, packaging, and any extra
+                        product-level expenses.
+                      </p>
+                    </div>
+                    <button
+                      onClick={prepareNewOperationalCost}
+                      className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      <Plus size={14} />
+                      New Cost
+                    </button>
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    {selectedProductCosts.length > 0 ? (
+                      selectedProductCosts.map((cost) => (
+                        <div
+                          key={cost.id}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-gray-900">
+                              {cost.cost_name ||
+                                COST_TYPE_LABELS[cost.cost_type] ||
+                                "Operational Cost"}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500">
+                              {COST_TYPE_LABELS[cost.cost_type] || "Other"} |{" "}
+                              {getApplyToLabel(cost.apply_to)} |{" "}
+                              {formatAmount(cost.amount)}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-gray-800">
+                              {formatAmount(
+                                getAppliedCostTotal(
+                                  cost,
+                                  selectedProduct?.sold_quantity,
+                                  selectedProduct?.orders_count,
+                                ),
+                              )}
+                            </span>
+                            <button
+                              onClick={() =>
+                                openCostModal(selectedProductId, cost)
+                              }
+                              className="rounded p-1 text-blue-500 hover:bg-blue-50 hover:text-blue-700"
+                              title="Edit cost"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => deleteOperationalCost(cost.id)}
+                              className="rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-700"
+                              title="Delete cost"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+                        No operational costs added for this product yet.
+                      </p>
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              <section className="mt-5 rounded-2xl border border-gray-200 bg-white p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {editingOperationalCostId
+                        ? "Edit Selected Cost"
+                        : "Add New Operational Cost"}
+                    </h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Use this form to save ads, workshop, shipping, packaging,
+                      or any other cost for the current product.
+                    </p>
+                  </div>
+                  {editingOperationalCostId ? (
+                    <button
+                      onClick={prepareNewOperationalCost}
+                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      Add Another Cost
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  <input
+                    type="text"
+                    placeholder="Cost name (optional)"
+                    value={newCost.cost_name}
+                    onChange={(e) =>
+                      setNewCost((prev) => ({
+                        ...prev,
+                        cost_name: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3"
+                  />
+                  <select
+                    value={newCost.cost_type}
+                    onChange={(e) =>
+                      setNewCost((prev) => ({
+                        ...prev,
+                        cost_type: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3"
+                  >
+                    <option value="operations">Operations</option>
+                    <option value="ads">Ads</option>
+                    <option value="workshop">Workshop</option>
+                    <option value="shipping">Shipping</option>
+                    <option value="packaging">Packaging</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Amount"
+                    value={newCost.amount}
+                    onChange={(e) =>
+                      setNewCost((prev) => ({
+                        ...prev,
+                        amount: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3"
+                  />
+                  <select
+                    value={newCost.apply_to}
+                    onChange={(e) =>
+                      setNewCost((prev) => ({
+                        ...prev,
+                        apply_to: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3"
+                  >
+                    <option value="per_unit">Per Unit</option>
+                    <option value="per_order">Per Order</option>
+                    <option value="fixed">Fixed</option>
+                  </select>
+                  <textarea
+                    rows={4}
+                    placeholder="Description"
+                    value={newCost.description}
+                    onChange={(e) =>
+                      setNewCost((prev) => ({
+                        ...prev,
+                        description: e.target.value,
+                      }))
+                    }
+                    className="md:col-span-2 w-full rounded-xl border border-gray-200 px-4 py-3"
+                  />
+                </div>
+
+                <p className="mt-3 text-xs text-gray-500">
+                  Per unit is multiplied by sold quantity. Per order is
+                  multiplied by the number of orders. Fixed is applied once for
+                  the product.
+                </p>
+              </section>
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2 border-t border-gray-200 px-6 py-4">
               <button
                 onClick={saveOperationalCost}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2"
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 font-medium text-white hover:bg-blue-700"
               >
-                {editingOperationalCostId ? "Save Changes" : "Add"}
+                <Save size={16} />
+                {editingOperationalCostId ? "Save Cost" : "Add Cost"}
               </button>
               <button
                 onClick={closeCostModal}
-                className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg py-2"
+                className="rounded-xl bg-gray-200 px-4 py-2.5 font-medium text-gray-800 hover:bg-gray-300"
               >
-                Cancel
+                Done
               </button>
             </div>
           </div>
@@ -861,6 +1024,17 @@ function BreakdownMetric({
         {value}
       </div>
       <p className="mt-1 text-[11px] text-gray-500">{note}</p>
+    </div>
+  );
+}
+
+function InfoBadge({ label, value }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+        {label}
+      </p>
+      <p className="mt-2 text-lg font-semibold text-gray-900">{value}</p>
     </div>
   );
 }

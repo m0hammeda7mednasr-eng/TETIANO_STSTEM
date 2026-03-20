@@ -15,6 +15,7 @@ import {
   filterOrdersByScope,
   getOrderScopeFiltersCacheKey,
   hasActiveOrderScopeFilters,
+  normalizeOrderScopeFilters,
 } from "../helpers/orderScope.js";
 import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 
@@ -40,6 +41,7 @@ const LOW_STOCK_NOTIFICATION_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const LOW_STOCK_NOTIFICATION_MAX_PRODUCTS = 8;
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 const QUERY_RETRYABLE_ERROR_CODES = new Set(["57014"]);
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const dashboardStatsCache = new Map();
 const dashboardAnalyticsCache = new Map();
 const DASHBOARD_PRODUCT_COUNT_SELECT = [
@@ -246,6 +248,159 @@ const sortOrdersByCreatedAtDesc = (orders = []) =>
     (left, right) =>
       new Date(right?.created_at || 0) - new Date(left?.created_at || 0),
   );
+
+const cloneDate = (value) => new Date(value.getTime());
+
+const startOfDateDay = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const endOfDateDay = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
+
+const addDays = (value, amount) => {
+  const date = cloneDate(value);
+  date.setDate(date.getDate() + amount);
+  return date;
+};
+
+const addMonths = (value, amount) => {
+  const date = cloneDate(value);
+  date.setMonth(date.getMonth() + amount);
+  return date;
+};
+
+const startOfMonth = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+};
+
+const endOfMonth = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+};
+
+const resolveAnalyticsDateRange = (orders = [], rawFilters = {}) => {
+  const filters = normalizeOrderScopeFilters(rawFilters);
+  const orderDates = orders
+    .map((order) => new Date(order?.created_at || ""))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((left, right) => left.getTime() - right.getTime());
+  const latestOrderDate = orderDates[orderDates.length - 1] || new Date();
+
+  let from = filters.dateFrom ? startOfDateDay(filters.dateFrom) : null;
+  let to = filters.dateTo ? endOfDateDay(filters.dateTo) : null;
+
+  if (!to) {
+    to = endOfDateDay(latestOrderDate) || endOfDateDay(new Date());
+  }
+
+  if (!from) {
+    from = startOfDateDay(addMonths(to, -5)) || startOfDateDay(to);
+  }
+
+  if (from.getTime() > to.getTime()) {
+    return {
+      from: startOfDateDay(to),
+      to: endOfDateDay(from),
+    };
+  }
+
+  return { from, to };
+};
+
+const getAnalyticsTrendGranularity = (from, to) => {
+  const spanInDays = Math.max(
+    1,
+    Math.ceil((to.getTime() - from.getTime()) / DAY_IN_MS) + 1,
+  );
+
+  return spanInDays <= 31 ? "day" : "month";
+};
+
+const buildAnalyticsTrends = (orders = [], rawFilters = {}) => {
+  const { from, to } = resolveAnalyticsDateRange(orders, rawFilters);
+  const granularity = getAnalyticsTrendGranularity(from, to);
+  const buckets = [];
+
+  let cursor =
+    granularity === "day" ? startOfDateDay(from) : startOfMonth(from);
+  const lastBucketStart =
+    granularity === "day" ? startOfDateDay(to) : startOfMonth(to);
+
+  while (cursor && lastBucketStart && cursor.getTime() <= lastBucketStart.getTime()) {
+    const bucketStart = cloneDate(cursor);
+    const rawBucketEnd =
+      granularity === "day" ? endOfDateDay(bucketStart) : endOfMonth(bucketStart);
+    const bucketRangeStart =
+      bucketStart.getTime() < from.getTime() ? from : bucketStart;
+    const bucketRangeEnd =
+      rawBucketEnd.getTime() > to.getTime() ? to : rawBucketEnd;
+
+    const bucketOrders = orders.filter((order) => {
+      const createdAt = new Date(order?.created_at || "");
+      if (Number.isNaN(createdAt.getTime())) {
+        return false;
+      }
+
+      return (
+        createdAt.getTime() >= bucketRangeStart.getTime() &&
+        createdAt.getTime() <= bucketRangeEnd.getTime()
+      );
+    });
+
+    const bucketRevenue = bucketOrders.reduce(
+      (sum, order) => sum + getOrderNetSalesAmount(order),
+      0,
+    );
+
+    buckets.push({
+      label:
+        granularity === "day"
+          ? bucketStart.toISOString().slice(0, 10)
+          : bucketStart.toISOString().slice(0, 7),
+      period_start: bucketStart.toISOString(),
+      period_end: rawBucketEnd.toISOString(),
+      orders: bucketOrders.length,
+      revenue: parseFloat(bucketRevenue.toFixed(2)),
+      cancelled: bucketOrders.filter((order) => isCancelledOrder(order)).length,
+      refunded: bucketOrders.filter((order) => isRefundedOrder(order)).length,
+    });
+
+    cursor =
+      granularity === "day" ? addDays(cursor, 1) : addMonths(cursor, 1);
+  }
+
+  return {
+    trends: buckets,
+    granularity,
+    range: {
+      from: from.toISOString(),
+      to: to.toISOString(),
+    },
+  };
+};
 
 const getFreshCacheEntry = (cache, key) => {
   const entry = cache.get(key);
@@ -1121,6 +1276,7 @@ router.get(
     }
 
     try {
+      const orderScopeFilters = normalizeOrderScopeFilters(req.query || {});
       const [orders, customers] = await Promise.all([
         getScopedRowsBatched(req, Order, {
           selects: DASHBOARD_ORDER_ANALYTICS_SELECTS,
@@ -1132,7 +1288,7 @@ router.get(
         }),
       ]);
 
-      const allOrders = orders || [];
+      const allOrders = filterOrdersByScope(orders || [], orderScopeFilters);
       const paidOrders = allOrders.filter((order) => isPaidOrder(order));
       const refundedOrders = allOrders.filter((order) =>
         isRefundedOrder(order),
@@ -1178,34 +1334,7 @@ router.get(
       const pendingAmount = allOrders
         .filter((order) => isPendingOrder(order))
         .reduce((sum, order) => sum + getOrderGrossAmount(order), 0);
-
-      const now = new Date();
-      const monthlyTrends = [];
-      for (let i = 5; i >= 0; i -= 1) {
-        const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-
-        const monthOrders = allOrders.filter((order) => {
-          const created = new Date(order.created_at);
-          return created >= start && created <= end;
-        });
-
-        const monthRevenue = monthOrders.reduce(
-          (sum, order) => sum + getOrderNetSalesAmount(order),
-          0,
-        );
-
-        monthlyTrends.push({
-          month: start.toLocaleDateString("ar-EG", {
-            month: "long",
-            year: "numeric",
-          }),
-          orders: monthOrders.length,
-          revenue: parseFloat(monthRevenue.toFixed(2)),
-          cancelled: monthOrders.filter((o) => isCancelledOrder(o)).length,
-          refunded: monthOrders.filter((o) => isRefundedOrder(o)).length,
-        });
-      }
+      const timeline = buildAnalyticsTrends(allOrders, orderScopeFilters);
 
       const productRevenueMap = new Map();
       revenueOrders.forEach((order) => {
@@ -1320,6 +1449,12 @@ router.get(
                 )
               : 0,
         },
+        meta: {
+          filters: orderScopeFilters,
+          trendGranularity: timeline.granularity,
+          dateRange: timeline.range,
+        },
+        monthlyTrends: timeline.trends,
       };
 
       rememberCacheEntry(dashboardAnalyticsCache, cacheKey, payload);

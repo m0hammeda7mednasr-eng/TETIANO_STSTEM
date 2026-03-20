@@ -40,6 +40,8 @@ import {
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
 const ORDERS_PAGE_SIZE = 100;
 const ORDERS_VISIBLE_LIMIT = 4500;
+const ORDERS_PER_PAGE = 50;
+const ORDERS_PAGINATION_WINDOW = 5;
 const ORDERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const CURRENCY_LABEL = "LE";
 
@@ -385,6 +387,7 @@ export default function Orders() {
   const [orders, setOrders] = useState(() => initialCachedSnapshot.rows);
   const [missingOrderIds, setMissingOrderIds] = useState([]);
   const [filters, setFilters] = useState(INITIAL_FILTERS);
+  const [currentPage, setCurrentPage] = useState(1);
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
   const [isExportPanelOpen, setIsExportPanelOpen] = useState(false);
   const [, setLoading] = useState(false);
@@ -844,6 +847,59 @@ export default function Orders() {
     };
   }, [filteredOrders]);
 
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PER_PAGE)),
+    [filteredOrders.length],
+  );
+
+  const paginatedOrders = useMemo(() => {
+    const safePage = Math.min(currentPage, totalPages);
+    const startIndex = (safePage - 1) * ORDERS_PER_PAGE;
+    return filteredOrders.slice(startIndex, startIndex + ORDERS_PER_PAGE);
+  }, [currentPage, filteredOrders, totalPages]);
+
+  const paginationWindow = useMemo(() => {
+    const safePage = Math.min(currentPage, totalPages);
+    const halfWindow = Math.floor(ORDERS_PAGINATION_WINDOW / 2);
+    let startPage = Math.max(1, safePage - halfWindow);
+    let endPage = Math.min(totalPages, startPage + ORDERS_PAGINATION_WINDOW - 1);
+
+    if (endPage - startPage + 1 < ORDERS_PAGINATION_WINDOW) {
+      startPage = Math.max(1, endPage - ORDERS_PAGINATION_WINDOW + 1);
+    }
+
+    const pages = [];
+    for (let page = startPage; page <= endPage; page += 1) {
+      pages.push(page);
+    }
+
+    return {
+      startPage,
+      endPage,
+      pages,
+    };
+  }, [currentPage, totalPages]);
+
+  const visibleRange = useMemo(() => {
+    if (filteredOrders.length === 0) {
+      return { start: 0, end: 0 };
+    }
+
+    const safePage = Math.min(currentPage, totalPages);
+    const start = (safePage - 1) * ORDERS_PER_PAGE + 1;
+    const end = Math.min(filteredOrders.length, safePage * ORDERS_PER_PAGE);
+
+    return { start, end };
+  }, [currentPage, filteredOrders.length, totalPages]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(Math.max(page, 1), totalPages));
+  }, [totalPages]);
+
   const handleFilterChange = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
@@ -952,11 +1008,11 @@ export default function Orders() {
 
     return (
       <div className="flex items-center gap-3">
-        <div className="flex -space-x-2">
-          {previews.slice(0, 3).map((item, index) => (
+        <div className="grid w-[92px] shrink-0 grid-cols-2 gap-1">
+          {previews.slice(0, 4).map((item, index) => (
             <div
               key={`${item.id || item.title || "item"}-${index}`}
-              className="h-10 w-10 overflow-hidden rounded-full border-2 border-white bg-slate-100 shadow-sm"
+              className="relative h-10 w-10 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-sm"
               title={item.title || "Order item"}
             >
               {String(item.image_url || "").trim() ? (
@@ -967,22 +1023,30 @@ export default function Orders() {
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-slate-400">
-                  <Package size={16} />
+                  <Package size={15} />
                 </div>
               )}
             </div>
           ))}
+          {previews.length > 4 ? (
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 text-xs font-semibold text-slate-600">
+              +{previews.length - 4}
+            </div>
+          ) : null}
         </div>
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-800">
-            {toNumber(order.items_count).toLocaleString()} item(s)
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-800">
+            {select(
+              `${toNumber(order.items_count).toLocaleString()} عنصر`,
+              `${toNumber(order.items_count).toLocaleString()} item(s)`,
+            )}
           </p>
-          <p className="truncate text-xs text-slate-500">
+          <p className="line-clamp-2 text-xs leading-5 text-slate-500">
             {previews
-              .slice(0, 2)
+              .slice(0, 3)
               .map((item) => item.title)
               .filter(Boolean)
-              .join(", ")}
+              .join(" • ")}
           </p>
         </div>
       </div>
@@ -1371,6 +1435,12 @@ export default function Orders() {
                   {filteredOrders.length.toLocaleString()} filtered orders,{" "}
                   {selectedOrders.length.toLocaleString()} selected for export.
                 </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {select(
+                    `الصفحة ${currentPage.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} من ${totalPages.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} - 50 طلب في الصفحة`,
+                    `Page ${currentPage.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} of ${totalPages.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} - 50 orders per page`,
+                  )}
+                </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -1467,8 +1537,8 @@ export default function Orders() {
                         )}
                       </td>
                     </tr>
-                  ) : filteredOrders.length > 0 ? (
-                    filteredOrders.map((order) => (
+                  ) : paginatedOrders.length > 0 ? (
+                    paginatedOrders.map((order) => (
                       <tr
                         key={order.id}
                         className="border-b hover:bg-slate-50 transition cursor-pointer"
@@ -1575,8 +1645,8 @@ export default function Orders() {
                 <div className="px-5 py-10 text-center text-slate-500">
                   Latest orders will appear here automatically.
                 </div>
-              ) : filteredOrders.length > 0 ? (
-                filteredOrders.map((order) => (
+              ) : paginatedOrders.length > 0 ? (
+                paginatedOrders.map((order) => (
                   <article key={order.id} className="p-4 space-y-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -1667,6 +1737,84 @@ export default function Orders() {
                 </div>
               )}
             </div>
+
+            {filteredOrders.length > 0 ? (
+              <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-slate-600">
+                  {select(
+                    `عرض ${visibleRange.start.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} - ${visibleRange.end.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} من ${filteredOrders.length.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} طلب`,
+                    `Showing ${visibleRange.start.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} - ${visibleRange.end.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} of ${filteredOrders.length.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")} orders`,
+                  )}
+                </p>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                    disabled={currentPage <= 1}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {select("السابق", "Previous")}
+                  </button>
+
+                  {paginationWindow.startPage > 1 ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(1)}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        1
+                      </button>
+                      {paginationWindow.startPage > 2 ? (
+                        <span className="px-1 text-sm text-slate-400">...</span>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  {paginationWindow.pages.map((pageNumber) => (
+                    <button
+                      key={pageNumber}
+                      type="button"
+                      onClick={() => setCurrentPage(pageNumber)}
+                      className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                        pageNumber === currentPage
+                          ? "bg-sky-700 text-white shadow-sm"
+                          : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {pageNumber.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")}
+                    </button>
+                  ))}
+
+                  {paginationWindow.endPage < totalPages ? (
+                    <>
+                      {paginationWindow.endPage < totalPages - 1 ? (
+                        <span className="px-1 text-sm text-slate-400">...</span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(totalPages)}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        {totalPages.toLocaleString(locale === "ar" ? "ar-EG" : "en-US")}
+                      </button>
+                    </>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCurrentPage((page) => Math.min(totalPages, page + 1))
+                    }
+                    disabled={currentPage >= totalPages}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {select("التالي", "Next")}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </main>

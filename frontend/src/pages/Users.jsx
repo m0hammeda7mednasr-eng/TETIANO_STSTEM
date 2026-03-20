@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  CheckCircle2,
   FileText,
   Shield,
-  Trash2,
   UserPlus,
   Users as UsersIcon,
   X,
-  XCircle,
 } from "lucide-react";
 import api, { getErrorMessage } from "../utils/api";
 import Sidebar from "../components/Sidebar";

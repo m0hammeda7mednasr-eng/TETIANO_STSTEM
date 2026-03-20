@@ -525,7 +525,7 @@ export default function Orders() {
     return () => {
       active = false;
     };
-  }, [deferredSearchTerm, select]);
+  }, [deferredSearchTerm, formatNumber, select]);
 
   useEffect(() => {
     let active = true;
@@ -551,7 +551,7 @@ export default function Orders() {
     return () => {
       active = false;
     };
-  }, [cacheKey]);
+  }, [cacheKey, formatNumber]);
 
   const fetchMissingOrderIds = useCallback(async () => {
     if (missingFetchPromiseRef.current) {
@@ -669,7 +669,7 @@ export default function Orders() {
     } finally {
       fetchPromiseRef.current = null;
     }
-  }, [cacheKey, fetchMissingOrderIds]);
+  }, [cacheKey, fetchMissingOrderIds, formatNumber]);
 
   const scheduleSilentRefresh = useCallback(() => {
     if (refreshTimeoutRef.current) {
@@ -1042,6 +1042,7 @@ export default function Orders() {
     );
   }, [
     deferredSearchTerm,
+    formatNumber,
     fullHistorySearchLoading,
     fullHistorySearchOrders,
     select,

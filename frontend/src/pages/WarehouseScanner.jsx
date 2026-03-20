@@ -17,11 +17,6 @@ import { formatDateTime, formatNumber } from "../utils/helpers";
 import { extractArray, extractObject } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
-const toNumber = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
 const formatCount = (value) =>
   formatNumber(value, { maximumFractionDigits: 0 });
 

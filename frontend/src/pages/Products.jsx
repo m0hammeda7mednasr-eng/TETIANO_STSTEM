@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   CheckCircle,
@@ -21,11 +21,9 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { SkeletonBlock } from "../components/Common";
-import ProductEditModal from "../components/ProductEditModal";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import {
-  markSharedDataUpdated,
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
@@ -144,24 +142,7 @@ const isProductsRelatedSharedUpdate = (event) => {
   return source.includes("/shopify/products") || source.includes("/products/");
 };
 
-const isEditableSingleVariant = (variantRow) => !variantRow.has_multiple_variants;
-
-const mapVariantRowToEditableProduct = (variantRow) => ({
-  id: variantRow.id,
-  title:
-    variantRow.variant_title === "Default Variant"
-      ? variantRow.product_title
-      : `${variantRow.product_title} / ${variantRow.variant_title}`,
-  price: variantRow.price,
-  cost_price: variantRow.cost_price,
-  sku: variantRow.sku || "",
-  inventory_quantity: variantRow.inventory_quantity,
-  total_inventory: variantRow.inventory_quantity,
-  has_multiple_variants: false,
-});
-
 export default function Products() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { isAdmin, hasPermission } = useAuth();
   const canEditProducts = hasPermission("can_edit_products");
@@ -182,7 +163,6 @@ export default function Products() {
     resolveFiltersFromSearchParams(searchParams),
   );
   const [, setLoading] = useState(false);
-  const [editingProduct, setEditingProduct] = useState(null);
   const [notification, setNotification] = useState(null);
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(
@@ -642,79 +622,6 @@ export default function Products() {
     return chips;
   }, [filters, isAdmin]);
 
-  const handleEditProduct = async (productId, updates) => {
-    try {
-      setProducts((prevProducts) =>
-        prevProducts.map((product) => {
-          if (product.id !== productId) {
-            return product;
-          }
-
-          const nextProduct = {
-            ...product,
-            price: updates.price,
-            ...(updates.sku !== undefined
-              ? { sku: String(updates.sku || "").trim() }
-              : {}),
-            ...(isAdmin && updates.cost_price !== undefined
-              ? { cost_price: updates.cost_price }
-              : {}),
-            ...(updates.inventory !== undefined
-              ? {
-                  inventory_quantity: updates.inventory,
-                  total_inventory: updates.inventory,
-                }
-              : {}),
-            pending_sync: true,
-          };
-
-          if (Array.isArray(nextProduct.variants) && nextProduct.variants.length === 1) {
-            nextProduct.variants = nextProduct.variants.map((variant) => ({
-              ...variant,
-              price: updates.price,
-              ...(updates.sku !== undefined
-                ? { sku: String(updates.sku || "").trim() }
-                : {}),
-              ...(isAdmin && updates.cost_price !== undefined
-                ? { cost_price: updates.cost_price }
-                : {}),
-              ...(updates.inventory !== undefined
-                ? { inventory_quantity: updates.inventory }
-                : {}),
-            }));
-          }
-
-          return nextProduct;
-        }),
-      );
-
-      const payload = {
-        price: updates.price,
-        sku: String(updates.sku || "").trim(),
-      };
-      if (updates.inventory !== undefined) {
-        payload.inventory = updates.inventory;
-      }
-      if (isAdmin && updates.cost_price !== undefined) {
-        payload.cost_price = updates.cost_price;
-      }
-
-      const response = await api.post(`/shopify/products/${productId}/update`, payload);
-      if (response.data.success) {
-        showNotification("Product updated and queued for sync", "success");
-        markSharedDataUpdated();
-        fetchProducts({ silent: true });
-      }
-    } catch (requestError) {
-      console.error("Error updating product:", requestError);
-      showNotification(
-        requestError.response?.data?.error || "Failed to update product",
-        "error",
-      );
-      fetchProducts({ silent: true });
-    }
-  };
-
   const handleFilterChange = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
@@ -736,14 +643,18 @@ export default function Products() {
     return null;
   };
 
-  const openVariantEditor = (variant) => {
-    if (!isEditableSingleVariant(variant)) {
-      navigate(`/products/${variant.id}`);
+  const openProductWorkspace = useCallback((productId, mode = "view") => {
+    if (!productId) {
       return;
     }
 
-    setEditingProduct(mapVariantRowToEditableProduct(variant));
-  };
+    const href =
+      mode === "edit"
+        ? `/products/${productId}?mode=edit`
+        : `/products/${productId}`;
+
+    window.open(href, "_blank", "noopener,noreferrer");
+  }, []);
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -1276,7 +1187,7 @@ export default function Products() {
 
                     <div className="flex gap-2">
                       <button
-                        onClick={() => navigate(`/products/${variant.id}`)}
+                        onClick={() => openProductWorkspace(variant.id)}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg flex items-center justify-center gap-2 text-sm"
                       >
                         <Eye size={14} />
@@ -1284,11 +1195,11 @@ export default function Products() {
                       </button>
                       {canEditProducts && (
                         <button
-                          onClick={() => openVariantEditor(variant)}
+                          onClick={() => openProductWorkspace(variant.id, "edit")}
                           className="flex-1 bg-sky-600 hover:bg-sky-700 text-white py-2 rounded-lg flex items-center justify-center gap-2 text-sm"
                         >
                           <Edit2 size={14} />
-                          {variant.has_multiple_variants ? "Manage" : "Edit"}
+                          Edit
                         </button>
                       )}
                     </div>
@@ -1306,14 +1217,6 @@ export default function Products() {
         </div>
       </main>
 
-      {editingProduct && canEditProducts && (
-        <ProductEditModal
-          product={editingProduct}
-          onClose={() => setEditingProduct(null)}
-          onSave={(updates) => handleEditProduct(editingProduct.id, updates)}
-          canEditCost={isAdmin}
-        />
-      )}
     </div>
   );
 }

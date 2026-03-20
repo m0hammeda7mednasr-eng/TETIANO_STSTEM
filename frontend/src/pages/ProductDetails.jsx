@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import {
   ArrowLeft,
@@ -95,6 +95,7 @@ const cloneVariantDrafts = (variants = []) =>
 export default function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isAdmin, hasPermission } = useAuth();
   const { select, currencyLabel } = useLocale();
   const canEditProducts = hasPermission("can_edit_products");
@@ -156,6 +157,20 @@ export default function ProductDetails() {
   useEffect(() => {
     fetchProductDetails();
   }, [id, fetchProductDetails]);
+
+  useEffect(() => {
+    if (!product || searchParams.get("mode") !== "edit") {
+      return;
+    }
+
+    if (canEditProducts) {
+      setEditing(true);
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete("mode");
+    setSearchParams(nextSearchParams, { replace: true });
+  }, [canEditProducts, product, searchParams, setSearchParams]);
 
   const handleSave = async () => {
     if (!canEditProducts) return;

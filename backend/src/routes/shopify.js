@@ -39,6 +39,7 @@ const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 200;
 const ORDER_LIST_PAGE_LIMIT = 4500;
 const ORDER_LIST_MAX_VISIBLE = 4500;
+const ORDER_SEARCH_SHOPIFY_FALLBACK_LIMIT = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MISSING_ORDER_GRACE_MS = 3 * DAY_MS;
 const MISSING_ORDER_ESCALATION_MS = 6 * DAY_MS;
@@ -1761,6 +1762,57 @@ const getFallbackOrdersPage = async (req) => {
   );
 };
 
+const searchOrdersFromShopifyFallback = async ({
+  req,
+  requestedStoreId,
+  isAdmin,
+  searchTerm,
+}) => {
+  const normalizedSearchTerm = String(searchTerm || "").trim();
+  if (!normalizedSearchTerm) {
+    return [];
+  }
+
+  const tokenData = await resolveSyncToken({
+    userId: req.user.id,
+    requestedStoreId,
+    isAdmin,
+  });
+
+  if (!tokenData?.access_token || !tokenData?.shop) {
+    return [];
+  }
+
+  const fallbackOrders = await ShopifyService.searchOrdersFromShopify(
+    tokenData.access_token,
+    tokenData.shop,
+    normalizedSearchTerm,
+    {
+      limit: ORDER_SEARCH_SHOPIFY_FALLBACK_LIMIT,
+    },
+  );
+
+  if (fallbackOrders.length === 0) {
+    return [];
+  }
+
+  const ordersWithScope = fallbackOrders.map((order) => ({
+    ...order,
+    user_id: tokenData.user_id || req.user.id,
+    store_id: requestedStoreId || tokenData.store_id || null,
+  }));
+
+  const persistedResult = await Order.updateMultiple(ordersWithScope);
+  if (persistedResult?.error) {
+    console.warn(
+      "Shopify fallback order persistence warning:",
+      persistedResult.error?.message || persistedResult.error,
+    );
+  }
+
+  return ordersWithScope;
+};
+
 const getFallbackProductsPage = async (req) => {
   const scopedRowsResult = await getScopedEntityRows(req, Product);
   if (scopedRowsResult?.error) {
@@ -3477,7 +3529,7 @@ router.get(
             .json({ error: scopedRowsResult.error.message || "Failed to search orders" });
         }
 
-        const matchedOrders = applyOrdersQueryFilters(
+        let matchedOrders = applyOrdersQueryFilters(
           scopedRowsResult?.data || [],
           req.query,
           {
@@ -3485,6 +3537,35 @@ router.get(
             paginate: false,
           },
         ).map((order) => buildOrderListItem(order));
+        let searchScope = "full_history";
+
+        if (matchedOrders.length === 0 && String(req.query.search || "").trim()) {
+          try {
+            const shopifyFallbackOrders = await searchOrdersFromShopifyFallback({
+              req,
+              requestedStoreId,
+              isAdmin,
+              searchTerm: req.query.search,
+            });
+
+            if (shopifyFallbackOrders.length > 0) {
+              matchedOrders = applyOrdersQueryFilters(
+                shopifyFallbackOrders,
+                req.query,
+                {
+                  maxVisible: null,
+                  paginate: false,
+                },
+              ).map((order) => buildOrderListItem(order));
+              searchScope = "shopify_fallback";
+            }
+          } catch (fallbackError) {
+            console.error(
+              "Error fetching on-demand Shopify order search fallback:",
+              fallbackError,
+            );
+          }
+        }
 
         if (liveSyncResult) {
           res.setHeader(
@@ -3493,11 +3574,11 @@ router.get(
           );
         }
 
-        res.setHeader("X-Orders-Search-Scope", "full_history");
+        res.setHeader("X-Orders-Search-Scope", searchScope);
         return res.json(
           buildSlicedPaginatedCollection(matchedOrders, pagination, {
             meta: {
-              search_scope: "full_history",
+              search_scope: searchScope,
             },
           }),
         );

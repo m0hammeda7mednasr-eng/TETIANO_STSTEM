@@ -195,4 +195,109 @@ describe("ShopifyService", () => {
       );
     });
   });
+
+  describe("searchOrdersFromShopify", () => {
+    it("falls back from hash-prefixed order search terms and hydrates the full Shopify order", async () => {
+      const postSpy = jest.spyOn(axios, "post").mockImplementation((url, body) => {
+        if (!url.includes("/graphql.json")) {
+          return Promise.resolve({ data: { data: { orders: { edges: [] } } } });
+        }
+
+        if (body?.variables?.query === "#1001") {
+          return Promise.resolve({
+            data: {
+              data: {
+                orders: {
+                  edges: [],
+                },
+              },
+            },
+          });
+        }
+
+        if (body?.variables?.query === "1001") {
+          return Promise.resolve({
+            data: {
+              data: {
+                orders: {
+                  edges: [
+                    {
+                      node: {
+                        legacyResourceId: "12345",
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          });
+        }
+
+        return Promise.resolve({
+          data: {
+            data: {
+              orders: {
+                edges: [],
+              },
+            },
+          },
+        });
+      });
+      const getSpy = jest.spyOn(axios, "get").mockResolvedValue({
+        data: {
+          order: {
+            id: "12345",
+            order_number: 1001,
+            line_items: [],
+            customer: {
+              email: "order@test.com",
+            },
+          },
+        },
+      });
+
+      const result = await ShopifyService.searchOrdersFromShopify(
+        accessToken,
+        shop,
+        "#1001",
+      );
+
+      expect(postSpy).toHaveBeenCalledTimes(2);
+      expect(postSpy.mock.calls[0][1]?.variables?.query).toBe("#1001");
+      expect(postSpy.mock.calls[1][1]?.variables?.query).toBe("1001");
+      expect(getSpy).toHaveBeenCalledWith(
+        `https://${shop}/admin/api/2024-01/orders/12345.json?status=any`,
+        expect.any(Object),
+      );
+      expect(result).toEqual([
+        expect.objectContaining({
+          shopify_id: "12345",
+          order_number: 1001,
+          customer_email: "order@test.com",
+        }),
+      ]);
+    });
+
+    it("returns an empty array when Shopify search finds no matching orders", async () => {
+      jest.spyOn(axios, "post").mockResolvedValue({
+        data: {
+          data: {
+            orders: {
+              edges: [],
+            },
+          },
+        },
+      });
+      const getSpy = jest.spyOn(axios, "get");
+
+      const result = await ShopifyService.searchOrdersFromShopify(
+        accessToken,
+        shop,
+        "missing-order",
+      );
+
+      expect(result).toEqual([]);
+      expect(getSpy).not.toHaveBeenCalled();
+    });
+  });
 });

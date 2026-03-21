@@ -2,8 +2,17 @@ import axios from "axios";
 import { Product, Order, Customer } from "../models/index.js";
 import { extractCustomerPhone } from "../helpers/customerContact.js";
 
+const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
+
 export class ShopifyService {
   static #SHOPIFY_API_TIMEOUT_MS = 15000;
+
+  static #buildShopifyHeaders(accessToken) {
+    return {
+      "X-Shopify-Access-Token": accessToken,
+      "Content-Type": "application/json",
+    };
+  }
 
   static #getProductVariants(product = {}) {
     return Array.isArray(product?.variants) ? product.variants : [];
@@ -59,15 +68,16 @@ export class ShopifyService {
       query.set(key, String(value));
     });
 
-    return `https://${shop}/admin/api/2024-01/${resource}.json?${query.toString()}`;
+    return `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/${resource}.json?${query.toString()}`;
+  }
+
+  static #buildGraphQlUrl(shop) {
+    return `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
   }
 
   static async #fetchPage(url, accessToken) {
     const response = await axios.get(url, {
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
-      },
+      headers: this.#buildShopifyHeaders(accessToken),
       timeout: this.#SHOPIFY_API_TIMEOUT_MS,
     });
 
@@ -80,6 +90,65 @@ export class ShopifyService {
       items,
       nextPageUrl: this.#extractNextPageUrl(response.headers?.link),
     };
+  }
+
+  static async #fetchGraphQl(shop, accessToken, query, variables = {}) {
+    const response = await axios.post(
+      this.#buildGraphQlUrl(shop),
+      {
+        query,
+        variables,
+      },
+      {
+        headers: this.#buildShopifyHeaders(accessToken),
+        timeout: this.#SHOPIFY_API_TIMEOUT_MS,
+      },
+    );
+
+    if (Array.isArray(response.data?.errors) && response.data.errors.length > 0) {
+      throw new Error(
+        response.data.errors
+          .map((error) => error?.message || "Unknown Shopify GraphQL error")
+          .join("; "),
+      );
+    }
+
+    return response.data?.data || {};
+  }
+
+  static async #fetchOrderById(accessToken, shop, orderId) {
+    const response = await axios.get(
+      this.#buildResourceUrl(shop, `orders/${orderId}`, {
+        status: "any",
+      }),
+      {
+        headers: this.#buildShopifyHeaders(accessToken),
+        timeout: this.#SHOPIFY_API_TIMEOUT_MS,
+      },
+    );
+
+    return response.data?.order || null;
+  }
+
+  static #buildOrderSearchTerms(searchTerm) {
+    const trimmedSearch = String(searchTerm || "").trim();
+    if (!trimmedSearch) {
+      return [];
+    }
+
+    const searchWithoutHashes = trimmedSearch.replace(/^#+/, "").trim();
+    return Array.from(
+      new Set(
+        [
+          trimmedSearch,
+          searchWithoutHashes && searchWithoutHashes !== trimmedSearch
+            ? searchWithoutHashes
+            : null,
+          searchWithoutHashes ? `#${searchWithoutHashes}` : null,
+          /[\s@]/.test(trimmedSearch) ? `"${trimmedSearch}"` : null,
+        ].filter(Boolean),
+      ),
+    );
   }
 
   static #mapProductFromShopify(product = {}) {
@@ -330,6 +399,79 @@ export class ShopifyService {
       console.error("Error details:", error.response?.data || error);
       throw error;
     }
+  }
+
+  static async searchOrdersFromShopify(
+    accessToken,
+    shop,
+    searchTerm,
+    options = {},
+  ) {
+    const first = Math.max(1, parseInt(options?.limit, 10) || 10);
+    const searchTerms = this.#buildOrderSearchTerms(searchTerm);
+
+    if (searchTerms.length === 0) {
+      return [];
+    }
+
+    const SEARCH_ORDERS_QUERY = `
+      query SearchOrders($first: Int!, $query: String!) {
+        orders(first: $first, query: $query, reverse: true, sortKey: PROCESSED_AT) {
+          edges {
+            node {
+              legacyResourceId
+            }
+          }
+        }
+      }
+    `;
+
+    const matchedOrderIds = [];
+    const seenOrderIds = new Set();
+
+    for (const currentSearchTerm of searchTerms) {
+      const payload = await this.#fetchGraphQl(
+        shop,
+        accessToken,
+        SEARCH_ORDERS_QUERY,
+        {
+          first,
+          query: currentSearchTerm,
+        },
+      );
+
+      const edges = Array.isArray(payload?.orders?.edges)
+        ? payload.orders.edges
+        : [];
+
+      edges.forEach((edge) => {
+        const legacyResourceId = String(
+          edge?.node?.legacyResourceId || "",
+        ).trim();
+        if (!legacyResourceId || seenOrderIds.has(legacyResourceId)) {
+          return;
+        }
+
+        seenOrderIds.add(legacyResourceId);
+        matchedOrderIds.push(legacyResourceId);
+      });
+
+      if (matchedOrderIds.length > 0) {
+        break;
+      }
+    }
+
+    if (matchedOrderIds.length === 0) {
+      return [];
+    }
+
+    const orders = await Promise.all(
+      matchedOrderIds.slice(0, first).map((orderId) =>
+        this.#fetchOrderById(accessToken, shop, orderId),
+      ),
+    );
+
+    return orders.filter(Boolean).map((order) => this.#mapOrderFromShopify(order));
   }
 
   static async syncRecentOrders(

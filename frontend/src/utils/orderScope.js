@@ -180,6 +180,22 @@ export const hasActiveOrderScopeFilters = (filters = {}) =>
   String(filters.fulfillmentFilter || "all") !== "all" ||
   String(filters.refundFilter || "all") !== "all";
 
+export const hasActiveOrdersListFilters = (filters = {}) =>
+  hasValue(filters.searchTerm) ||
+  hasValue(filters.dateFrom) ||
+  hasValue(filters.dateTo) ||
+  hasValue(filters.orderNumberFrom) ||
+  hasValue(filters.orderNumberTo) ||
+  hasValue(filters.amountMin) ||
+  hasValue(filters.amountMax) ||
+  String(filters.paymentFilter || "all") !== "all" ||
+  String(filters.paymentMethodFilter || "all") !== "all" ||
+  String(filters.fulfillmentFilter || "all") !== "all" ||
+  String(filters.refundFilter || "all") !== "all" ||
+  Boolean(filters.cancelledOnly) ||
+  Boolean(filters.fulfilledOnly) ||
+  Boolean(filters.paidOnly);
+
 export const buildOrderScopeApiParams = (filters = {}) => {
   const params = {};
 
@@ -200,6 +216,59 @@ export const buildOrderScopeApiParams = (filters = {}) => {
   }
   if (String(filters.refundFilter || "all") !== "all") {
     params.refund_filter = filters.refundFilter;
+  }
+
+  return params;
+};
+
+export const buildOrdersListApiParams = (filters = {}) => {
+  const params = {};
+
+  if (hasValue(filters.searchTerm)) {
+    params.search = String(filters.searchTerm).trim();
+  }
+  if (hasValue(filters.dateFrom)) {
+    params.date_from = filters.dateFrom;
+  }
+  if (hasValue(filters.dateTo)) {
+    params.date_to = filters.dateTo;
+  }
+  if (hasValue(filters.orderNumberFrom)) {
+    params.order_number_from = String(filters.orderNumberFrom)
+      .replace(/[^\d]/g, "")
+      .trim();
+  }
+  if (hasValue(filters.orderNumberTo)) {
+    params.order_number_to = String(filters.orderNumberTo)
+      .replace(/[^\d]/g, "")
+      .trim();
+  }
+  if (hasValue(filters.amountMin)) {
+    params.min_total = String(filters.amountMin).trim();
+  }
+  if (hasValue(filters.amountMax)) {
+    params.max_total = String(filters.amountMax).trim();
+  }
+  if (String(filters.paymentFilter || "all") !== "all") {
+    params.payment_status = filters.paymentFilter;
+  }
+  if (String(filters.paymentMethodFilter || "all") !== "all") {
+    params.payment_method = filters.paymentMethodFilter;
+  }
+  if (String(filters.fulfillmentFilter || "all") !== "all") {
+    params.fulfillment_status = filters.fulfillmentFilter;
+  }
+  if (String(filters.refundFilter || "all") !== "all") {
+    params.refund_filter = filters.refundFilter;
+  }
+  if (filters.cancelledOnly) {
+    params.cancelled_only = "true";
+  }
+  if (filters.fulfilledOnly) {
+    params.fulfilled_only = "true";
+  }
+  if (filters.paidOnly) {
+    params.paid_only = "true";
   }
 
   return params;

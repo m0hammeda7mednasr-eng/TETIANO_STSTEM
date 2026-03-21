@@ -133,6 +133,7 @@ const DASHBOARD_ORDER_ANALYTICS_SELECTS = [
     "total_price",
     "status",
     "created_at",
+    "data",
   ].join(","),
   [
     "id",
@@ -144,7 +145,6 @@ const DASHBOARD_ORDER_ANALYTICS_SELECTS = [
     "total_price",
     "status",
     "created_at",
-    "data",
   ].join(","),
   DASHBOARD_ORDER_ANALYTICS_SELECT,
   [
@@ -242,6 +242,32 @@ const getDashboardCacheKey = (req) =>
     String(getRequestedStoreId(req) || "all").trim(),
     getOrderScopeFiltersCacheKey(req.query || {}),
   ].join("::");
+
+const getOrderDateRangeFilters = (rawFilters = {}) => {
+  const filters = normalizeOrderScopeFilters(rawFilters);
+  const from = filters.dateFrom ? startOfDateDay(filters.dateFrom) : null;
+  const to = filters.dateTo ? endOfDateDay(filters.dateTo) : null;
+
+  return {
+    from: from ? from.toISOString() : "",
+    to: to ? to.toISOString() : "",
+  };
+};
+
+const applyOrderDateRangeFilters = (query, rawFilters = {}) => {
+  const { from, to } = getOrderDateRangeFilters(rawFilters);
+  let scopedQuery = query;
+
+  if (from) {
+    scopedQuery = scopedQuery.gte("created_at", from);
+  }
+
+  if (to) {
+    scopedQuery = scopedQuery.lte("created_at", to);
+  }
+
+  return scopedQuery;
+};
 
 const sortOrdersByCreatedAtDesc = (orders = []) =>
   [...(orders || [])].sort(
@@ -1037,6 +1063,7 @@ const getScopedRowsBatched = async (
     selects = null,
     orderField = "created_at",
     allowUnorderedFallback = false,
+    scopeFilters = null,
   } = {},
 ) => {
   const tableName =
@@ -1079,6 +1106,10 @@ const getScopedRowsBatched = async (
       } else {
         query = query.eq("user_id", req.user.id);
       }
+    }
+
+    if (tableName === "orders") {
+      query = applyOrderDateRangeFilters(query, scopeFilters);
     }
 
     const { data, error } = await query;
@@ -1136,7 +1167,7 @@ const getScopedRowsBatched = async (
       } catch (error) {
         lastError = error;
         if (isSchemaCompatibilityError(error)) {
-          break;
+          continue;
         }
 
         if (isQueryRetryableError(error)) {
@@ -1200,6 +1231,7 @@ router.get("/stats", authenticateToken, async (req, res) => {
           ? DASHBOARD_ORDER_FILTERED_STATS_SELECTS
           : DASHBOARD_ORDER_STATS_SELECTS,
         allowUnorderedFallback: true,
+        scopeFilters: req.query || {},
       }),
       getScopedRowsBatched(req, Customer, {
         select: DASHBOARD_CUSTOMER_COUNT_SELECT,
@@ -1277,16 +1309,11 @@ router.get(
 
     try {
       const orderScopeFilters = normalizeOrderScopeFilters(req.query || {});
-      const [orders, customers] = await Promise.all([
-        getScopedRowsBatched(req, Order, {
-          selects: DASHBOARD_ORDER_ANALYTICS_SELECTS,
-          allowUnorderedFallback: true,
-        }),
-        getScopedRowsBatched(req, Customer, {
-          select: DASHBOARD_CUSTOMER_COUNT_SELECT,
-          allowUnorderedFallback: true,
-        }),
-      ]);
+      const orders = await getScopedRowsBatched(req, Order, {
+        selects: DASHBOARD_ORDER_ANALYTICS_SELECTS,
+        allowUnorderedFallback: true,
+        scopeFilters: orderScopeFilters,
+      });
 
       const allOrders = filterOrdersByScope(orders || [], orderScopeFilters);
       const paidOrders = allOrders.filter((order) => isPaidOrder(order));
@@ -1380,20 +1407,21 @@ router.get(
           total_revenue: parseFloat(item.total_revenue.toFixed(2)),
         }));
 
-      const customerMap = new Map();
-      customers.forEach((customer) => {
-        customerMap.set(String(customer.shopify_id || customer.id), customer);
-      });
-
       const customerSpendMap = new Map();
       allOrders.forEach((order) => {
-        const key = String(order.customer_id || order.customer_email || "");
+        const data = parseOrderData(order);
+        const key = getOrderCustomerKey(order);
         if (!key) return;
 
         const current = customerSpendMap.get(key) || {
-          customer_id: order.customer_id || null,
-          email: order.customer_email || order.email || "",
-          name: order.customer_name || "",
+          customer_id: null,
+          email:
+            order.customer_email ||
+            order.email ||
+            data?.email ||
+            data?.customer?.email ||
+            "",
+          name: order.customer_name || data?.customer?.name || "",
           orders_count: 0,
           total_spent: 0,
         };
@@ -1406,15 +1434,11 @@ router.get(
       const topCustomers = Array.from(customerSpendMap.values())
         .sort((a, b) => b.total_spent - a.total_spent)
         .slice(0, 10)
-        .map((entry) => {
-          const customerLookupKey = String(entry.customer_id || "");
-          const customer = customerMap.get(customerLookupKey);
-          return {
-            ...entry,
-            name: entry.name || customer?.name || customer?.customer_name || "",
-            total_spent: parseFloat(entry.total_spent.toFixed(2)),
-          };
-        });
+        .map((entry) => ({
+          ...entry,
+          name: entry.name || entry.email || "",
+          total_spent: parseFloat(entry.total_spent.toFixed(2)),
+        }));
 
       const totalOrders = allOrders.length;
       const payload = {

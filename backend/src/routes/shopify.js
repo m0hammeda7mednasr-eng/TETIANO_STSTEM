@@ -26,6 +26,7 @@ import { authenticateToken } from "../middleware/auth.js";
 import { supabase as db } from "../supabaseClient.js";
 import { extractCustomerPhone } from "../helpers/customerContact.js";
 import { buildProductsSummaryExportPayload } from "../helpers/orderExport.js";
+import { hasActiveOrderScopeFilters } from "../helpers/orderScope.js";
 import { buildProductSourcingDetail } from "../helpers/suppliers.js";
 
 const router = express.Router();
@@ -1726,7 +1727,14 @@ const buildOrderListItem = (order) => {
 };
 
 const getOrdersListPagination = (query = {}) => {
-  const pagination = getListPagination(query);
+  const requestedLimit = parseInt(query.limit, 10);
+  const pagination = {
+    limit:
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, ORDER_LIST_PAGE_LIMIT)
+        : DEFAULT_LIST_LIMIT,
+    offset: toNonNegativeInteger(query.offset, 0),
+  };
   const offset = Math.max(
     0,
     Math.min(
@@ -3407,9 +3415,10 @@ router.get(
   requirePermission("can_view_orders"),
   async (req, res) => {
     try {
+      const searchAllHistoryRequested =
+        String(req.query.search_all || "").toLowerCase().trim() === "true";
       const searchAllHistory =
-        String(req.query.search_all || "").toLowerCase().trim() === "true" &&
-        Boolean(String(req.query.search || "").trim());
+        searchAllHistoryRequested && hasActiveOrderScopeFilters(req.query);
       const pagination = searchAllHistory
         ? getListPagination(req.query)
         : getOrdersListPagination(req.query);

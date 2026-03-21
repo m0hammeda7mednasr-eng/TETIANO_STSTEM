@@ -1846,7 +1846,7 @@ function renderDetails({
         canManage={canEditProducts}
       />
 
-      <SupplierCatalogExplorer supplier={selectedSupplier} />
+      <SupplierCatalogWorkspace supplier={selectedSupplier} />
 
       {canEditProducts ? (
         <div className="grid gap-6 lg:grid-cols-2">
@@ -1994,6 +1994,8 @@ function FabricSupplierDetails({
           </div>
         </SectionCard>
       </div>
+
+      <SupplierCatalogWorkspace supplier={supplier} />
 
       <SectionCard
         title="مراجع الاستخدام"
@@ -2626,7 +2628,7 @@ function PaymentForm({ form, setForm, onSave, saving }) {
     );
   }
 
-function SupplierCatalogExplorer({ supplier }) {
+function LegacySupplierCatalogExplorer({ supplier }) {
   const { locale } = useLocale();
   const productCatalog = toArray(supplier?.product_catalog);
   const fabricCatalog = toArray(supplier?.fabric_catalog);
@@ -2901,6 +2903,712 @@ function SupplierCatalogExplorer({ supplier }) {
   );
 }
 
+void LegacySupplierCatalogExplorer;
+
+
+const buildCatalogSearchString = (values = []) =>
+  values
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .map(normalizeText)
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+const buildWorkspaceProductSearchText = (group = {}) =>
+  buildCatalogSearchString([
+    group.product_name,
+    group.variant_title,
+    group.sku,
+    toArray(group.fabrics),
+    toArray(group.materials),
+    toArray(group.colors),
+    toArray(group.measurement_units),
+    toArray(group.items).flatMap((item) => [
+      item.product_name,
+      item.variant_title,
+      item.sku,
+      item.fabric_name,
+      item.fabric_code,
+      item.fabric_supplier_name,
+      item.fabric_supplier_code,
+      item.material,
+      item.color,
+      item.reference_code,
+    ]),
+  ]);
+
+const buildWorkspaceFabricSearchText = (group = {}) =>
+  buildCatalogSearchString([
+    group.fabric_name,
+    group.fabric_code,
+    group.fabric_supplier_name,
+    group.fabric_supplier_code,
+    toArray(group.materials),
+    toArray(group.colors),
+    toArray(group.measurement_units),
+    toArray(group.products).flatMap((product) => [
+      product.product_name,
+      product.variant_title,
+      product.sku,
+    ]),
+    toArray(group.items).flatMap((item) => [
+      item.product_name,
+      item.fabric_name,
+      item.fabric_code,
+      item.material,
+      item.color,
+      item.reference_code,
+    ]),
+  ]);
+
+const buildWorkspaceLinkedFabrics = (group = {}) => {
+  const lookup = new Map();
+
+  toArray(group.items).forEach((item) => {
+    const label = formatSupplierFabricDisplay(item) || item.material || "-";
+    const key =
+      normalizeText(item.fabric_id) ||
+      normalizeText(item.fabric_code).toLowerCase() ||
+      normalizeText(label).toLowerCase();
+
+    if (!key) {
+      return;
+    }
+
+    const existing = lookup.get(key) || {
+      key,
+      label,
+      supplierLabel: item.fabric_supplier_name
+        ? item.fabric_supplier_code
+          ? `${item.fabric_supplier_code} | ${item.fabric_supplier_name}`
+          : item.fabric_supplier_name
+        : "",
+      quantity: 0,
+      units: new Set(),
+    };
+
+    existing.quantity += toNumber(item.quantity);
+    if (item.measurement_unit) {
+      existing.units.add(formatDeliveryMeasurementUnitLabel(item.measurement_unit));
+    }
+
+    lookup.set(key, existing);
+  });
+
+  return Array.from(lookup.values())
+    .map((entry) => ({
+      ...entry,
+      units: Array.from(entry.units),
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, "ar"));
+};
+
+const buildWorkspaceRecentItems = (group = {}, limit = 6) =>
+  toArray(group.items).slice(0, limit);
+
+function SupplierCatalogWorkspace({ supplier }) {
+  const { locale, isRTL } = useLocale();
+  const t = (ar, en) => (locale === "en" ? en : ar);
+  const productCatalog = toArray(supplier?.product_catalog);
+  const fabricCatalog = toArray(supplier?.fabric_catalog);
+  const [activeView, setActiveView] = useState("models");
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [selectedProductKey, setSelectedProductKey] = useState("");
+  const [selectedFabricKey, setSelectedFabricKey] = useState("");
+
+  useEffect(() => {
+    setCatalogSearch("");
+    setActiveView(
+      productCatalog.length > 0 || fabricCatalog.length === 0 ? "models" : "fabrics",
+    );
+  }, [supplier?.id, productCatalog.length, fabricCatalog.length]);
+
+  const normalizedSearch = normalizeText(catalogSearch).toLowerCase();
+
+  const filteredProductCatalog = useMemo(() => {
+    if (!normalizedSearch) {
+      return productCatalog;
+    }
+
+    return productCatalog.filter((group) =>
+      buildWorkspaceProductSearchText(group).includes(normalizedSearch),
+    );
+  }, [normalizedSearch, productCatalog]);
+
+  const filteredFabricCatalog = useMemo(() => {
+    if (!normalizedSearch) {
+      return fabricCatalog;
+    }
+
+    return fabricCatalog.filter((group) =>
+      buildWorkspaceFabricSearchText(group).includes(normalizedSearch),
+    );
+  }, [fabricCatalog, normalizedSearch]);
+
+  useEffect(() => {
+    setSelectedProductKey((current) =>
+      filteredProductCatalog.some((group) => group.key === current)
+        ? current
+        : filteredProductCatalog[0]?.key || "",
+    );
+  }, [filteredProductCatalog]);
+
+  useEffect(() => {
+    setSelectedFabricKey((current) =>
+      filteredFabricCatalog.some((group) => group.key === current)
+        ? current
+        : filteredFabricCatalog[0]?.key || "",
+    );
+  }, [filteredFabricCatalog]);
+
+  const selectedProduct =
+    filteredProductCatalog.find((group) => group.key === selectedProductKey) ||
+    filteredProductCatalog[0] ||
+    null;
+  const selectedFabric =
+    filteredFabricCatalog.find((group) => group.key === selectedFabricKey) ||
+    filteredFabricCatalog[0] ||
+    null;
+  const visibleCount =
+    activeView === "models"
+      ? filteredProductCatalog.length
+      : filteredFabricCatalog.length;
+
+  return (
+    <SectionCard
+      title={t("كتالوج الموديلات والأقمشة", "Models & Fabrics Catalog")}
+      subtitle={t(
+        "كروت بسيطة من بره، وداخل كل موديل أو قماش كل التفاصيل المرتبطة به بشكل أوضح واحترافي.",
+        "Simple cards outside, with a clearer professional detail view inside every model or fabric.",
+      )}
+    >
+      <div className="space-y-5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap gap-2">
+            <CatalogWorkspaceModeButton
+              active={activeView === "models"}
+              label={t("الموديلات", "Models")}
+              count={filteredProductCatalog.length}
+              onClick={() => setActiveView("models")}
+            />
+            <CatalogWorkspaceModeButton
+              active={activeView === "fabrics"}
+              label={t("الأقمشة", "Fabrics")}
+              count={filteredFabricCatalog.length}
+              onClick={() => setActiveView("fabrics")}
+            />
+          </div>
+
+          <div className="relative w-full xl:max-w-md">
+            <Search
+              className={`absolute top-1/2 -translate-y-1/2 text-slate-400 ${
+                isRTL ? "right-3" : "left-3"
+              }`}
+              size={16}
+            />
+            <input
+              value={catalogSearch}
+              onChange={(event) => setCatalogSearch(event.target.value)}
+              placeholder={
+                activeView === "models"
+                  ? t(
+                      "ابحث باسم الموديل أو SKU أو القماش",
+                      "Search by model name, SKU, or fabric",
+                    )
+                  : t(
+                      "ابحث باسم القماش أو الكود أو الموديل",
+                      "Search by fabric name, code, or model",
+                    )
+              }
+              className={`app-input py-3 ${
+                isRTL ? "pr-9 pl-3 text-right" : "pl-9 pr-3 text-left"
+              }`}
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <DetailStat
+            label={t("إجمالي الموديلات", "Total models")}
+            value={formatCount(productCatalog.length)}
+          />
+          <DetailStat
+            label={t("إجمالي الأقمشة", "Total fabrics")}
+            value={formatCount(fabricCatalog.length)}
+          />
+          <DetailStat
+            label={t("النتائج المعروضة", "Visible results")}
+            value={formatCount(visibleCount)}
+          />
+          <DetailStat
+            label={t("آخر نشاط", "Last activity")}
+            value={formatDateTime(supplier?.last_delivery_at)}
+          />
+        </div>
+
+        {activeView === "models" ? (
+          filteredProductCatalog.length > 0 ? (
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <div className="space-y-3 xl:max-h-[920px] xl:overflow-y-auto xl:pe-1">
+                {filteredProductCatalog.map((group) => (
+                  <button
+                    key={group.key}
+                    onClick={() => setSelectedProductKey(group.key)}
+                    className={`w-full rounded-[24px] border p-4 text-right transition ${
+                      group.key === selectedProduct?.key
+                        ? "border-sky-300 bg-[linear-gradient(180deg,rgba(240,249,255,0.98),rgba(232,244,255,0.92))] shadow-[0_18px_35px_-28px_rgba(14,116,144,0.45)]"
+                        : "border-slate-200 bg-white/90 hover:border-slate-300 hover:bg-white"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-base font-semibold text-slate-900">
+                          {group.product_name || "-"}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {translateSupplierUiText(getLinkedScopeLabel(group), locale)}
+                          {group.sku ? ` | SKU: ${group.sku}` : ""}
+                        </div>
+                      </div>
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                        {formatCount(group.deliveries_count)} {t("وارد", "deliveries")}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600 sm:grid-cols-4">
+                      <KeyValueCompact label="الكمية" value={formatCount(group.total_quantity)} />
+                      <KeyValueCompact label="الإجمالي" value={formatCurrency(group.total_cost)} />
+                      <KeyValueCompact
+                        label="الأقمشة"
+                        value={formatCount(toArray(group.fabrics).length)}
+                      />
+                      <KeyValueCompact
+                        label="آخر نشاط"
+                        value={formatDateTime(group.last_delivery_at)}
+                      />
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <CatalogWorkspaceProductDetail group={selectedProduct} locale={locale} />
+            </div>
+          ) : (
+            <EmptyState
+              text={t(
+                "لا توجد موديلات مطابقة للبحث الحالي.",
+                "No models match the current search.",
+              )}
+            />
+          )
+        ) : filteredFabricCatalog.length > 0 ? (
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="space-y-3 xl:max-h-[920px] xl:overflow-y-auto xl:pe-1">
+              {filteredFabricCatalog.map((group) => (
+                <button
+                  key={group.key}
+                  onClick={() => setSelectedFabricKey(group.key)}
+                  className={`w-full rounded-[24px] border p-4 text-right transition ${
+                    group.key === selectedFabric?.key
+                      ? "border-emerald-300 bg-[linear-gradient(180deg,rgba(236,253,245,0.98),rgba(220,252,231,0.92))] shadow-[0_18px_35px_-28px_rgba(5,150,105,0.35)]"
+                      : "border-slate-200 bg-white/90 hover:border-slate-300 hover:bg-white"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-base font-semibold text-slate-900">
+                        {formatSupplierFabricDisplay(group)}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {group.fabric_code ? `كود: ${group.fabric_code}` : "-"}
+                        {group.fabric_supplier_name
+                          ? ` | ${
+                              group.fabric_supplier_code
+                                ? `${group.fabric_supplier_code} | ${group.fabric_supplier_name}`
+                                : group.fabric_supplier_name
+                            }`
+                          : ""}
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                      {formatCount(toArray(group.products).length)} {t("موديل", "models")}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600 sm:grid-cols-4">
+                    <KeyValueCompact label="الكمية" value={formatCount(group.total_quantity)} />
+                    <KeyValueCompact label="الإجمالي" value={formatCurrency(group.total_cost)} />
+                    <KeyValueCompact
+                      label="الواردات"
+                      value={formatCount(group.deliveries_count)}
+                    />
+                    <KeyValueCompact
+                      label="آخر نشاط"
+                      value={formatDateTime(group.last_delivery_at)}
+                    />
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <CatalogWorkspaceFabricDetail group={selectedFabric} locale={locale} />
+          </div>
+        ) : (
+          <EmptyState
+            text={t(
+              "لا توجد أقمشة مطابقة للبحث الحالي.",
+              "No fabrics match the current search.",
+            )}
+          />
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+function CatalogWorkspaceModeButton({ active, label, count, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-semibold transition ${
+        active
+          ? "border-sky-200 bg-sky-50 text-sky-700 shadow-sm"
+          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+      }`}
+    >
+      <span>{label}</span>
+      <span
+        className={`rounded-full px-2 py-0.5 text-xs ${
+          active ? "bg-white text-sky-700" : "bg-slate-100 text-slate-600"
+        }`}
+      >
+        {formatCount(count)}
+      </span>
+    </button>
+  );
+}
+
+function CatalogWorkspaceProductDetail({ group, locale }) {
+  const t = (ar, en) => (locale === "en" ? en : ar);
+
+  if (!group) {
+    return (
+      <EmptyState
+        text={t("اختر موديلًا من القائمة لعرض تفاصيله.", "Choose a model to view its details.")}
+      />
+    );
+  }
+
+  const linkedFabrics = buildWorkspaceLinkedFabrics(group);
+  const recentItems = buildWorkspaceRecentItems(group);
+
+  return (
+    <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.92))] p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="inline-flex rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700">
+              {t("ملف الموديل", "Model profile")}
+            </div>
+            <h3 className="mt-3 text-xl font-semibold text-slate-900">
+              {group.product_name || "-"}
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              {translateSupplierUiText(getLinkedScopeLabel(group), locale)}
+              {group.sku ? ` | SKU: ${group.sku}` : ""}
+            </p>
+          </div>
+
+          {group.product_id ? (
+            <Link
+              to={buildProductDetailsPath(group.product_id)}
+              className="inline-flex items-center rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 hover:bg-sky-100"
+            >
+              {t("فتح صفحة المنتج", "Open product page")}
+            </Link>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="space-y-5 p-5">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <DetailStat label="الكمية" value={formatCount(group.total_quantity)} />
+          <DetailStat label="الإجمالي" value={formatCurrency(group.total_cost)} />
+          <DetailStat label="الواردات" value={formatCount(group.deliveries_count)} />
+          <DetailStat
+            label="الأقمشة المرتبطة"
+            value={formatCount(linkedFabrics.length)}
+          />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <DetailLineCompact label="آخر وارد" value={formatDateTime(group.last_delivery_at)} />
+          <DetailLineCompact
+            label="الوحدات"
+            value={formatTextList(
+              toArray(group.measurement_units).map(formatDeliveryMeasurementUnitLabel),
+            )}
+          />
+          <DetailLineCompact label="الخامات" value={formatTextList(group.materials)} />
+          <DetailLineCompact label="الألوان" value={formatTextList(group.colors)} />
+          <DetailLineCompact
+            label="أنواع البنود"
+            value={formatTextList(
+              toArray(group.item_types).map(formatDeliveryItemTypeLabel),
+            )}
+          />
+          <DetailLineCompact label="الأقمشة" value={formatTextList(group.fabrics)} />
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold text-slate-900">
+              {t("الأقمشة المرتبطة بالموديل", "Fabrics linked to this model")}
+            </h4>
+            <span className="text-xs text-slate-500">
+              {formatCount(linkedFabrics.length)} {t("قماش", "fabric(s)")}
+            </span>
+          </div>
+
+          {linkedFabrics.length > 0 ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {linkedFabrics.map((fabric) => (
+                <div
+                  key={fabric.key}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  <div className="text-sm font-semibold text-slate-900">
+                    {fabric.label}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {fabric.supplierLabel || t("بدون مورد قماش محدد", "No fabric supplier")}
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-600">
+                    <KeyValueCompact label="الكمية" value={formatCount(fabric.quantity)} />
+                    <KeyValueCompact label="الوحدات" value={formatTextList(fabric.units)} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              text={t(
+                "لا توجد أقمشة مرتبطة بهذا الموديل حتى الآن.",
+                "No fabrics are linked to this model yet.",
+              )}
+            />
+          )}
+        </div>
+
+        <CatalogWorkspaceMovements
+          title={t("آخر الحركات على الموديل", "Latest model movements")}
+          items={recentItems}
+          locale={locale}
+          emptyText={t(
+            "لا توجد حركات وارد مرتبطة بهذا الموديل.",
+            "No delivery movements are linked to this model.",
+          )}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CatalogWorkspaceFabricDetail({ group, locale }) {
+  const t = (ar, en) => (locale === "en" ? en : ar);
+
+  if (!group) {
+    return (
+      <EmptyState
+        text={t("اختر قماشًا من القائمة لعرض تفاصيله.", "Choose a fabric to view its details.")}
+      />
+    );
+  }
+
+  const recentItems = buildWorkspaceRecentItems(group);
+
+  return (
+    <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.92))] p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+              {t("ملف القماش", "Fabric profile")}
+            </div>
+            <h3 className="mt-3 text-xl font-semibold text-slate-900">
+              {formatSupplierFabricDisplay(group)}
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              {group.fabric_code ? `كود: ${group.fabric_code}` : t("بدون كود", "No code")}
+              {group.fabric_supplier_name
+                ? ` | ${
+                    group.fabric_supplier_code
+                      ? `${group.fabric_supplier_code} | ${group.fabric_supplier_name}`
+                      : group.fabric_supplier_name
+                  }`
+                : ""}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            <div className="text-xs text-slate-500">{t("آخر نشاط", "Last activity")}</div>
+            <div className="mt-1 font-semibold text-slate-900">
+              {formatDateTime(group.last_delivery_at)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-5 p-5">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <DetailStat label="الكمية" value={formatCount(group.total_quantity)} />
+          <DetailStat label="الإجمالي" value={formatCurrency(group.total_cost)} />
+          <DetailStat label="الواردات" value={formatCount(group.deliveries_count)} />
+          <DetailStat
+            label="الموديلات المرتبطة"
+            value={formatCount(toArray(group.products).length)}
+          />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <DetailLineCompact
+            label="الوحدات"
+            value={formatTextList(
+              toArray(group.measurement_units).map(formatDeliveryMeasurementUnitLabel),
+            )}
+          />
+          <DetailLineCompact label="الخامات" value={formatTextList(group.materials)} />
+          <DetailLineCompact label="الألوان" value={formatTextList(group.colors)} />
+          <DetailLineCompact
+            label="الموديلات"
+            value={formatTextList(
+              toArray(group.products).map((product) => product.product_name),
+            )}
+          />
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold text-slate-900">
+              {t("الموديلات المرتبطة بهذا القماش", "Models linked to this fabric")}
+            </h4>
+            <span className="text-xs text-slate-500">
+              {formatCount(toArray(group.products).length)} {t("موديل", "model(s)")}
+            </span>
+          </div>
+
+          {toArray(group.products).length > 0 ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {toArray(group.products).map((product) => (
+                <div
+                  key={`${group.key}-${product.key}`}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-slate-900">
+                        {product.product_name || "-"}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {translateSupplierUiText(getLinkedScopeLabel(product), locale)}
+                        {product.sku ? ` | SKU: ${product.sku}` : ""}
+                      </div>
+                    </div>
+                    {product.product_id ? (
+                      <Link
+                        to={buildProductDetailsPath(product.product_id)}
+                        className="text-xs font-semibold text-sky-700 hover:text-sky-800"
+                      >
+                        {t("فتح", "Open")}
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              text={t(
+                "لا توجد موديلات مرتبطة بهذا القماش حتى الآن.",
+                "No models are linked to this fabric yet.",
+              )}
+            />
+          )}
+        </div>
+
+        <CatalogWorkspaceMovements
+          title={t("آخر الحركات على القماش", "Latest fabric movements")}
+          items={recentItems}
+          locale={locale}
+          emptyText={t(
+            "لا توجد حركات وارد مرتبطة بهذا القماش.",
+            "No delivery movements are linked to this fabric.",
+          )}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CatalogWorkspaceMovements({ title, items, locale, emptyText }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-sm font-semibold text-slate-900">{title}</h4>
+        <span className="text-xs text-slate-500">{formatCount(items.length)}</span>
+      </div>
+
+      {items.length > 0 ? (
+        <div className="space-y-3">
+          {items.map((item, index) => (
+            <div
+              key={`${item.delivery_id || item.reference_code || "movement"}-${index}`}
+              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-900">
+                    {item.product_name || item.fabric_name || "-"}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {formatDateTime(item.entry_date)}
+                    {item.reference_code
+                      ? ` | ${translateSupplierUiText("مرجع", locale)}: ${item.reference_code}`
+                      : ""}
+                  </div>
+                </div>
+                <div className="text-sm font-semibold text-slate-800">
+                  {formatCurrency(item.total_cost)}
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <DetailLineCompact
+                  label="القماش"
+                  value={formatSupplierFabricDisplay(item) || item.material || "-"}
+                />
+                <DetailLineCompact label="الوصف" value={item.material || "-"} />
+                <DetailLineCompact
+                  label="الكمية"
+                  value={`${formatCount(item.quantity)} ${translateSupplierUiText(
+                    formatDeliveryMeasurementUnitLabel(item.measurement_unit),
+                    locale,
+                  )}`}
+                />
+                <DetailLineCompact
+                  label="تكلفة الوحدة"
+                  value={formatCurrency(item.unit_cost)}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState text={emptyText} />
+      )}
+    </div>
+  );
+}
 
 function ReceivedItemsTable({ items }) {
   const { locale } = useLocale();

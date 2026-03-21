@@ -148,11 +148,17 @@ export default function MetaCommandCenter() {
   const loadPage = async ({ silent = false } = {}) => {
     try {
       silent ? setRefreshing(true) : setLoading(true);
-      const [statusResponse, overviewResponse] = await Promise.all([
-        metaAnalyticsAPI.getStatus(),
-        metaAnalyticsAPI.getOverview({ days: 30 }),
-      ]);
-      setStatus(statusResponse.data || null);
+      const statusResponse = await metaAnalyticsAPI.getStatus();
+      const nextStatus = statusResponse.data || null;
+      setStatus(nextStatus);
+
+      if (nextStatus?.schemaReady === false) {
+        setOverview(null);
+        setError("");
+        return;
+      }
+
+      const overviewResponse = await metaAnalyticsAPI.getOverview({ days: 30 });
       setOverview(overviewResponse.data || null);
       setError("");
     } catch (requestError) {
@@ -164,6 +170,7 @@ export default function MetaCommandCenter() {
   };
   useEffect(() => { loadPage(); }, []);
 
+  const schemaMissing = status?.schemaReady === false;
   const summary = overview?.overview?.summary || {};
   const storeSnapshot = overview?.store_snapshot || {};
   const formatCount = (value) =>
@@ -246,8 +253,8 @@ export default function MetaCommandCenter() {
             <div className="flex flex-wrap items-center gap-3">
               <Link to="/settings" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"><Settings size={16} />Settings</Link>
               <button type="button" onClick={() => loadPage({ silent: true })} disabled={refreshing} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"><RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />Refresh</button>
-              <button type="button" onClick={handleSync} disabled={syncing} className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-800 disabled:opacity-60"><RefreshCw size={16} className={syncing ? "animate-spin" : ""} />{syncing ? "Syncing Meta..." : "Sync Meta Data"}</button>
-              <button type="button" onClick={handleAnalyze} disabled={analyzing} className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-800 disabled:opacity-60"><Sparkles size={16} className={analyzing ? "animate-pulse" : ""} />{analyzing ? "Generating brief..." : "Generate AI Brief"}</button>
+              <button type="button" onClick={handleSync} disabled={syncing || schemaMissing} className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-800 disabled:opacity-60"><RefreshCw size={16} className={syncing ? "animate-spin" : ""} />{syncing ? "Syncing Meta..." : "Sync Meta Data"}</button>
+              <button type="button" onClick={handleAnalyze} disabled={analyzing || schemaMissing} className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-800 disabled:opacity-60"><Sparkles size={16} className={analyzing ? "animate-pulse" : ""} />{analyzing ? "Generating brief..." : "Generate AI Brief"}</button>
             </div>
           </div>
           {error ? <ErrorAlert message={error} onClose={() => setError("")} /> : null}
@@ -271,20 +278,20 @@ export default function MetaCommandCenter() {
             <Section title="Suggested Moves" description="Immediate operational recommendations based on the store snapshot and the latest Meta overview." actions={<Link to="/settings" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Tune integrations<ArrowRight size={16} /></Link>}>
               {recommendations.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-sm text-slate-500">Save OpenRouter and Meta in Settings and sync some data to start getting action suggestions.</div> : <div className="space-y-3">{recommendations.map((item, index) => <Recommendation key={`${item.title || "recommendation"}-${index}`} item={item} />)}</div>}
             </Section>
-            <Section title="AI Operator Chat" description="Ask directly: what to stop, what to scale, what to restock, and where the bottleneck is." actions={<button type="button" onClick={() => handleAssistantSend(quickPrompts[0])} disabled={assistantSending} className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-800 transition hover:bg-violet-100 disabled:opacity-60"><MessageSquare size={16} />Ask AI now</button>}>
-              <div className="mb-4 flex flex-wrap gap-2">{quickPrompts.map((prompt) => <button key={prompt} type="button" onClick={() => handleAssistantSend(prompt)} disabled={assistantSending} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-white disabled:opacity-60">{prompt}</button>)}</div>
+            <Section title="AI Operator Chat" description="Ask directly: what to stop, what to scale, what to restock, and where the bottleneck is." actions={<button type="button" onClick={() => handleAssistantSend(quickPrompts[0])} disabled={assistantSending || schemaMissing} className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-800 transition hover:bg-violet-100 disabled:opacity-60"><MessageSquare size={16} />Ask AI now</button>}>
+              <div className="mb-4 flex flex-wrap gap-2">{quickPrompts.map((prompt) => <button key={prompt} type="button" onClick={() => handleAssistantSend(prompt)} disabled={assistantSending || schemaMissing} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-white disabled:opacity-60">{prompt}</button>)}</div>
               <div className="space-y-3 rounded-2xl bg-slate-50 p-4">{assistantMessages.map((message, index) => <ChatBubble key={`${message.role}-${message.timestamp || index}-${index}`} role={message.role} content={message.content} timestamp={formatDateTime(message.timestamp)} />)}{assistantSending ? <ChatBubble role="assistant" content="Analyzing the store and ads context..." /> : null}</div>
               <div className="mt-4">
                 <textarea rows={4} value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100" placeholder="اكتب سؤالك هنا: أوقف إيه؟ أركز على إيه؟ فين المشكلة؟" />
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <p className="text-xs text-slate-500">The reply is grounded in the latest store snapshot plus Meta data if available.</p>
-                  <button type="button" onClick={() => handleAssistantSend()} disabled={assistantSending || !assistantInput.trim()} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"><Send size={16} />{assistantSending ? "Sending..." : "Send to AI"}</button>
+                  <button type="button" onClick={() => handleAssistantSend()} disabled={assistantSending || schemaMissing || !assistantInput.trim()} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"><Send size={16} />{assistantSending ? "Sending..." : "Send to AI"}</button>
                 </div>
               </div>
             </Section>
           </div>
 
-          <Section title="AI Brief Focus" description="This instruction is sent with the latest Meta data whenever you generate a formal brief." actions={<button type="button" onClick={handleAnalyze} disabled={analyzing} className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-800 transition hover:bg-violet-100 disabled:opacity-60"><Brain size={16} />{analyzing ? "Analyzing..." : "Run AI Analysis"}</button>}>
+          <Section title="AI Brief Focus" description="This instruction is sent with the latest Meta data whenever you generate a formal brief." actions={<button type="button" onClick={handleAnalyze} disabled={analyzing || schemaMissing} className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-800 transition hover:bg-violet-100 disabled:opacity-60"><Brain size={16} />{analyzing ? "Analyzing..." : "Run AI Analysis"}</button>}>
             <textarea rows={4} value={analysisFocus} onChange={(event) => setAnalysisFocus(event.target.value)} className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100" />
           </Section>
 

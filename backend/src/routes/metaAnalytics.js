@@ -752,8 +752,9 @@ const handleSchemaAwareError = (res, error, fallbackMessage) => {
 router.use(authenticateToken, requirePermission("can_manage_settings"));
 
 router.get("/status", async (req, res) => {
+  let storeId = null;
   try {
-    const storeId = await resolveStoreScope(req);
+    storeId = await resolveStoreScope(req);
     if (!storeId) {
       return res.status(400).json({
         error:
@@ -769,6 +770,15 @@ router.get("/status", async (req, res) => {
       integration: normalizeIntegrationPayload(integration),
     });
   } catch (error) {
+    if (isSchemaCompatibilityError(error)) {
+      return res.json({
+        schemaReady: false,
+        store_id: storeId,
+        integration: null,
+        ...META_SCHEMA_ERROR,
+      });
+    }
+
     return handleSchemaAwareError(
       res,
       error,

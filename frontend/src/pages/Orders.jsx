@@ -30,6 +30,10 @@ import {
   shouldAutoRefreshView,
 } from "../utils/refreshPolicy";
 import {
+  buildOrdersListApiParams,
+  hasActiveOrdersListFilters,
+} from "../utils/orderScope";
+import {
   buildStoreScopedCacheKey,
   isCacheFresh,
   peekCachedView,
@@ -421,9 +425,26 @@ export default function Orders() {
     ordersRef.current = orders;
   }, [orders]);
 
+  const fullHistoryQueryParams = useMemo(
+    () =>
+      buildOrdersListApiParams({
+        ...filters,
+        searchTerm: deferredSearchTerm,
+      }),
+    [deferredSearchTerm, filters],
+  );
+
+  const shouldUseFullHistory = useMemo(
+    () =>
+      hasActiveOrdersListFilters({
+        ...filters,
+        searchTerm: deferredSearchTerm,
+      }),
+    [deferredSearchTerm, filters],
+  );
+
   useEffect(() => {
-    const query = deferredSearchTerm.trim();
-    if (!query) {
+    if (!shouldUseFullHistory) {
       fullHistorySearchRequestIdRef.current += 1;
       setFullHistorySearchOrders(null);
       setFullHistorySearchError("");
@@ -440,8 +461,8 @@ export default function Orders() {
     setLoadStatus({
       active: true,
       message: select(
-        `جاري البحث في كل أوردرات المتجر عن "${query}"...`,
-        `Searching all store orders for "${query}"...`,
+        "جاري فحص كل تاريخ أوردرات المتجر حسب البحث والفلاتر الحالية...",
+        "Scanning the full store order history with the active search and filters...",
       ),
     });
 
@@ -451,7 +472,7 @@ export default function Orders() {
           params: {
             limit,
             offset,
-            search: query,
+            ...fullHistoryQueryParams,
             search_all: "true",
           },
         }),
@@ -525,7 +546,7 @@ export default function Orders() {
     return () => {
       active = false;
     };
-  }, [deferredSearchTerm, formatNumber, select]);
+  }, [deferredSearchTerm, formatNumber, fullHistoryQueryParams, select, shouldUseFullHistory]);
 
   useEffect(() => {
     let active = true;
@@ -1015,17 +1036,17 @@ export default function Orders() {
   }, [currentPage, filteredOrders.length, totalPages]);
 
   const searchScopeHint = useMemo(() => {
-    if (!deferredSearchTerm.trim()) {
+    if (!shouldUseFullHistory) {
       return select(
-        `بدون بحث، الصفحة تعرض آخر ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} طلب فقط. عند كتابة أي بحث، سيتم التفتيش في كل تاريخ أوردرات المتجر تلقائيًا.`,
-        `Without search, the page shows the latest ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} orders only. Once you type a search, the page scans the full store order history automatically.`,
+        `بدون بحث أو فلاتر، الصفحة تعرض آخر ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} طلب فقط. عند البحث أو تطبيق أي فلتر، سيتم فحص كل تاريخ أوردرات المتجر تلقائيًا.`,
+        `Without search or filters, the page shows the latest ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} orders only. Once you search or apply filters, the page scans the full store order history automatically.`,
       );
     }
 
     if (fullHistorySearchLoading) {
       return select(
-        "جاري البحث الآن في كل تاريخ أوردرات المتجر...",
-        "Searching the full store order history now...",
+        "جاري فحص كل تاريخ أوردرات المتجر الآن...",
+        "Scanning the full store order history now...",
       );
     }
 
@@ -1037,15 +1058,15 @@ export default function Orders() {
     }
 
     return select(
-      "سيتم البحث في كل تاريخ أوردرات المتجر بدل آخر الطلبات فقط.",
-      "The search will scan the full store history instead of only recent orders.",
+      "سيتم فحص كل تاريخ أوردرات المتجر بدل آخر الطلبات فقط.",
+      "The active search and filters will scan the full store history instead of only recent orders.",
     );
   }, [
-    deferredSearchTerm,
     formatNumber,
     fullHistorySearchLoading,
     fullHistorySearchOrders,
     select,
+    shouldUseFullHistory,
   ]);
 
   useEffect(() => {

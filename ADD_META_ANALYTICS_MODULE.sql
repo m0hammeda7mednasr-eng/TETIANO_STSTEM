@@ -71,6 +71,41 @@ create table if not exists public.meta_insight_snapshots (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.meta_entities (
+  id uuid primary key default gen_random_uuid(),
+  integration_id uuid not null references public.meta_integrations(id) on delete cascade,
+  store_id uuid not null,
+  object_type text not null
+    check (object_type in ('account', 'campaign', 'adset', 'ad')),
+  object_id text not null,
+  name text default '',
+  account_id text default '',
+  account_name text default '',
+  campaign_id text default '',
+  campaign_name text default '',
+  adset_id text default '',
+  adset_name text default '',
+  ad_id text default '',
+  ad_name text default '',
+  objective text default '',
+  status text default '',
+  effective_status text default '',
+  is_active boolean not null default false,
+  currency text default '',
+  timezone_name text default '',
+  optimization_goal text default '',
+  billing_event text default '',
+  daily_budget numeric default 0,
+  lifetime_budget numeric default 0,
+  start_time timestamptz null,
+  end_time timestamptz null,
+  stop_time timestamptz null,
+  updated_time timestamptz null,
+  raw_payload jsonb not null default '{}'::jsonb,
+  synced_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.meta_ai_analyses (
   id uuid primary key default gen_random_uuid(),
   integration_id uuid not null references public.meta_integrations(id) on delete cascade,
@@ -111,6 +146,22 @@ create unique index if not exists idx_meta_insight_snapshots_unique
     date_start,
     date_stop
   );
+create index if not exists idx_meta_entities_store_id
+  on public.meta_entities(store_id);
+create index if not exists idx_meta_entities_integration_id
+  on public.meta_entities(integration_id);
+create index if not exists idx_meta_entities_object_type
+  on public.meta_entities(object_type);
+create index if not exists idx_meta_entities_is_active
+  on public.meta_entities(is_active);
+create index if not exists idx_meta_entities_campaign_id
+  on public.meta_entities(campaign_id);
+create index if not exists idx_meta_entities_adset_id
+  on public.meta_entities(adset_id);
+create index if not exists idx_meta_entities_updated_time
+  on public.meta_entities(updated_time desc);
+create unique index if not exists idx_meta_entities_unique
+  on public.meta_entities(integration_id, object_type, object_id);
 create index if not exists idx_meta_ai_analyses_store_id
   on public.meta_ai_analyses(store_id);
 create index if not exists idx_meta_ai_analyses_integration_id
@@ -137,6 +188,7 @@ execute function public.set_updated_at();
 alter table public.meta_integrations enable row level security;
 alter table public.meta_sync_runs enable row level security;
 alter table public.meta_insight_snapshots enable row level security;
+alter table public.meta_entities enable row level security;
 alter table public.meta_ai_analyses enable row level security;
 
 drop policy if exists meta_integrations_service_access on public.meta_integrations;
@@ -156,6 +208,13 @@ with check (auth.role() in ('service_role', 'authenticated'));
 drop policy if exists meta_insight_snapshots_service_access on public.meta_insight_snapshots;
 create policy meta_insight_snapshots_service_access
 on public.meta_insight_snapshots
+for all
+using (auth.role() in ('service_role', 'authenticated'))
+with check (auth.role() in ('service_role', 'authenticated'));
+
+drop policy if exists meta_entities_service_access on public.meta_entities;
+create policy meta_entities_service_access
+on public.meta_entities
 for all
 using (auth.role() in ('service_role', 'authenticated'))
 with check (auth.role() in ('service_role', 'authenticated'));

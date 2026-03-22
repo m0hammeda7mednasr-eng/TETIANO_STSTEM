@@ -30,6 +30,24 @@ const normalizeLocalFields = (value = {}) => ({
   supplier_location: normalizeText(value?.supplier_location),
 });
 
+const parseNumeric = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getProductVariants = (productData = {}) =>
+  Array.isArray(productData?.variants) ? productData.variants : [];
+
+const getVariantKey = (variant = {}, fallbackIndex = 0) =>
+  normalizeText(variant?.id || variant?.admin_graphql_api_id || variant?.sku) ||
+  `variant-${fallbackIndex}`;
+
+const sumVariantInventory = (variants = []) =>
+  variants.reduce(
+    (sum, variant) => sum + parseNumeric(variant?.inventory_quantity),
+    0,
+  );
+
 export const extractProductLocalMetadata = (productData) => {
   const data = toPlainObject(productData);
   const localMetadata = toPlainObject(data?.[LOCAL_PRODUCT_METADATA_KEY]);
@@ -63,3 +81,53 @@ export const preserveProductLocalMetadata = (incomingData, existingData) =>
     incomingData,
     extractProductLocalMetadata(existingData),
   );
+
+export const zeroProductInventoryData = (productData) => {
+  const nextData = clonePlainObject(productData);
+  const variants = getProductVariants(nextData);
+
+  if (variants.length > 0) {
+    nextData.variants = variants.map((variant) => ({
+      ...variant,
+      inventory_quantity: 0,
+    }));
+    nextData.inventory_quantity = 0;
+    return nextData;
+  }
+
+  nextData.inventory_quantity = 0;
+  return nextData;
+};
+
+export const preserveProductInventoryData = (incomingData, existingData) => {
+  const nextData = clonePlainObject(incomingData);
+  const existing = clonePlainObject(existingData);
+  const incomingVariants = getProductVariants(nextData);
+  const existingVariants = getProductVariants(existing);
+
+  if (incomingVariants.length > 0) {
+    const existingVariantsByKey = new Map(
+      existingVariants.map((variant, index) => [
+        getVariantKey(variant, index),
+        variant,
+      ]),
+    );
+
+    nextData.variants = incomingVariants.map((variant, index) => {
+      const key = getVariantKey(variant, index);
+      const existingVariant = existingVariantsByKey.get(key);
+
+      return {
+        ...variant,
+        inventory_quantity: existingVariant
+          ? parseNumeric(existingVariant.inventory_quantity)
+          : 0,
+      };
+    });
+    nextData.inventory_quantity = sumVariantInventory(nextData.variants);
+    return nextData;
+  }
+
+  nextData.inventory_quantity = parseNumeric(existing?.inventory_quantity);
+  return nextData;
+};

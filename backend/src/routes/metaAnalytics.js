@@ -16,6 +16,8 @@ import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 import {
   DEFAULT_META_LOOKBACK_DAYS,
   DEFAULT_OPENROUTER_MODEL,
+  buildMetaDecisionBoard,
+  buildMetaEntityCatalogRows,
   buildMetaInsightSnapshots,
   buildMetaOverview,
   fetchMetaAdAccounts,
@@ -280,13 +282,54 @@ const saveIntegration = async ({ storeId, userId, updates }) => {
   return data;
 };
 
+const splitMetaEntities = (rows = []) => ({
+  accounts: normalizeArray(rows).filter(
+    (row) => normalizeText(row?.object_type).toLowerCase() === "account",
+  ),
+  campaigns: normalizeArray(rows).filter(
+    (row) => normalizeText(row?.object_type).toLowerCase() === "campaign",
+  ),
+  adsets: normalizeArray(rows).filter(
+    (row) => normalizeText(row?.object_type).toLowerCase() === "adset",
+  ),
+  ads: normalizeArray(rows).filter(
+    (row) => normalizeText(row?.object_type).toLowerCase() === "ad",
+  ),
+});
+
+const loadMetaEntities = async (storeId) => {
+  const { data, error } = await supabase
+    .from("meta_entities")
+    .select("*")
+    .eq("store_id", storeId)
+    .order("is_active", { ascending: false })
+    .order("updated_time", { ascending: false })
+    .limit(5000);
+
+  if (error) {
+    if (isSchemaCompatibilityError(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return normalizeArray(data);
+};
+
 const loadOverviewData = async ({ storeId, days }) => {
   const normalizedDays = Math.max(1, toNumber(days) || DEFAULT_META_LOOKBACK_DAYS);
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - normalizedDays + 1);
   const since = startDate.toISOString().slice(0, 10);
 
-  const [integrationResult, snapshotsResult, syncRunsResult, analysesResult] =
+  const [
+    integrationResult,
+    snapshotsResult,
+    syncRunsResult,
+    analysesResult,
+    entities,
+  ] =
     await Promise.all([
       supabase
         .from("meta_integrations")
@@ -312,6 +355,7 @@ const loadOverviewData = async ({ storeId, days }) => {
         .eq("store_id", storeId)
         .order("created_at", { ascending: false })
         .limit(8),
+      loadMetaEntities(storeId),
     ]);
 
   for (const result of [
@@ -325,11 +369,14 @@ const loadOverviewData = async ({ storeId, days }) => {
     }
   }
 
+  const entityCollections = splitMetaEntities(entities);
+
   return {
     integration: integrationResult.data || null,
     snapshots: normalizeArray(snapshotsResult.data),
     syncRuns: normalizeArray(syncRunsResult.data),
     analyses: normalizeArray(analysesResult.data),
+    ...entityCollections,
     days: normalizedDays,
   };
 };
@@ -632,7 +679,163 @@ const buildStoreSnapshot = async ({ storeId, days = STORE_CONTEXT_LOOKBACK_DAYS 
 const buildOperationalRecommendations = ({
   storeSnapshot = {},
   metaOverview = {},
+  decisionBoard = {},
 }) => {
+  {
+    const recommendations = [];
+    const orders = storeSnapshot?.orders || {};
+    const financial = storeSnapshot?.financial || {};
+    const catalog = storeSnapshot?.catalog || {};
+    const topProducts = normalizeArray(storeSnapshot?.top_products);
+    const lowStockProducts = normalizeArray(storeSnapshot?.low_stock_products);
+    const metaSummary = metaOverview?.summary || {};
+    const scaleNow = normalizeArray(decisionBoard?.scale_now);
+    const pauseNow = normalizeArray(decisionBoard?.pause_now);
+    const testNext = normalizeArray(decisionBoard?.test_next);
+    const creativeDiagnostics = normalizeArray(
+      decisionBoard?.creative_diagnostics,
+    );
+
+    if (toNumber(orders.pending) >= 8) {
+      recommendations.push({
+        priority: "high",
+        category: "operations",
+        title: "Close pending orders before pushing spend",
+        action:
+          "Work the unconfirmed and unpaid orders queue before increasing campaign budgets.",
+        reason: `${orders.pending} pending orders are still open inside the current store snapshot.`,
+      });
+    }
+
+    if (toNumber(orders.cancellation_rate) >= 10) {
+      recommendations.push({
+        priority: "high",
+        category: "retention",
+        title: "Fix cancellation leakage before scaling sales",
+        action:
+          "Review cancellation reasons, confirmation flow, shipping promises, and payment handling before adding more traffic.",
+        reason: `Current cancellation rate is ${toNumber(
+          orders.cancellation_rate,
+        ).toFixed(2)}%.`,
+      });
+    }
+
+    if (toNumber(catalog.low_stock_count) > 0) {
+      const productNames = lowStockProducts
+        .slice(0, 3)
+        .map((product) => product.title)
+        .filter(Boolean)
+        .join(", ");
+
+      recommendations.push({
+        priority: toNumber(catalog.low_stock_count) >= 5 ? "high" : "medium",
+        category: "inventory",
+        title: "Secure stock before pushing harder on ads",
+        action: productNames
+          ? `Start with ${productNames}.`
+          : "Review low-stock items and prioritize the next replenishment batch.",
+        reason: `${catalog.low_stock_count} products are low on stock and ${catalog.out_of_stock_count} are already out of stock.`,
+      });
+    }
+
+    if (topProducts.length > 0 && toNumber(financial.net_revenue) > 0) {
+      const leadProduct = topProducts[0];
+      const revenueShare =
+        toNumber(financial.net_revenue) > 0
+          ? (toNumber(leadProduct.total_revenue) /
+              toNumber(financial.net_revenue)) *
+            100
+          : 0;
+
+      if (revenueShare >= 25) {
+        recommendations.push({
+          priority: "medium",
+          category: "merchandising",
+          title: "Protect the top seller while reducing store dependence",
+          action: `Hold pricing, stock, and creative consistency for ${leadProduct.title}, while building two adjacent products behind it.`,
+          reason: `${leadProduct.title} drives ${revenueShare.toFixed(
+            1,
+          )}% of net revenue.`,
+        });
+      }
+    }
+
+    if (toNumber(metaSummary.rows_count) === 0) {
+      recommendations.push({
+        priority: "medium",
+        category: "ads",
+        title: "Run Meta sync before making ad decisions",
+        action:
+          "Sync Meta data first, then review spend, ROAS, CTR, conversion rate, and creative diagnostics together.",
+        reason:
+          "There are no stored Meta insight rows inside the current analysis window.",
+      });
+    } else {
+      const scalableCampaign = scaleNow[0];
+      const weakCampaign = pauseNow[0];
+      const testCampaign = testNext[0];
+      const creativeIssue = creativeDiagnostics.find(
+        (item) => item.diagnosis && item.diagnosis !== "winner",
+      );
+
+      if (scalableCampaign) {
+        recommendations.push({
+          priority: "medium",
+          category: "ads",
+          title: "Scale the strongest campaign carefully",
+          action: `${scalableCampaign.action} Focus on ${
+            scalableCampaign.name || scalableCampaign.id
+          }.`,
+          reason: `${scalableCampaign.name || scalableCampaign.id} is clearing ROAS ${toNumber(
+            scalableCampaign.roas,
+          ).toFixed(2)}x with ${toNumber(scalableCampaign.purchases)} purchases.`,
+        });
+      }
+
+      if (weakCampaign) {
+        recommendations.push({
+          priority: "high",
+          category: "ads",
+          title: "Cut waste from the weakest campaign",
+          action: `${weakCampaign.action} Start with ${
+            weakCampaign.name || weakCampaign.id
+          }.`,
+          reason: `Spend is ${toNumber(weakCampaign.spend).toFixed(
+            2,
+          )} with ROAS only ${toNumber(weakCampaign.roas).toFixed(2)}x.`,
+        });
+      }
+
+      if (testCampaign) {
+        recommendations.push({
+          priority: "medium",
+          category: "ads",
+          title: "Launch one focused test on the mixed campaign",
+          action: `${testCampaign.action} Start with ${
+            testCampaign.name || testCampaign.id
+          }.`,
+          reason:
+            normalizeArray(testCampaign.why)[0] ||
+            "Performance is mixed, so a controlled test is better than an immediate scale or pause.",
+        });
+      }
+
+      if (creativeIssue) {
+        recommendations.push({
+          priority: "medium",
+          category: "creative",
+          title: creativeIssue.headline || "Creative needs a rebuild",
+          action: creativeIssue.action,
+          reason: `${creativeIssue.name || creativeIssue.id} shows ${
+            creativeIssue.diagnosis
+          } signals with ROAS ${toNumber(creativeIssue.roas).toFixed(2)}x.`,
+        });
+      }
+    }
+
+    return recommendations.slice(0, 8);
+  }
+  /*
   const recommendations = [];
   const orders = storeSnapshot?.orders || {};
   const financial = storeSnapshot?.financial || {};
@@ -736,6 +939,7 @@ const buildOperationalRecommendations = ({
   }
 
   return recommendations.slice(0, 6);
+  */
 };
 
 const handleSchemaAwareError = (res, error, fallbackMessage) => {
@@ -1022,17 +1226,29 @@ router.post("/sync", async (req, res) => {
           campaigns,
           adsets,
           ads,
+          entities: buildMetaEntityCatalogRows({
+            integrationId: integration.id,
+            storeId,
+            account,
+            campaigns,
+            adsets,
+            ads,
+          }),
           snapshots: buildMetaInsightSnapshots({
             integrationId: integration.id,
             storeId,
             account,
             insightRows: insights,
+            campaigns,
+            adsets,
+            ads,
           }),
         };
       }),
     );
 
     const snapshots = syncPayloads.flatMap((item) => item.snapshots);
+    const entities = syncPayloads.flatMap((item) => item.entities);
     const campaigns = syncPayloads.flatMap((item) => item.campaigns);
     const adsets = syncPayloads.flatMap((item) => item.adsets);
     const ads = syncPayloads.flatMap((item) => item.ads);
@@ -1050,13 +1266,54 @@ router.post("/sync", async (req, res) => {
       }
     }
 
+    if (entities.length > 0) {
+      const { error: entityError } = await supabase
+        .from("meta_entities")
+        .upsert(entities, {
+          onConflict: "integration_id,object_type,object_id",
+        });
+
+      if (entityError && !isSchemaCompatibilityError(entityError)) {
+        throw entityError;
+      }
+    }
+    const entityCollections = splitMetaEntities(entities);
+
     const overview = buildMetaOverview({
       snapshots,
-      accounts: adAccounts,
-      campaigns,
-      adsets,
-      ads,
+      accounts:
+        entityCollections.accounts.length > 0
+          ? entityCollections.accounts
+          : adAccounts,
+      campaigns:
+        entityCollections.campaigns.length > 0
+          ? entityCollections.campaigns
+          : campaigns,
+      adsets:
+        entityCollections.adsets.length > 0
+          ? entityCollections.adsets
+          : adsets,
+      ads: entityCollections.ads.length > 0 ? entityCollections.ads : ads,
     });
+    let storeSnapshot = {};
+    try {
+      storeSnapshot = await buildStoreSnapshot({
+        storeId,
+      });
+    } catch (storeSnapshotError) {
+      console.warn(
+        "Meta sync completed without store snapshot context",
+        storeSnapshotError,
+      );
+    }
+    const decisionBoard = buildMetaDecisionBoard({
+      overview,
+      storeSnapshot,
+    });
+    const overviewPayload = {
+      ...overview,
+      decision_board: decisionBoard,
+    };
 
     const completedAt = new Date().toISOString();
     const updateIntegrationResult = await supabase
@@ -1087,6 +1344,7 @@ router.post("/sync", async (req, res) => {
             ads_count: ads.length,
             snapshots_count: snapshots.length,
             summary: overview.summary,
+            decision_summary: decisionBoard.summary,
           },
         })
         .eq("id", syncRunId);
@@ -1115,7 +1373,7 @@ router.post("/sync", async (req, res) => {
         accounts_count: adAccounts.length,
         snapshots_count: snapshots.length,
       },
-      overview,
+      overview: overviewPayload,
     });
   } catch (error) {
     if (syncRunId) {
@@ -1170,17 +1428,29 @@ router.get("/overview", async (req, res) => {
 
     const metaOverview = buildMetaOverview({
       snapshots: data.snapshots,
+      accounts: data.accounts,
+      campaigns: data.campaigns,
+      adsets: data.adsets,
+      ads: data.ads,
+    });
+    const decisionBoard = buildMetaDecisionBoard({
+      overview: metaOverview,
+      storeSnapshot,
     });
     const recommendations = buildOperationalRecommendations({
       storeSnapshot,
       metaOverview,
+      decisionBoard,
     });
 
     return res.json({
       store_id: storeId,
       days: data.days,
       integration: normalizeIntegrationPayload(data.integration),
-      overview: metaOverview,
+      overview: {
+        ...metaOverview,
+        decision_board: decisionBoard,
+      },
       store_snapshot: storeSnapshot,
       recommendations,
       sync_runs: data.syncRuns,
@@ -1220,13 +1490,26 @@ router.post("/analyze", async (req, res) => {
       });
     }
 
-    const data = await loadOverviewData({
-      storeId,
-      days: req.body?.days || req.query?.days,
-    });
+    const [data, storeSnapshot] = await Promise.all([
+      loadOverviewData({
+        storeId,
+        days: req.body?.days || req.query?.days,
+      }),
+      buildStoreSnapshot({
+        storeId,
+      }),
+    ]);
 
     const overview = buildMetaOverview({
       snapshots: data.snapshots,
+      accounts: data.accounts,
+      campaigns: data.campaigns,
+      adsets: data.adsets,
+      ads: data.ads,
+    });
+    const decisionBoard = buildMetaDecisionBoard({
+      overview,
+      storeSnapshot,
     });
 
     if (overview.summary.rows_count === 0) {
@@ -1248,6 +1531,8 @@ router.post("/analyze", async (req, res) => {
         normalizeText(req.body?.site_name) ||
         normalizeText(integration.openrouter_site_name),
       overview,
+      decisionBoard,
+      storeSnapshot,
       focus: normalizeText(req.body?.focus),
     });
 
@@ -1345,10 +1630,19 @@ router.post("/assistant/chat", async (req, res) => {
 
     const metaOverview = buildMetaOverview({
       snapshots: overviewData.snapshots,
+      accounts: overviewData.accounts,
+      campaigns: overviewData.campaigns,
+      adsets: overviewData.adsets,
+      ads: overviewData.ads,
+    });
+    const decisionBoard = buildMetaDecisionBoard({
+      overview: metaOverview,
+      storeSnapshot,
     });
     const recommendations = buildOperationalRecommendations({
       storeSnapshot,
       metaOverview,
+      decisionBoard,
     });
 
     const reply = await generateOpenRouterStoreAssistantReply({
@@ -1367,6 +1661,7 @@ router.post("/assistant/chat", async (req, res) => {
       history: normalizeArray(req.body?.history),
       storeSnapshot,
       metaOverview,
+      decisionBoard,
       recommendations,
     });
 
@@ -1395,6 +1690,7 @@ router.post("/assistant/chat", async (req, res) => {
         model: reply.model,
         content: reply.content,
       },
+      decision_board: decisionBoard,
       store_snapshot: storeSnapshot,
       recommendations,
     });

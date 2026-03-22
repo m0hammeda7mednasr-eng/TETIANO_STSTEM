@@ -3917,20 +3917,10 @@ router.post(
   requirePermission("can_edit_products"),
   async (req, res) => {
     try {
-      const { inventory } = req.body;
-      const productId = req.params.id;
-      const userId = req.user.id;
-
-      if (inventory === undefined || inventory === null) {
-        return res.status(400).json({ error: "Inventory is required" });
-      }
-
-      const result = await ProductUpdateService.updateInventory(
-        userId,
-        productId,
-        parseInt(inventory),
-      );
-      res.json(result);
+      return res.status(403).json({
+        error:
+          "Inventory is scanner-managed only. Use the warehouse scanner to change stock.",
+      });
     } catch (error) {
       console.error("Update inventory error:", error);
       res
@@ -3970,8 +3960,12 @@ router.post(
         updates.price = parseFloat(price);
       if (cost_price !== undefined && cost_price !== null)
         updates.cost_price = parseFloat(cost_price);
-      if (inventory !== undefined && inventory !== null)
-        updates.inventory = parseInt(inventory);
+      if (inventory !== undefined && inventory !== null) {
+        return res.status(403).json({
+          error:
+            "Inventory is scanner-managed only. Use the warehouse scanner to change stock.",
+        });
+      }
       if (Object.prototype.hasOwnProperty.call(req.body, "sku")) {
         updates.sku = String(sku ?? "").trim();
       }
@@ -3993,9 +3987,8 @@ router.post(
               "inventory_quantity",
             )
           ) {
-            nextVariantUpdate.inventory_quantity = parseInt(
-              variantUpdate?.inventory_quantity,
-              10,
+            throw new Error(
+              "Inventory is scanner-managed only. Use the warehouse scanner to change stock.",
             );
           }
 

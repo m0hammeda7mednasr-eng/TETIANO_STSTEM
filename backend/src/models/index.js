@@ -1,5 +1,9 @@
 import { supabase } from "../supabaseClient.js";
-import { preserveProductLocalMetadata } from "../helpers/productLocalMetadata.js";
+import {
+  preserveProductInventoryData,
+  preserveProductLocalMetadata,
+  zeroProductInventoryData,
+} from "../helpers/productLocalMetadata.js";
 import { preserveOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
 
 const sortByCreatedAtDesc = { ascending: false };
@@ -564,7 +568,7 @@ const preserveLocalProductMetadataForUpserts = async (rows = []) => {
 
   const { data: existingRows, error } = await supabase
     .from("products")
-    .select("shopify_id, store_id, user_id, data")
+    .select("shopify_id, store_id, user_id, data, inventory_quantity")
     .in("shopify_id", shopifyIds);
 
   if (error) {
@@ -574,13 +578,26 @@ const preserveLocalProductMetadataForUpserts = async (rows = []) => {
 
   return rows.map((row) => {
     const matchingRow = findMatchingProductRow(existingRows || [], row);
-    if (!matchingRow?.data || row?.data === undefined) {
-      return row;
+    if (row?.data === undefined) {
+      return {
+        ...row,
+        inventory_quantity: matchingRow
+          ? Number(matchingRow.inventory_quantity) || 0
+          : 0,
+      };
     }
 
     return {
       ...row,
-      data: preserveProductLocalMetadata(row.data, matchingRow.data),
+      inventory_quantity: matchingRow
+        ? Number(matchingRow.inventory_quantity) || 0
+        : 0,
+      data: matchingRow?.data
+        ? preserveProductLocalMetadata(
+            preserveProductInventoryData(row.data, matchingRow.data),
+            matchingRow.data,
+          )
+        : preserveProductLocalMetadata(zeroProductInventoryData(row.data), {}),
     };
   });
 };

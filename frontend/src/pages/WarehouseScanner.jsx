@@ -85,8 +85,8 @@ export default function WarehouseScanner() {
         setSetupNotice(
           payload?.message ||
             select(
-              "سجل مسح المخزن غير متاح الآن، لكن السكان سيحدث المخزون المباشر.",
-              "Warehouse scan history is unavailable right now, but the scanner will still update live stock.",
+              "سجل مسح المخزن غير متاح الآن، لكن السكان سيحدث مخزون المخزن المنفصل عن Shopify.",
+              "Warehouse scan history is unavailable right now, but the scanner will still update the separate warehouse stock.",
             ),
         );
       }
@@ -235,8 +235,8 @@ export default function WarehouseScanner() {
                     <p className="text-sm mt-1">
                       {setupNotice}.{" "}
                       {select(
-                        "ما زال بإمكانك المسح بالـSKU أو الباركود وتحديث المخزون مباشرة.",
-                        "You can still scan SKU or barcode values and update stock immediately.",
+                        "ما زال بإمكانك المسح بالـSKU أو الباركود وتحديث مخزون المخزن المنفصل مباشرة.",
+                        "You can still scan SKU or barcode values and update the separate warehouse stock immediately.",
                       )}
                     </p>
                   </div>
@@ -366,12 +366,12 @@ export default function WarehouseScanner() {
                 <p className="text-slate-300 text-sm mt-4 leading-6">
                   {movementType === "in"
                     ? select(
-                        "كل عملية مسح تزود مخزون المخزن للكود المحدد.",
-                        "Each scan increases warehouse stock for the selected variant code.",
+                        "كل عملية مسح تزود مخزون المخزن الفعلي للكود المحدد بدون تغيير رقم Shopify.",
+                        "Each scan increases the scanner-managed warehouse stock for the selected variant code without changing Shopify stock.",
                       )
                     : select(
-                        "كل عملية مسح تقلل مخزون المخزن للكود المحدد ولا تسمح أبدًا بمخزون سالب.",
-                        "Each scan decreases warehouse stock for the selected variant code and never allows negative inventory.",
+                        "كل عملية مسح تقلل مخزون المخزن الفعلي للكود المحدد ولا تسمح أبدًا بمخزون سالب.",
+                        "Each scan decreases the scanner-managed warehouse stock for the selected variant code and never allows negative inventory.",
                       )}
                 </p>
               </div>

@@ -25,18 +25,17 @@ describe("helpers/warehouseScan", () => {
     ).toBe(7);
   });
 
-  it("falls back to live product inventory when tracked warehouse stock would go negative", () => {
+  it("clamps tracked warehouse stock at zero when stock out exceeds balance", () => {
     expect(
       resolveTrackedWarehouseQuantity({
         currentWarehouseQuantity: 0,
         movementType: "out",
         quantity: 1,
-        fallbackQuantity: 6,
       }),
-    ).toBe(6);
+    ).toBe(0);
   });
 
-  it("builds a mirrored inventory row for product-only scanner mode", () => {
+  it("builds a mirrored inventory row for local warehouse fallback mode", () => {
     expect(
       buildMirroredInventoryRow({
         product: {

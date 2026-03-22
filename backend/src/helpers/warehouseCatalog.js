@@ -1,3 +1,5 @@
+import { extractWarehouseInventorySnapshot } from "./productLocalMetadata.js";
+
 const DEFAULT_VARIANT_TITLES = new Set(["default", "default title"]);
 const INTERNAL_CODE_PREFIX = "INT-";
 
@@ -110,16 +112,30 @@ export const getVariantDisplayTitle = (product, variant, index) => {
   return rawTitle;
 };
 
-export const buildFallbackVariant = (product) => ({
-  id: product?.shopify_id || product?.id || null,
-  title: product?.title || "Default Variant",
-  sku: product?.sku || "",
-  barcode: "",
-  price: product?.price ?? null,
-  inventory_quantity: product?.inventory_quantity ?? 0,
-  created_at: product?.created_at || null,
-  updated_at: product?.updated_at || null,
-});
+export const buildFallbackVariant = (product) => {
+  const localWarehouseSnapshot = extractWarehouseInventorySnapshot(
+    parseWarehouseJsonField(product?.data),
+  );
+
+  return {
+    id: product?.shopify_id || product?.id || null,
+    title: product?.title || "Default Variant",
+    sku: product?.sku || "",
+    barcode: "",
+    price: product?.price ?? null,
+    inventory_quantity: product?.inventory_quantity ?? 0,
+    created_at: product?.created_at || null,
+    updated_at: product?.updated_at || null,
+    _tetiano_warehouse_quantity: localWarehouseSnapshot.quantity,
+    _tetiano_warehouse_last_scanned_at: localWarehouseSnapshot.last_scanned_at,
+    _tetiano_warehouse_last_movement_type:
+      localWarehouseSnapshot.last_movement_type,
+    _tetiano_warehouse_last_movement_quantity:
+      localWarehouseSnapshot.last_movement_quantity,
+    _tetiano_warehouse_created_at: localWarehouseSnapshot.created_at,
+    _tetiano_warehouse_updated_at: localWarehouseSnapshot.updated_at,
+  };
+};
 
 const buildInternalCode = (product, variant) => {
   const variantId = normalizeIdentifier(variant?.id);
@@ -171,6 +187,7 @@ export const buildWarehouseVariantCatalogEntry = (
   const variantTitle = getVariantDisplayTitle(product, variant, index);
   const isDefaultVariant = variantTitle === "Default Variant";
   const productTitle = product?.title || "Untitled product";
+  const localWarehouseSnapshot = extractWarehouseInventorySnapshot(variant);
 
   return {
     key: `${product?.id || "product"}:${variant?.id || primaryCode.code}:${index}`,
@@ -204,6 +221,14 @@ export const buildWarehouseVariantCatalogEntry = (
     shopify_inventory_quantity: toWarehouseNumber(
       variant?.inventory_quantity ?? product?.inventory_quantity,
     ),
+    local_warehouse_quantity: toWarehouseNumber(localWarehouseSnapshot.quantity),
+    local_last_scanned_at: localWarehouseSnapshot.last_scanned_at,
+    local_last_movement_type: localWarehouseSnapshot.last_movement_type,
+    local_last_movement_quantity: toWarehouseNumber(
+      localWarehouseSnapshot.last_movement_quantity,
+    ),
+    local_created_at: localWarehouseSnapshot.created_at,
+    local_updated_at: localWarehouseSnapshot.updated_at,
     has_multiple_variants: variantsCount > 1,
     variants_count: variantsCount,
     option_values: [variant?.option1, variant?.option2, variant?.option3]

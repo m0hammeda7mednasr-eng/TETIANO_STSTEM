@@ -4,16 +4,18 @@ import { authenticateToken } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { getAccessibleStoreIds } from "../models/index.js";
 import {
-  buildMirroredInventoryRow,
   calculateScannedQuantity,
-  resolveTrackedWarehouseQuantity,
+  buildMirroredInventoryRow,
 } from "../helpers/warehouseScan.js";
 import { emitRealtimeEvent } from "../services/realtimeEventService.js";
-import { ProductUpdateService } from "../services/productUpdateService.js";
 import {
   buildWarehouseVariantCatalog,
   normalizeWarehouseCode,
 } from "../helpers/warehouseCatalog.js";
+import {
+  applyProductWarehouseInventorySnapshot,
+  getProductWarehouseInventorySnapshot,
+} from "../helpers/productLocalMetadata.js";
 
 const router = express.Router();
 
@@ -534,63 +536,135 @@ const findCatalogVariantByScanCode = async ({ storeId, scanCode }) => {
   return catalog.rowsByAnyCode.get(normalizedCode) || null;
 };
 
-const isMissingVariantInventoryError = (error) => {
-  const message = String(error?.message || "");
-  return (
-    message === "No variants found for this product." ||
-    (message.startsWith("Variant ") &&
-      message.endsWith(" was not found for this product."))
-  );
-};
-
-const syncScannedProductInventory = async ({
-  userId,
+const getFallbackScanEvent = ({
   storeId,
+  userId,
   product,
   movementType,
   quantity,
+  scanCode,
+  note,
+  nowIso,
+}) => ({
+  id: null,
+  store_id: storeId,
+  sku: product.warehouse_code,
+  product_id: product.product_id,
+  user_id: userId || null,
+  movement_type: movementType,
+  quantity,
+  scan_code: scanCode,
+  note: note || null,
+  created_at: nowIso,
+});
+
+const buildInsufficientWarehouseStockError = ({
+  product,
+  quantity,
+  currentWarehouseQuantity,
+}) =>
+  createHttpError(
+    400,
+    `Cannot scan out ${quantity}. Available warehouse stock for ${product.warehouse_code} is ${currentWarehouseQuantity}.`,
+  );
+
+const getNextWarehouseQuantity = ({
+  product,
+  currentWarehouseQuantity,
+  movementType,
+  quantity,
 }) => {
-  const currentProductQuantity = toNumber(product?.shopify_inventory_quantity);
-  const nextProductQuantity = calculateScannedQuantity({
-    currentQuantity: currentProductQuantity,
+  const nextWarehouseQuantity = calculateScannedQuantity({
+    currentQuantity: currentWarehouseQuantity,
     movementType,
     quantity,
   });
 
-  if (nextProductQuantity < 0) {
-    throw createHttpError(
-      400,
-      `Cannot scan out ${quantity}. Available product stock for ${product.warehouse_code} is ${currentProductQuantity}.`,
-    );
+  if (movementType === "out" && nextWarehouseQuantity < 0) {
+    throw buildInsufficientWarehouseStockError({
+      product,
+      quantity,
+      currentWarehouseQuantity,
+    });
   }
 
+  return Math.max(0, nextWarehouseQuantity);
+};
+
+const persistLocalWarehouseTracking = async ({
+  storeId,
+  userId,
+  product,
+  movementType,
+  quantity,
+  scanCode,
+  note,
+  nowIso,
+}) => {
   if (!product?.product_id) {
     throw createHttpError(400, "Matched product is missing a local product id");
   }
 
-  try {
-    if (product?.variant_id) {
-      await ProductUpdateService.updateProduct(userId, product.product_id, {
-        variant_updates: [
-          {
-            id: product.variant_id,
-            inventory_quantity: nextProductQuantity,
-          },
-        ],
-      });
-    } else {
-      await ProductUpdateService.updateProduct(userId, product.product_id, {
-        inventory: nextProductQuantity,
-      });
-    }
-  } catch (error) {
-    if (!product?.variant_id || !isMissingVariantInventoryError(error)) {
-      throw error;
-    }
+  const fallbackScanEvent = getFallbackScanEvent({
+    storeId,
+    userId,
+    product,
+    movementType,
+    quantity,
+    scanCode,
+    note,
+    nowIso,
+  });
+  const { data: productRow, error: productLookupError } = await db
+    .from("products")
+    .select("id, data")
+    .eq("id", product.product_id)
+    .maybeSingle();
 
-    await ProductUpdateService.updateProduct(userId, product.product_id, {
-      inventory: nextProductQuantity,
-    });
+  if (productLookupError) {
+    throw productLookupError;
+  }
+
+  if (!productRow?.id) {
+    throw createHttpError(404, "Matched product no longer exists locally");
+  }
+
+  const currentSnapshot = getProductWarehouseInventorySnapshot(productRow.data, {
+    variantId: product.variant_id,
+    sku: product.sku,
+  });
+  const currentWarehouseQuantity = toNumber(currentSnapshot.quantity);
+  const nextWarehouseQuantity = getNextWarehouseQuantity({
+    product,
+    currentWarehouseQuantity,
+    movementType,
+    quantity,
+  });
+  const nextData = applyProductWarehouseInventorySnapshot(
+    productRow.data,
+    {
+      variantId: product.variant_id,
+      sku: product.sku,
+    },
+    {
+      quantity: nextWarehouseQuantity,
+      last_scanned_at: nowIso,
+      last_movement_type: movementType,
+      last_movement_quantity: quantity,
+      created_at: currentSnapshot.created_at || nowIso,
+      updated_at: nowIso,
+    },
+  );
+  const { error: updateError } = await db
+    .from("products")
+    .update({
+      data: nextData,
+      local_updated_at: nowIso,
+    })
+    .eq("id", product.product_id);
+
+  if (updateError) {
+    throw updateError;
   }
 
   clearProductCatalog(storeId);
@@ -601,13 +675,28 @@ const syncScannedProductInventory = async ({
       scanCode: product.warehouse_code,
     })) || {
       ...product,
-      shopify_inventory_quantity: nextProductQuantity,
-      updated_at: new Date().toISOString(),
+      local_warehouse_quantity: nextWarehouseQuantity,
+      local_last_scanned_at: nowIso,
+      local_last_movement_type: movementType,
+      local_last_movement_quantity: quantity,
+      local_created_at: currentSnapshot.created_at || nowIso,
+      local_updated_at: nowIso,
     };
 
   return {
-    currentProductQuantity,
-    nextProductQuantity,
+    savedInventory: buildMirroredInventoryRow({
+      product: refreshedProduct,
+      quantity: nextWarehouseQuantity,
+      scannedAt: nowIso,
+      movementType,
+      movementQuantity: quantity,
+      createdAt: currentSnapshot.created_at || nowIso,
+      updatedAt: nowIso,
+    }),
+    scanEvent: fallbackScanEvent,
+    trackingMode: "local_product_data",
+    warehouseTrackingSaved: false,
+    nextWarehouseQuantity,
     refreshedProduct,
   };
 };
@@ -621,21 +710,7 @@ const persistWarehouseTracking = async ({
   scanCode,
   note,
   nowIso,
-  nextProductQuantity,
 }) => {
-  const fallbackScanEvent = {
-    id: null,
-    store_id: storeId,
-    sku: product.warehouse_code,
-    product_id: product.product_id,
-    user_id: userId || null,
-    movement_type: movementType,
-    quantity,
-    scan_code: scanCode,
-    note: note || null,
-    created_at: nowIso,
-  };
-
   try {
     const { data: existingInventory, error: inventoryLookupError } = await db
       .from("warehouse_inventory")
@@ -651,11 +726,11 @@ const persistWarehouseTracking = async ({
     }
 
     const currentWarehouseQuantity = toNumber(existingInventory?.quantity);
-    const nextWarehouseQuantity = resolveTrackedWarehouseQuantity({
+    const nextWarehouseQuantity = getNextWarehouseQuantity({
+      product,
       currentWarehouseQuantity,
       movementType,
       quantity,
-      fallbackQuantity: nextProductQuantity,
     });
 
     const inventoryPayload = {
@@ -725,25 +800,26 @@ const persistWarehouseTracking = async ({
     return {
       savedInventory,
       scanEvent,
-      trackingMode: "warehouse_and_product",
+      trackingMode: "warehouse_tables",
       warehouseTrackingSaved: true,
       nextWarehouseQuantity,
+      refreshedProduct: product,
     };
   } catch (error) {
     if (!isSchemaCompatibilityError(error)) {
-      console.warn(
-        "Warehouse tracking save failed after product inventory update:",
-        error.message,
-      );
+      throw error;
     }
 
-    return {
-      savedInventory: null,
-      scanEvent: fallbackScanEvent,
-      trackingMode: "product_inventory_only",
-      warehouseTrackingSaved: false,
-      nextWarehouseQuantity: nextProductQuantity,
-    };
+    return persistLocalWarehouseTracking({
+      storeId,
+      userId,
+      product,
+      movementType,
+      quantity,
+      scanCode,
+      note,
+      nowIso,
+    });
   }
 };
 
@@ -805,7 +881,7 @@ const writeActivityLog = async ({
   scanCode,
   note,
   nextWarehouseQuantity,
-  nextProductQuantity,
+  shopifyInventoryQuantity,
   trackingMode,
 }) => {
   try {
@@ -825,7 +901,7 @@ const writeActivityLog = async ({
         quantity,
         store_id: storeId,
         warehouse_quantity_after: nextWarehouseQuantity,
-        product_inventory_after: nextProductQuantity,
+        shopify_inventory_reference: shopifyInventoryQuantity,
         tracking_mode: trackingMode,
         note: note || null,
       },
@@ -869,7 +945,12 @@ router.get("/stock", requirePermission("can_view_products"), async (req, res) =>
           ? inventoryByCode.get(variantRow.warehouse_code)
           : buildMirroredInventoryRow({
               product: variantRow,
-              quantity: variantRow.shopify_inventory_quantity,
+              quantity: variantRow.local_warehouse_quantity,
+              scannedAt: variantRow.local_last_scanned_at,
+              movementType: variantRow.local_last_movement_type,
+              movementQuantity: variantRow.local_last_movement_quantity,
+              createdAt: variantRow.local_created_at,
+              updatedAt: variantRow.local_updated_at,
             }),
       ),
     );
@@ -897,11 +978,11 @@ router.get("/stock", requirePermission("can_view_products"), async (req, res) =>
       schema_ready: warehouseTablesReady,
       setup_required: !warehouseTablesReady,
       tracking_mode: warehouseTablesReady
-        ? "warehouse_and_product"
-        : "product_inventory_only",
+        ? "warehouse_tables"
+        : "local_product_data",
       message: warehouseTablesReady
         ? null
-        : "Warehouse tables are not deployed yet. Showing live product inventory instead.",
+        : "Warehouse tables are not deployed yet. Showing local warehouse stock saved on the product record.",
     });
   } catch (error) {
     console.error("Error fetching warehouse stock:", error);
@@ -962,9 +1043,9 @@ router.get("/scans", requirePermission("can_view_products"), async (req, res) =>
         generated_at: new Date().toISOString(),
         schema_ready: false,
         setup_required: true,
-        tracking_mode: "product_inventory_only",
+        tracking_mode: "local_product_data",
         message:
-          "Warehouse scan history is not available yet. Scanner actions still update live product stock.",
+          "Warehouse scan history is not available yet. Scanner actions still update local warehouse stock.",
       });
     }
 
@@ -1004,37 +1085,30 @@ router.post("/scan", requirePermission("can_edit_products"), async (req, res) =>
     }
 
     const nowIso = new Date().toISOString();
-    const {
-      nextProductQuantity,
-      refreshedProduct,
-    } = await syncScannedProductInventory({
-      userId: req.user?.id,
-      storeId,
-      product,
-      movementType,
-      quantity,
-    });
     const trackingResult = await persistWarehouseTracking({
       storeId,
       userId: req.user?.id,
-      product: refreshedProduct,
+      product,
       movementType,
       quantity,
       scanCode,
       note,
       nowIso,
-      nextProductQuantity,
     });
+    const refreshedProduct = trackingResult.refreshedProduct || product;
     const inventorySnapshot = serializeWarehouseVariantRow(
       refreshedProduct,
       trackingResult.savedInventory ||
         buildMirroredInventoryRow({
           product: refreshedProduct,
-          quantity: nextProductQuantity,
+          quantity: trackingResult.nextWarehouseQuantity,
           scannedAt: nowIso,
           movementType,
           movementQuantity: quantity,
-          createdAt: nowIso,
+          createdAt:
+            trackingResult.savedInventory?.created_at ||
+            refreshedProduct?.local_created_at ||
+            nowIso,
           updatedAt: nowIso,
         }),
     );
@@ -1048,7 +1122,7 @@ router.post("/scan", requirePermission("can_edit_products"), async (req, res) =>
       scanCode,
       note,
       nextWarehouseQuantity: trackingResult.nextWarehouseQuantity,
-      nextProductQuantity,
+      shopifyInventoryQuantity: toNumber(refreshedProduct?.shopify_inventory_quantity),
       trackingMode: trackingResult.trackingMode,
     });
 

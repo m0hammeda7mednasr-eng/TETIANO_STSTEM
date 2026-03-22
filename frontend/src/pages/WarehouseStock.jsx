@@ -175,7 +175,7 @@ export default function WarehouseStock() {
               schemaReady = false;
               setupMessage =
                 responsePayload?.message ||
-                "Warehouse is not configured yet on the database.";
+                "Warehouse tables are not configured yet on the database.";
             }
           },
         },
@@ -282,8 +282,8 @@ export default function WarehouseStock() {
                   </h1>
                   <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-600">
                     {select(
-                      "كل فاريانت من Shopify ظاهر هنا مع كود مخزني جاهز للمسح. الماسح يقدر يشتغل بـ SKU أو الباركود أو كود داخلي بديل عند نقص البيانات.",
-                      "Every Shopify variant is listed here with a warehouse code ready for scanning. The scanner can work with SKU, barcode, or a generated internal code when product data is incomplete.",
+                      "كل فاريانت من Shopify ظاهر هنا مع كود مخزني جاهز للمسح. رقم Shopify يظل ظاهر كمرجع، بينما مخزون المخزن الفعلي يُدار بشكل منفصل من السكانر فقط.",
+                      "Every Shopify variant is listed here with a warehouse code ready for scanning. Shopify stock stays visible as a reference, while warehouse stock is tracked separately by the scanner.",
                     )}
                   </p>
                   {lastUpdatedAt && (
@@ -347,8 +347,8 @@ export default function WarehouseStock() {
                 <p className="mt-1 text-sm">
                   {setupNotice}.{" "}
                   {select(
-                    "الصفحة تعرض الآن مخزون المنتجات المباشر، والسكان سيستمر في تحديثه حتى لو سجل warehouse التفصيلي غير متاح.",
-                    "The page is showing live product stock, and the scanner will keep updating it even if detailed warehouse history is unavailable.",
+                    "الصفحة تعرض الآن مخزون المخزن المحلي المنفصل عن Shopify، والسكان سيستمر في تحديثه حتى لو جداول سجل warehouse التفصيلي غير متاحة.",
+                    "The page is showing scanner-managed warehouse stock saved separately from Shopify, even if detailed warehouse history tables are unavailable.",
                   )}
                 </p>
               </div>
@@ -396,8 +396,8 @@ export default function WarehouseStock() {
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {select(
-                    "قارن مخزون Shopify بحركات المخزن لنفس الكود المخزني.",
-                    "Compare Shopify inventory against warehouse movements for the same warehouse code.",
+                    "قارن رقم Shopify المرجعي برصيد المخزن الفعلي الذي يديره السكانر لنفس الكود المخزني.",
+                    "Compare Shopify stock against the separate scanner-managed warehouse balance for the same warehouse code.",
                   )}
                 </p>
               </div>

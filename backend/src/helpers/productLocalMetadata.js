@@ -1,4 +1,12 @@
 const LOCAL_PRODUCT_METADATA_KEY = "_tetiano_local_product";
+const WAREHOUSE_LOCAL_FIELDS = {
+  quantity: "_tetiano_warehouse_quantity",
+  lastScannedAt: "_tetiano_warehouse_last_scanned_at",
+  lastMovementType: "_tetiano_warehouse_last_movement_type",
+  lastMovementQuantity: "_tetiano_warehouse_last_movement_quantity",
+  createdAt: "_tetiano_warehouse_created_at",
+  updatedAt: "_tetiano_warehouse_updated_at",
+};
 
 const hasOwn = (value, key) =>
   Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
@@ -35,6 +43,11 @@ const parseNumeric = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const normalizeWarehouseMovementType = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized === "in" || normalized === "out" ? normalized : null;
+};
+
 const getProductVariants = (productData = {}) =>
   Array.isArray(productData?.variants) ? productData.variants : [];
 
@@ -42,11 +55,96 @@ const getVariantKey = (variant = {}, fallbackIndex = 0) =>
   normalizeText(variant?.id || variant?.admin_graphql_api_id || variant?.sku) ||
   `variant-${fallbackIndex}`;
 
-const sumVariantInventory = (variants = []) =>
-  variants.reduce(
-    (sum, variant) => sum + parseNumeric(variant?.inventory_quantity),
-    0,
-  );
+const clearWarehouseInventorySnapshot = (value = {}) => {
+  const nextValue = { ...toPlainObject(value) };
+
+  Object.values(WAREHOUSE_LOCAL_FIELDS).forEach((fieldName) => {
+    delete nextValue[fieldName];
+  });
+
+  return nextValue;
+};
+
+export const extractWarehouseInventorySnapshot = (value) => ({
+  quantity: parseNumeric(value?.[WAREHOUSE_LOCAL_FIELDS.quantity]),
+  last_scanned_at:
+    normalizeText(value?.[WAREHOUSE_LOCAL_FIELDS.lastScannedAt]) || null,
+  last_movement_type: normalizeWarehouseMovementType(
+    value?.[WAREHOUSE_LOCAL_FIELDS.lastMovementType],
+  ),
+  last_movement_quantity: parseNumeric(
+    value?.[WAREHOUSE_LOCAL_FIELDS.lastMovementQuantity],
+  ),
+  created_at: normalizeText(value?.[WAREHOUSE_LOCAL_FIELDS.createdAt]) || null,
+  updated_at: normalizeText(value?.[WAREHOUSE_LOCAL_FIELDS.updatedAt]) || null,
+});
+
+const applyWarehouseInventorySnapshot = (value, snapshot = {}) => {
+  const nextValue = clearWarehouseInventorySnapshot(value);
+  const existingSnapshot = extractWarehouseInventorySnapshot(value);
+  const normalizedSnapshot = {
+    quantity: parseNumeric(snapshot.quantity),
+    last_scanned_at: normalizeText(snapshot.last_scanned_at) || null,
+    last_movement_type: normalizeWarehouseMovementType(
+      snapshot.last_movement_type,
+    ),
+    last_movement_quantity: parseNumeric(snapshot.last_movement_quantity),
+    created_at:
+      normalizeText(snapshot.created_at) || existingSnapshot.created_at || null,
+    updated_at:
+      normalizeText(snapshot.updated_at) ||
+      normalizeText(snapshot.last_scanned_at) ||
+      null,
+  };
+
+  nextValue[WAREHOUSE_LOCAL_FIELDS.quantity] = normalizedSnapshot.quantity;
+
+  if (normalizedSnapshot.last_scanned_at) {
+    nextValue[WAREHOUSE_LOCAL_FIELDS.lastScannedAt] =
+      normalizedSnapshot.last_scanned_at;
+  }
+
+  if (normalizedSnapshot.last_movement_type) {
+    nextValue[WAREHOUSE_LOCAL_FIELDS.lastMovementType] =
+      normalizedSnapshot.last_movement_type;
+  }
+
+  if (normalizedSnapshot.last_movement_quantity > 0) {
+    nextValue[WAREHOUSE_LOCAL_FIELDS.lastMovementQuantity] =
+      normalizedSnapshot.last_movement_quantity;
+  }
+
+  if (normalizedSnapshot.created_at) {
+    nextValue[WAREHOUSE_LOCAL_FIELDS.createdAt] = normalizedSnapshot.created_at;
+  }
+
+  if (normalizedSnapshot.updated_at) {
+    nextValue[WAREHOUSE_LOCAL_FIELDS.updatedAt] = normalizedSnapshot.updated_at;
+  }
+
+  return nextValue;
+};
+
+const findVariantIndex = (variants = [], selector = {}) => {
+  const normalizedVariantId = normalizeText(selector?.variantId);
+  if (normalizedVariantId) {
+    const matchedIndex = variants.findIndex(
+      (variant) => normalizeText(variant?.id) === normalizedVariantId,
+    );
+    if (matchedIndex >= 0) {
+      return matchedIndex;
+    }
+  }
+
+  const normalizedSku = normalizeText(selector?.sku);
+  if (normalizedSku) {
+    return variants.findIndex(
+      (variant) => normalizeText(variant?.sku) === normalizedSku,
+    );
+  }
+
+  return -1;
+};
 
 export const extractProductLocalMetadata = (productData) => {
   const data = toPlainObject(productData);
@@ -82,24 +180,53 @@ export const preserveProductLocalMetadata = (incomingData, existingData) =>
     extractProductLocalMetadata(existingData),
   );
 
-export const zeroProductInventoryData = (productData) => {
+export const getProductWarehouseInventorySnapshot = (
+  productData,
+  selector = {},
+) => {
   const nextData = clonePlainObject(productData);
   const variants = getProductVariants(nextData);
 
   if (variants.length > 0) {
-    nextData.variants = variants.map((variant) => ({
-      ...variant,
-      inventory_quantity: 0,
-    }));
-    nextData.inventory_quantity = 0;
-    return nextData;
+    const targetIndex = findVariantIndex(variants, selector);
+    if (targetIndex < 0) {
+      return extractWarehouseInventorySnapshot({});
+    }
+
+    return extractWarehouseInventorySnapshot(variants[targetIndex]);
   }
 
-  nextData.inventory_quantity = 0;
-  return nextData;
+  return extractWarehouseInventorySnapshot(nextData);
 };
 
-export const preserveProductInventoryData = (incomingData, existingData) => {
+export const applyProductWarehouseInventorySnapshot = (
+  productData,
+  selector = {},
+  snapshot = {},
+) => {
+  const nextData = clonePlainObject(productData);
+  const variants = getProductVariants(nextData);
+
+  if (variants.length > 0) {
+    const targetIndex = findVariantIndex(variants, selector);
+
+    if (targetIndex < 0) {
+      throw new Error("Warehouse variant metadata target was not found.");
+    }
+
+    nextData.variants = variants.map((variant, index) =>
+      index === targetIndex
+        ? applyWarehouseInventorySnapshot(variant, snapshot)
+        : variant,
+    );
+
+    return clearWarehouseInventorySnapshot(nextData);
+  }
+
+  return applyWarehouseInventorySnapshot(nextData, snapshot);
+};
+
+export const preserveProductWarehouseData = (incomingData, existingData) => {
   const nextData = clonePlainObject(incomingData);
   const existing = clonePlainObject(existingData);
   const incomingVariants = getProductVariants(nextData);
@@ -117,17 +244,25 @@ export const preserveProductInventoryData = (incomingData, existingData) => {
       const key = getVariantKey(variant, index);
       const existingVariant = existingVariantsByKey.get(key);
 
-      return {
-        ...variant,
-        inventory_quantity: existingVariant
-          ? parseNumeric(existingVariant.inventory_quantity)
-          : 0,
-      };
+      return existingVariant
+        ? applyWarehouseInventorySnapshot(
+            variant,
+            extractWarehouseInventorySnapshot(existingVariant),
+          )
+        : applyWarehouseInventorySnapshot(variant, {});
     });
-    nextData.inventory_quantity = sumVariantInventory(nextData.variants);
+
+    delete nextData[WAREHOUSE_LOCAL_FIELDS.quantity];
+    delete nextData[WAREHOUSE_LOCAL_FIELDS.lastScannedAt];
+    delete nextData[WAREHOUSE_LOCAL_FIELDS.lastMovementType];
+    delete nextData[WAREHOUSE_LOCAL_FIELDS.lastMovementQuantity];
+    delete nextData[WAREHOUSE_LOCAL_FIELDS.createdAt];
+    delete nextData[WAREHOUSE_LOCAL_FIELDS.updatedAt];
     return nextData;
   }
 
-  nextData.inventory_quantity = parseNumeric(existing?.inventory_quantity);
-  return nextData;
+  return applyWarehouseInventorySnapshot(
+    nextData,
+    extractWarehouseInventorySnapshot(existing),
+  );
 };

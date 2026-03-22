@@ -1,8 +1,7 @@
 import { supabase } from "../supabaseClient.js";
 import {
-  preserveProductInventoryData,
   preserveProductLocalMetadata,
-  zeroProductInventoryData,
+  preserveProductWarehouseData,
 } from "../helpers/productLocalMetadata.js";
 import { preserveOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
 
@@ -579,25 +578,15 @@ const preserveLocalProductMetadataForUpserts = async (rows = []) => {
   return rows.map((row) => {
     const matchingRow = findMatchingProductRow(existingRows || [], row);
     if (row?.data === undefined) {
-      return {
-        ...row,
-        inventory_quantity: matchingRow
-          ? Number(matchingRow.inventory_quantity) || 0
-          : 0,
-      };
+      return row;
     }
 
     return {
       ...row,
-      inventory_quantity: matchingRow
-        ? Number(matchingRow.inventory_quantity) || 0
-        : 0,
-      data: matchingRow?.data
-        ? preserveProductLocalMetadata(
-            preserveProductInventoryData(row.data, matchingRow.data),
-            matchingRow.data,
-          )
-        : preserveProductLocalMetadata(zeroProductInventoryData(row.data), {}),
+      data: preserveProductLocalMetadata(
+        preserveProductWarehouseData(row.data, matchingRow?.data || {}),
+        matchingRow?.data || {},
+      ),
     };
   });
 };

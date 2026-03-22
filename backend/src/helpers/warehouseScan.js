@@ -26,17 +26,12 @@ export const resolveTrackedWarehouseQuantity = ({
   currentWarehouseQuantity,
   movementType,
   quantity,
-  fallbackQuantity,
 }) => {
   const nextTrackedQuantity = calculateScannedQuantity({
     currentQuantity: currentWarehouseQuantity,
     movementType,
     quantity,
   });
-
-  if (movementType === "out" && nextTrackedQuantity < 0) {
-    return Math.max(0, toNumber(fallbackQuantity));
-  }
 
   return Math.max(0, nextTrackedQuantity);
 };

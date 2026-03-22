@@ -342,13 +342,13 @@ export default function WarehouseStock() {
               <ShieldAlert size={18} className="mt-0.5 shrink-0" />
               <div>
                 <p className="font-semibold">
-                  {select("إعداد المخزن مطلوب", "Warehouse setup required")}
+                  {select("عرض مباشر للمخزون", "Live stock view")}
                 </p>
                 <p className="mt-1 text-sm">
                   {setupNotice}.{" "}
                   {select(
-                    "عرض المخزون يظل متاحًا، لكن إجراءات المسح لن تعمل حتى يتم إنشاء جداول المخزن.",
-                    "The stock view stays readable, but scan actions will not work until the warehouse tables are available.",
+                    "الصفحة تعرض الآن مخزون المنتجات المباشر، والسكان سيستمر في تحديثه حتى لو سجل warehouse التفصيلي غير متاح.",
+                    "The page is showing live product stock, and the scanner will keep updating it even if detailed warehouse history is unavailable.",
                   )}
                 </p>
               </div>

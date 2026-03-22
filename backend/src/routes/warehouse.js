@@ -3,7 +3,13 @@ import { supabase as db } from "../supabaseClient.js";
 import { authenticateToken } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { getAccessibleStoreIds } from "../models/index.js";
+import {
+  buildMirroredInventoryRow,
+  calculateScannedQuantity,
+  resolveTrackedWarehouseQuantity,
+} from "../helpers/warehouseScan.js";
 import { emitRealtimeEvent } from "../services/realtimeEventService.js";
+import { ProductUpdateService } from "../services/productUpdateService.js";
 import {
   buildWarehouseVariantCatalog,
   normalizeWarehouseCode,
@@ -177,6 +183,15 @@ const rememberProductCatalog = (storeId, value) => {
     updatedAt: Date.now(),
     value,
   });
+};
+
+const clearProductCatalog = (storeId) => {
+  const cacheKey = String(storeId || "").trim();
+  if (!cacheKey) {
+    return;
+  }
+
+  productCatalogCache.delete(cacheKey);
 };
 
 const getAdminStoreIds = async () => {
@@ -519,6 +534,237 @@ const findCatalogVariantByScanCode = async ({ storeId, scanCode }) => {
   return catalog.rowsByAnyCode.get(normalizedCode) || null;
 };
 
+const isMissingVariantInventoryError = (error) => {
+  const message = String(error?.message || "");
+  return (
+    message === "No variants found for this product." ||
+    (message.startsWith("Variant ") &&
+      message.endsWith(" was not found for this product."))
+  );
+};
+
+const syncScannedProductInventory = async ({
+  userId,
+  storeId,
+  product,
+  movementType,
+  quantity,
+}) => {
+  const currentProductQuantity = toNumber(product?.shopify_inventory_quantity);
+  const nextProductQuantity = calculateScannedQuantity({
+    currentQuantity: currentProductQuantity,
+    movementType,
+    quantity,
+  });
+
+  if (nextProductQuantity < 0) {
+    throw createHttpError(
+      400,
+      `Cannot scan out ${quantity}. Available product stock for ${product.warehouse_code} is ${currentProductQuantity}.`,
+    );
+  }
+
+  if (!product?.product_id) {
+    throw createHttpError(400, "Matched product is missing a local product id");
+  }
+
+  try {
+    if (product?.variant_id) {
+      await ProductUpdateService.updateProduct(userId, product.product_id, {
+        variant_updates: [
+          {
+            id: product.variant_id,
+            inventory_quantity: nextProductQuantity,
+          },
+        ],
+      });
+    } else {
+      await ProductUpdateService.updateProduct(userId, product.product_id, {
+        inventory: nextProductQuantity,
+      });
+    }
+  } catch (error) {
+    if (!product?.variant_id || !isMissingVariantInventoryError(error)) {
+      throw error;
+    }
+
+    await ProductUpdateService.updateProduct(userId, product.product_id, {
+      inventory: nextProductQuantity,
+    });
+  }
+
+  clearProductCatalog(storeId);
+
+  const refreshedProduct =
+    (await findCatalogVariantByScanCode({
+      storeId,
+      scanCode: product.warehouse_code,
+    })) || {
+      ...product,
+      shopify_inventory_quantity: nextProductQuantity,
+      updated_at: new Date().toISOString(),
+    };
+
+  return {
+    currentProductQuantity,
+    nextProductQuantity,
+    refreshedProduct,
+  };
+};
+
+const persistWarehouseTracking = async ({
+  storeId,
+  userId,
+  product,
+  movementType,
+  quantity,
+  scanCode,
+  note,
+  nowIso,
+  nextProductQuantity,
+}) => {
+  const fallbackScanEvent = {
+    id: null,
+    store_id: storeId,
+    sku: product.warehouse_code,
+    product_id: product.product_id,
+    user_id: userId || null,
+    movement_type: movementType,
+    quantity,
+    scan_code: scanCode,
+    note: note || null,
+    created_at: nowIso,
+  };
+
+  try {
+    const { data: existingInventory, error: inventoryLookupError } = await db
+      .from("warehouse_inventory")
+      .select(
+        "id, store_id, product_id, sku, quantity, last_scanned_at, last_movement_type, last_movement_quantity",
+      )
+      .eq("store_id", storeId)
+      .eq("sku", product.warehouse_code)
+      .maybeSingle();
+
+    if (inventoryLookupError && inventoryLookupError.code !== "PGRST116") {
+      throw inventoryLookupError;
+    }
+
+    const currentWarehouseQuantity = toNumber(existingInventory?.quantity);
+    const nextWarehouseQuantity = resolveTrackedWarehouseQuantity({
+      currentWarehouseQuantity,
+      movementType,
+      quantity,
+      fallbackQuantity: nextProductQuantity,
+    });
+
+    const inventoryPayload = {
+      store_id: storeId,
+      product_id: product.product_id,
+      sku: product.warehouse_code,
+      quantity: nextWarehouseQuantity,
+      last_scanned_at: nowIso,
+      last_movement_type: movementType,
+      last_movement_quantity: quantity,
+      updated_at: nowIso,
+    };
+
+    let savedInventory;
+    if (existingInventory?.id) {
+      const { data, error } = await db
+        .from("warehouse_inventory")
+        .update(inventoryPayload)
+        .eq("id", existingInventory.id)
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      savedInventory = data;
+    } else {
+      const { data, error } = await db
+        .from("warehouse_inventory")
+        .insert({
+          ...inventoryPayload,
+          created_at: nowIso,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      savedInventory = data;
+    }
+
+    const { data: scanEvent, error: scanEventError } = await db
+      .from("warehouse_scan_events")
+      .insert({
+        store_id: storeId,
+        sku: product.warehouse_code,
+        product_id: product.product_id,
+        user_id: userId || null,
+        movement_type: movementType,
+        quantity,
+        scan_code: scanCode,
+        note: note || null,
+        created_at: nowIso,
+      })
+      .select(
+        "id, store_id, sku, product_id, user_id, movement_type, quantity, scan_code, note, created_at",
+      )
+      .single();
+
+    if (scanEventError) {
+      throw scanEventError;
+    }
+
+    return {
+      savedInventory,
+      scanEvent,
+      trackingMode: "warehouse_and_product",
+      warehouseTrackingSaved: true,
+      nextWarehouseQuantity,
+    };
+  } catch (error) {
+    if (!isSchemaCompatibilityError(error)) {
+      console.warn(
+        "Warehouse tracking save failed after product inventory update:",
+        error.message,
+      );
+    }
+
+    return {
+      savedInventory: null,
+      scanEvent: fallbackScanEvent,
+      trackingMode: "product_inventory_only",
+      warehouseTrackingSaved: false,
+      nextWarehouseQuantity: nextProductQuantity,
+    };
+  }
+};
+
+const serializeScanProduct = (product) => ({
+  id: product?.product_id || product?.id || null,
+  product_id: product?.product_id || product?.id || null,
+  variant_id: product?.variant_id || null,
+  title: product?.title || "",
+  product_title: product?.product_title || product?.title || "",
+  variant_title: product?.variant_title || "",
+  display_title: product?.display_title || product?.title || "",
+  warehouse_code: product?.warehouse_code || product?.sku || "",
+  warehouse_code_source: product?.warehouse_code_source || "legacy",
+  sku: product?.sku || "",
+  vendor: product?.vendor || "",
+  price: product?.price ?? null,
+  barcode: product?.barcode || "",
+  image_url: product?.image_url || "",
+  option_values: Array.isArray(product?.option_values) ? product.option_values : [],
+});
+
 const enrichScanEvent = (scan, catalog) => {
   const normalizedCode = normalizeSku(scan?.sku || scan?.scan_code);
   const variantRow = normalizedCode ? catalog.rowsByAnyCode.get(normalizedCode) : null;
@@ -558,7 +804,9 @@ const writeActivityLog = async ({
   storeId,
   scanCode,
   note,
-  nextQuantity,
+  nextWarehouseQuantity,
+  nextProductQuantity,
+  trackingMode,
 }) => {
   try {
     const { error } = await db.from("activity_log").insert({
@@ -576,7 +824,9 @@ const writeActivityLog = async ({
         movement_type: movementType,
         quantity,
         store_id: storeId,
-        warehouse_quantity_after: nextQuantity,
+        warehouse_quantity_after: nextWarehouseQuantity,
+        product_inventory_after: nextProductQuantity,
+        tracking_mode: trackingMode,
         note: note || null,
       },
     });
@@ -597,24 +847,40 @@ router.get("/stock", requirePermission("can_view_products"), async (req, res) =>
     const pagination = getPagination(req.query);
     const sortOptions = getSortOptions(req.query);
 
-    const [catalog, inventoryRows] = await Promise.all([
-      getWarehouseProductCatalog(storeId),
-      getInventoryRowsForStore(storeId),
-    ]);
+    const catalog = await getWarehouseProductCatalog(storeId);
+    let inventoryRows = [];
+    let warehouseTablesReady = true;
+
+    try {
+      inventoryRows = await getInventoryRowsForStore(storeId);
+    } catch (inventoryError) {
+      if (!isSchemaCompatibilityError(inventoryError)) {
+        throw inventoryError;
+      }
+
+      warehouseTablesReady = false;
+    }
 
     const inventoryByCode = mapInventoryRowsByCode(inventoryRows);
     const catalogRows = catalog.rows.map((variantRow) =>
       serializeWarehouseVariantRow(
         variantRow,
-        inventoryByCode.get(variantRow.warehouse_code),
+        warehouseTablesReady
+          ? inventoryByCode.get(variantRow.warehouse_code)
+          : buildMirroredInventoryRow({
+              product: variantRow,
+              quantity: variantRow.shopify_inventory_quantity,
+            }),
       ),
     );
-    const orphanRows = inventoryRows
-      .filter(
-        (inventoryRow) =>
-          !catalog.rowsByPrimaryCode.has(normalizeSku(inventoryRow?.sku)),
-      )
-      .map((inventoryRow) => buildOrphanWarehouseRow(inventoryRow));
+    const orphanRows = warehouseTablesReady
+      ? inventoryRows
+          .filter(
+            (inventoryRow) =>
+              !catalog.rowsByPrimaryCode.has(normalizeSku(inventoryRow?.sku)),
+          )
+          .map((inventoryRow) => buildOrphanWarehouseRow(inventoryRow))
+      : [];
     const sortedRows = sortWarehouseRows(
       [...catalogRows, ...orphanRows],
       sortOptions,
@@ -628,6 +894,14 @@ router.get("/stock", requirePermission("can_view_products"), async (req, res) =>
       ...buildPaginatedCollection(rows, pagination),
       store_id: storeId,
       generated_at: new Date().toISOString(),
+      schema_ready: warehouseTablesReady,
+      setup_required: !warehouseTablesReady,
+      tracking_mode: warehouseTablesReady
+        ? "warehouse_and_product"
+        : "product_inventory_only",
+      message: warehouseTablesReady
+        ? null
+        : "Warehouse tables are not deployed yet. Showing live product inventory instead.",
     });
   } catch (error) {
     console.error("Error fetching warehouse stock:", error);
@@ -679,14 +953,19 @@ router.get("/scans", requirePermission("can_view_products"), async (req, res) =>
     console.error("Error fetching warehouse scans:", error);
 
     if (isSchemaCompatibilityError(error)) {
-      return res.json(
-        buildWarehouseSetupResponse({
-          limit: getPagination(req.query).limit,
-          offset: getPagination(req.query).offset,
-          storeId: getRequestedStoreId(req),
-          message: "Warehouse tables are not deployed yet",
-        }),
-      );
+      const pagination = getPagination(req.query);
+      const requestedStoreId = getRequestedStoreId(req);
+
+      return res.json({
+        ...buildPaginatedCollection([], pagination),
+        store_id: requestedStoreId,
+        generated_at: new Date().toISOString(),
+        schema_ready: false,
+        setup_required: true,
+        tracking_mode: "product_inventory_only",
+        message:
+          "Warehouse scan history is not available yet. Scanner actions still update live product stock.",
+      });
     }
 
     res.status(error.status || 500).json({
@@ -724,104 +1003,53 @@ router.post("/scan", requirePermission("can_edit_products"), async (req, res) =>
       );
     }
 
-    const { data: existingInventory, error: inventoryLookupError } = await db
-      .from("warehouse_inventory")
-      .select(
-        "id, store_id, product_id, sku, quantity, last_scanned_at, last_movement_type, last_movement_quantity",
-      )
-      .eq("store_id", storeId)
-      .eq("sku", product.warehouse_code)
-      .maybeSingle();
-
-    if (inventoryLookupError && inventoryLookupError.code !== "PGRST116") {
-      throw inventoryLookupError;
-    }
-
-    const currentQuantity = toNumber(existingInventory?.quantity);
-    const nextQuantity =
-      movementType === "in" ? currentQuantity + quantity : currentQuantity - quantity;
-
-    if (nextQuantity < 0) {
-      throw createHttpError(
-        400,
-        `Cannot scan out ${quantity}. Available warehouse quantity for ${product.warehouse_code} is ${currentQuantity}.`,
-      );
-    }
-
     const nowIso = new Date().toISOString();
-    const inventoryPayload = {
-      store_id: storeId,
-      product_id: product.product_id,
-      sku: product.warehouse_code,
-      quantity: nextQuantity,
-      last_scanned_at: nowIso,
-      last_movement_type: movementType,
-      last_movement_quantity: quantity,
-      updated_at: nowIso,
-    };
-
-    let savedInventory;
-    if (existingInventory?.id) {
-      const { data, error } = await db
-        .from("warehouse_inventory")
-        .update(inventoryPayload)
-        .eq("id", existingInventory.id)
-        .select()
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      savedInventory = data;
-    } else {
-      const { data, error } = await db
-        .from("warehouse_inventory")
-        .insert({
-          ...inventoryPayload,
-          created_at: nowIso,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      savedInventory = data;
-    }
-
-    const { data: scanEvent, error: scanEventError } = await db
-      .from("warehouse_scan_events")
-      .insert({
-        store_id: storeId,
-        sku: product.warehouse_code,
-        product_id: product.product_id,
-        user_id: req.user?.id || null,
-        movement_type: movementType,
-        quantity,
-        scan_code: scanCode,
-        note: note || null,
-        created_at: nowIso,
-      })
-      .select(
-        "id, store_id, sku, product_id, user_id, movement_type, quantity, scan_code, note, created_at",
-      )
-      .single();
-
-    if (scanEventError) {
-      throw scanEventError;
-    }
+    const {
+      nextProductQuantity,
+      refreshedProduct,
+    } = await syncScannedProductInventory({
+      userId: req.user?.id,
+      storeId,
+      product,
+      movementType,
+      quantity,
+    });
+    const trackingResult = await persistWarehouseTracking({
+      storeId,
+      userId: req.user?.id,
+      product: refreshedProduct,
+      movementType,
+      quantity,
+      scanCode,
+      note,
+      nowIso,
+      nextProductQuantity,
+    });
+    const inventorySnapshot = serializeWarehouseVariantRow(
+      refreshedProduct,
+      trackingResult.savedInventory ||
+        buildMirroredInventoryRow({
+          product: refreshedProduct,
+          quantity: nextProductQuantity,
+          scannedAt: nowIso,
+          movementType,
+          movementQuantity: quantity,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        }),
+    );
 
     await writeActivityLog({
       userId: req.user?.id,
-      product,
+      product: refreshedProduct,
       movementType,
       quantity,
       storeId,
       scanCode,
       note,
-      nextQuantity,
+      nextWarehouseQuantity: trackingResult.nextWarehouseQuantity,
+      nextProductQuantity,
+      trackingMode: trackingResult.trackingMode,
     });
 
     emitRealtimeEvent({
@@ -832,7 +1060,7 @@ router.post("/scan", requirePermission("can_edit_products"), async (req, res) =>
       payload: {
         resource: "warehouse",
         context: "scanner",
-        sku: product.warehouse_code,
+        sku: refreshedProduct.warehouse_code,
         movement_type: movementType,
         quantity,
       },
@@ -841,36 +1069,16 @@ router.post("/scan", requirePermission("can_edit_products"), async (req, res) =>
     res.status(201).json({
       message:
         movementType === "in"
-          ? `Warehouse stock increased for code ${product.warehouse_code}`
-          : `Warehouse stock decreased for code ${product.warehouse_code}`,
-      product: {
-        id: product.product_id,
-        product_id: product.product_id,
-        variant_id: product.variant_id,
-        title: product.title,
-        product_title: product.product_title,
-        variant_title: product.variant_title,
-        display_title: product.display_title,
-        warehouse_code: product.warehouse_code,
-        warehouse_code_source: product.warehouse_code_source,
-        sku: product.sku,
-        vendor: product.vendor,
-        price: product.price,
-        barcode: product.barcode,
-        image_url: product.image_url,
-        option_values: product.option_values,
-      },
-      inventory: serializeWarehouseVariantRow(product, savedInventory),
-      scan: scanEvent,
+          ? `Stock increased for code ${refreshedProduct.warehouse_code}`
+          : `Stock decreased for code ${refreshedProduct.warehouse_code}`,
+      tracking_mode: trackingResult.trackingMode,
+      warehouse_tracking_saved: trackingResult.warehouseTrackingSaved,
+      product: serializeScanProduct(refreshedProduct),
+      inventory: inventorySnapshot,
+      scan: trackingResult.scanEvent,
     });
   } catch (error) {
     console.error("Error applying warehouse scan:", error);
-
-    if (isSchemaCompatibilityError(error)) {
-      return res.status(503).json({
-        error: "Warehouse tables are not deployed yet",
-      });
-    }
 
     res.status(error.status || 500).json({
       error: error.status ? error.message : "Failed to save warehouse scan",

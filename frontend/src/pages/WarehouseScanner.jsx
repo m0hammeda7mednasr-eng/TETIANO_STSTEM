@@ -85,8 +85,8 @@ export default function WarehouseScanner() {
         setSetupNotice(
           payload?.message ||
             select(
-              "المخزن غير مهيأ بعد على قاعدة البيانات.",
-              "Warehouse is not configured yet on the database.",
+              "سجل مسح المخزن غير متاح الآن، لكن السكان سيحدث المخزون المباشر.",
+              "Warehouse scan history is unavailable right now, but the scanner will still update live stock.",
             ),
         );
       }
@@ -185,7 +185,6 @@ export default function WarehouseScanner() {
     movementType === "in"
       ? "bg-emerald-600 hover:bg-emerald-700 border-emerald-600"
       : "bg-rose-600 hover:bg-rose-700 border-rose-600";
-  const scannerLocked = Boolean(setupNotice);
   const textAlignClass = isRTL ? "text-right" : "text-left";
 
   return (
@@ -231,13 +230,13 @@ export default function WarehouseScanner() {
                   <AlertCircle size={18} className="mt-0.5 shrink-0" />
                   <div>
                     <p className="font-semibold">
-                      {select("إعداد المخزن مطلوب", "Warehouse setup required")}
+                      {select("سجل المسح محدود", "Limited scan history")}
                     </p>
                     <p className="text-sm mt-1">
                       {setupNotice}.{" "}
                       {select(
-                        "تظل إجراءات الماسح معطلة حتى يتم إنشاء جداول المخزن.",
-                        "Scanner actions stay disabled until the warehouse tables are created.",
+                        "ما زال بإمكانك المسح بالـSKU أو الباركود وتحديث المخزون مباشرة.",
+                        "You can still scan SKU or barcode values and update stock immediately.",
                       )}
                     </p>
                   </div>
@@ -263,15 +262,6 @@ export default function WarehouseScanner() {
                 </div>
 
                 <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-                  {scannerLocked && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                      {select(
-                        "جداول المخزن غير منشأة بعد، لذلك تم تعطيل إجراءات المسح مؤقتًا.",
-                        "Warehouse tables are not deployed yet, so scan actions are temporarily disabled.",
-                      )}
-                    </div>
-                  )}
-
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
                       {select("كود المسح", "Scan Code")}
@@ -287,7 +277,6 @@ export default function WarehouseScanner() {
                       )}
                       className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg"
                       autoComplete="off"
-                      disabled={scannerLocked}
                     />
                   </div>
 
@@ -303,7 +292,6 @@ export default function WarehouseScanner() {
                         value={quantity}
                         onChange={(event) => setQuantity(event.target.value)}
                         className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
-                        disabled={scannerLocked}
                       />
                     </div>
 
@@ -320,14 +308,13 @@ export default function WarehouseScanner() {
                           "Optional: return, transfer, count, adjustment...",
                         )}
                         className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
-                        disabled={scannerLocked}
                       />
                     </div>
                   </div>
 
                   <button
                     type="submit"
-                    disabled={submitting || scannerLocked || !scanCode.trim()}
+                    disabled={submitting || !scanCode.trim()}
                     className={`w-full text-white px-4 py-3 rounded-xl border flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed ${modeClassName}`}
                   >
                     {movementType === "in" ? <ArrowDown size={18} /> : <ArrowUp size={18} />}
@@ -476,10 +463,15 @@ export default function WarehouseScanner() {
               </div>
             ) : recentScans.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
-                {select(
-                  "لم يتم تسجيل أي عمليات مسح للمخزن بعد.",
-                  "No warehouse scans have been recorded yet.",
-                )}
+                {setupNotice
+                  ? select(
+                      "سجل المسح غير متاح حاليًا، لكن آخر نتيجة من السكان ستظهر أعلى الصفحة.",
+                      "Scan history is currently unavailable, but the latest scan result will still appear above.",
+                    )
+                  : select(
+                      "لم يتم تسجيل أي عمليات مسح للمخزن بعد.",
+                      "No warehouse scans have been recorded yet.",
+                    )}
               </div>
             ) : (
               <div className="overflow-x-auto">

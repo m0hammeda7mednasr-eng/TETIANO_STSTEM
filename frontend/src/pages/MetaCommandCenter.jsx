@@ -26,10 +26,6 @@ import { getErrorMessage, metaAnalyticsAPI } from "../utils/api";
 const DEFAULT_ANALYSIS_FOCUS =
   "Use Meta best practices plus campaign data to explain ROAS, identify winners, wasted spend, creative issues, what to pause, what to keep, what to test next, and what should scale now.";
 
-const toNumber = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
 const toArray = (value) => (Array.isArray(value) ? value : []);
 const truncateText = (value, maxLength = 260) => {
   const normalized = String(value || "").trim();
@@ -143,9 +139,12 @@ export default function MetaCommandCenter() {
   }, []);
 
   const schemaMissing = status?.schemaReady === false;
-  const metaOverview = overview?.overview || {};
+  const metaOverview = useMemo(() => overview?.overview ?? null, [overview]);
+  const decisionBoard = useMemo(
+    () => metaOverview?.decision_board ?? null,
+    [metaOverview],
+  );
   const summary = metaOverview?.summary || {};
-  const decisionBoard = metaOverview?.decision_board || {};
   const decisionSummary = decisionBoard?.summary || {};
   const roasFramework = decisionBoard?.roas_framework || {};
   const storeSnapshot = overview?.store_snapshot || {};

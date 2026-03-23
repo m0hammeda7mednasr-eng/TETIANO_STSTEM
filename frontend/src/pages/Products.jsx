@@ -14,11 +14,13 @@ import {
   Edit2,
   Eye,
   Package,
+  Printer,
   RefreshCw,
   RotateCcw,
   Search,
   TrendingUp,
 } from "lucide-react";
+import BarcodeLabelModal from "../components/BarcodeLabelModal";
 import Sidebar from "../components/Sidebar";
 import { SkeletonBlock } from "../components/Common";
 import api from "../utils/api";
@@ -43,6 +45,7 @@ import {
   formatDateTime,
   formatNumber,
 } from "../utils/helpers";
+import { normalizeBarcodeVariantTitle } from "../utils/barcodeLabels";
 import {
   buildCatalogCounts,
   buildVariantRows,
@@ -165,6 +168,9 @@ export default function Products() {
   const [, setLoading] = useState(false);
   const [notification, setNotification] = useState(null);
   const [error, setError] = useState("");
+  const [barcodeModalTargets, setBarcodeModalTargets] = useState([]);
+  const [barcodeModalTargetKey, setBarcodeModalTargetKey] = useState("");
+  const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(
     () => initialCachedSnapshot.updatedAt,
   );
@@ -655,6 +661,32 @@ export default function Products() {
 
     window.open(href, "_blank", "noopener,noreferrer");
   }, []);
+
+  const openBarcodeLabelModal = useCallback(
+    (variant) => {
+      const target = {
+        key: String(variant?.key || variant?.variant_id || variant?.id || ""),
+        title: String(variant?.product_title || "").trim(),
+        subtitle: normalizeBarcodeVariantTitle(
+          variant?.variant_title,
+          variant?.product_title,
+        ),
+        sku: String(variant?.sku || "").trim(),
+        barcode: String(variant?.barcode || "").trim(),
+        vendor: String(variant?.vendor || "").trim(),
+      };
+
+      if (!target.key || (!target.sku && !target.barcode)) {
+        showNotification("This variant does not have a printable SKU or barcode", "error");
+        return;
+      }
+
+      setBarcodeModalTargets([target]);
+      setBarcodeModalTargetKey(target.key);
+      setIsBarcodeModalOpen(true);
+    },
+    [showNotification],
+  );
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -1185,7 +1217,14 @@ export default function Products() {
                         </div>
                       )}
 
-                    <div className="flex gap-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <button
+                        onClick={() => openBarcodeLabelModal(variant)}
+                        className="app-button-secondary flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700"
+                      >
+                        <Printer size={14} />
+                        Label
+                      </button>
                       <button
                         onClick={() => openProductWorkspace(variant.id)}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg flex items-center justify-center gap-2 text-sm"
@@ -1217,6 +1256,12 @@ export default function Products() {
         </div>
       </main>
 
+      <BarcodeLabelModal
+        open={isBarcodeModalOpen}
+        onClose={() => setIsBarcodeModalOpen(false)}
+        targets={barcodeModalTargets}
+        defaultTargetKey={barcodeModalTargetKey}
+      />
     </div>
   );
 }

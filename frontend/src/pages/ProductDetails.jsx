@@ -12,10 +12,13 @@ import {
   AlertCircle,
   Copy,
   Image as ImageIcon,
+  Printer,
 } from "lucide-react";
 import api from "../utils/api";
+import BarcodeLabelModal from "../components/BarcodeLabelModal";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
+import { normalizeBarcodeVariantTitle } from "../utils/barcodeLabels";
 import {
   formatCurrency as formatMoney,
   formatDateTime,
@@ -104,6 +107,8 @@ export default function ProductDetails() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notification, setNotification] = useState(null);
+  const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
+  const [barcodeModalTargetKey, setBarcodeModalTargetKey] = useState("");
 
   // Editable fields
   const [editedProduct, setEditedProduct] = useState({});
@@ -138,6 +143,43 @@ export default function ProductDetails() {
     hasMultipleVariants,
     product,
   ]);
+
+  const barcodeTargets = useMemo(() => {
+    if (!product) {
+      return [];
+    }
+
+    const productTitle = String(product.title || "").trim();
+    const productVendor = String(product.vendor || "").trim();
+    const variants =
+      Array.isArray(product.variants) && product.variants.length > 0
+        ? product.variants
+        : [product];
+
+    return variants
+      .map((variant, index) => {
+        const resolvedSku = String(
+          variant?.sku || (!hasMultipleVariants ? product?.sku : "") || "",
+        ).trim();
+        const resolvedBarcode = String(
+          variant?.barcode || (!hasMultipleVariants ? product?.barcode : "") || "",
+        ).trim();
+
+        return {
+          key: String(
+            variant?.id || product?.id || `product-barcode-target-${index}`,
+          ),
+          title: productTitle,
+          subtitle: normalizeBarcodeVariantTitle(variant?.title, productTitle),
+          sku: resolvedSku,
+          barcode: resolvedBarcode,
+          vendor: productVendor,
+        };
+      })
+      .filter((target) => target.sku || target.barcode);
+  }, [hasMultipleVariants, product]);
+
+  const hasPrintableBarcodeTarget = barcodeTargets.length > 0;
 
   const fetchProductDetails = useCallback(async () => {
     setLoading(true);
@@ -334,6 +376,25 @@ export default function ProductDetails() {
     setTimeout(() => setNotification(null), 5000);
   };
 
+  const openBarcodeModal = useCallback(
+    (targetKey = "") => {
+      if (!hasPrintableBarcodeTarget) {
+        showNotification(
+          select(
+            "لا يوجد SKU أو باركود صالح للطباعة لهذا المنتج.",
+            "This product does not have a printable SKU or barcode yet.",
+          ),
+          "error",
+        );
+        return;
+      }
+
+      setBarcodeModalTargetKey(targetKey);
+      setIsBarcodeModalOpen(true);
+    },
+    [hasPrintableBarcodeTarget, select, showNotification],
+  );
+
   const handleCopyProductReference = async () => {
     try {
       await navigator.clipboard.writeText(String(product?.id || id || ""));
@@ -473,6 +534,15 @@ export default function ProductDetails() {
               </div>
             </div>
             <div className="flex gap-2">
+              {hasPrintableBarcodeTarget && (
+                <button
+                  onClick={() => openBarcodeModal(barcodeTargets[0]?.key || "")}
+                  className="app-button-secondary flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-slate-700"
+                >
+                  <Printer size={16} />
+                  {select("طباعة ليبل", "Print label")}
+                </button>
+              )}
               {canEditProducts &&
                 (editing ? (
                   <>
@@ -685,6 +755,20 @@ export default function ProductDetails() {
                                     : variant.inventory_quantity,
                                 )}
                               </p>
+                              {(variant.barcode || displayedVariantSku) && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    openBarcodeModal(
+                                      String(variant.id || barcodeTargets[0]?.key || ""),
+                                    )
+                                  }
+                                  className="mt-3 app-button-secondary inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700"
+                                >
+                                  <Printer size={14} />
+                                  {select("طباعة ليبل", "Print label")}
+                                </button>
+                              )}
                               {editing &&
                                 canEditProducts &&
                                 hasMultipleVariants && (
@@ -1411,6 +1495,13 @@ export default function ProductDetails() {
           </div>
         </div>
       </main>
+
+      <BarcodeLabelModal
+        open={isBarcodeModalOpen}
+        onClose={() => setIsBarcodeModalOpen(false)}
+        targets={barcodeTargets}
+        defaultTargetKey={barcodeModalTargetKey}
+      />
     </div>
   );
 }

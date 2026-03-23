@@ -1,0 +1,58 @@
+import {
+  buildBarcodeLabelPrintHtml,
+  getBarcodeLabelPresetById,
+  normalizeBarcodeVariantTitle,
+  normalizeLabelCopies,
+  resolveBarcodeLabelValue,
+} from "./barcodeLabels";
+
+describe("barcodeLabels", () => {
+  test("normalizeBarcodeVariantTitle hides default titles", () => {
+    expect(normalizeBarcodeVariantTitle("Default Title", "Basic Tee")).toBe("");
+    expect(normalizeBarcodeVariantTitle("Basic Tee", "Basic Tee")).toBe("");
+    expect(normalizeBarcodeVariantTitle("Black / XL", "Basic Tee")).toBe("Black / XL");
+  });
+
+  test("resolveBarcodeLabelValue prioritizes barcode for auto mode", () => {
+    expect(
+      resolveBarcodeLabelValue(
+        {
+          sku: "SKU-001",
+          barcode: "6221234567890",
+        },
+        "auto",
+      ),
+    ).toEqual({
+      source: "barcode",
+      value: "6221234567890",
+    });
+  });
+
+  test("normalizeLabelCopies clamps invalid values", () => {
+    expect(normalizeLabelCopies("0")).toBe(1);
+    expect(normalizeLabelCopies("12")).toBe(12);
+    expect(normalizeLabelCopies("999")).toBe(200);
+  });
+
+  test("buildBarcodeLabelPrintHtml injects page size and escapes text", () => {
+    const html = buildBarcodeLabelPrintHtml({
+      label: {
+        title: "Dress <Main>",
+        subtitle: "Black / XL",
+        code: "ARV19964478",
+        codeSourceLabel: "SKU",
+        vendor: "Tetiano",
+        footerLines: ["tetiano.eg", "01022393911"],
+        barcodeSvgMarkup: "<svg></svg>",
+      },
+      preset: getBarcodeLabelPresetById("50x30"),
+      copies: 2,
+      direction: "rtl",
+    });
+
+    expect(html).toContain("@page");
+    expect(html).toContain("size: 50mm 30mm;");
+    expect(html).toContain("Dress &lt;Main&gt;");
+    expect(html.match(/class="label-page"/g)).toHaveLength(2);
+  });
+});

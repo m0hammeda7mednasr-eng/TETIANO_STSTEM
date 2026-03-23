@@ -154,6 +154,50 @@ export const escapeHtml = (value) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
+const getLabelLayoutProfile = (preset, codeValue = "") => {
+  const resolvedPreset = getBarcodeLabelPresetById(preset?.id);
+  const codeLength = String(codeValue || "").trim().length;
+  const isCompactLabel = resolvedPreset.heightMm <= 25;
+  const isLongCode = codeLength > 18;
+  const isVeryLongCode = codeLength > 24;
+
+  return {
+    paddingMm: isCompactLabel ? "1.1mm" : "1.5mm",
+    gapMm: isCompactLabel ? "0.45mm" : "0.7mm",
+    titleMaxHeight: isCompactLabel ? "4.8mm" : resolvedPreset.heightMm >= 40 ? "8.4mm" : "6.8mm",
+    titleFontSize: isCompactLabel ? "2.45mm" : resolvedPreset.heightMm >= 40 ? "3.4mm" : "3.05mm",
+    subtitleMaxHeight: isCompactLabel ? "3.2mm" : "4.8mm",
+    subtitleFontSize: isCompactLabel ? "1.85mm" : "2.35mm",
+    barcodeMaxHeight: isCompactLabel ? "8.4mm" : resolvedPreset.heightMm >= 40 ? "18mm" : "14mm",
+    codeFontSize: isCompactLabel
+      ? isVeryLongCode
+        ? "2mm"
+        : isLongCode
+          ? "2.2mm"
+          : "2.55mm"
+      : resolvedPreset.heightMm >= 40
+        ? isVeryLongCode
+          ? "3.1mm"
+          : isLongCode
+            ? "3.45mm"
+            : "4.1mm"
+        : isVeryLongCode
+          ? "2.55mm"
+          : isLongCode
+            ? "2.9mm"
+            : "3.7mm",
+    codeLetterSpacing: isCompactLabel
+      ? isLongCode
+        ? "0.03mm"
+        : "0.07mm"
+      : isLongCode
+        ? "0.07mm"
+        : "0.15mm",
+    metaFontSize: isCompactLabel ? "1.45mm" : "2mm",
+    footerFontSize: isCompactLabel ? "1.55mm" : "2.1mm",
+  };
+};
+
 export const buildBarcodeLabelPrintHtml = ({
   label,
   preset,
@@ -162,6 +206,7 @@ export const buildBarcodeLabelPrintHtml = ({
 }) => {
   const safeLabel = label || {};
   const safePreset = getBarcodeLabelPresetById(preset?.id);
+  const layout = getLabelLayoutProfile(safePreset, safeLabel.code);
   const normalizedCopies = normalizeLabelCopies(copies);
   const footerLines = Array.isArray(safeLabel.footerLines)
     ? safeLabel.footerLines
@@ -265,10 +310,10 @@ export const buildBarcodeLabelPrintHtml = ({
       .label-card {
         display: flex;
         flex-direction: column;
-        gap: 0.7mm;
+        gap: ${layout.gapMm};
         width: 100%;
         height: 100%;
-        padding: 1.5mm;
+        padding: ${layout.paddingMm};
       }
 
       .label-body {
@@ -276,7 +321,7 @@ export const buildBarcodeLabelPrintHtml = ({
         min-height: 0;
         flex: 1 1 auto;
         flex-direction: column;
-        gap: 0.7mm;
+        gap: ${layout.gapMm};
       }
 
       .label-body--text {
@@ -288,18 +333,18 @@ export const buildBarcodeLabelPrintHtml = ({
       }
 
       .label-title {
-        max-height: ${safePreset.heightMm >= 40 ? "8.4mm" : "6.8mm"};
+        max-height: ${layout.titleMaxHeight};
         overflow: hidden;
-        font-size: ${safePreset.heightMm >= 40 ? "3.4mm" : "3.05mm"};
+        font-size: ${layout.titleFontSize};
         font-weight: 700;
         line-height: 1.05;
       }
 
       .label-subtitle {
         margin-top: 0.25mm;
-        max-height: 4.8mm;
+        max-height: ${layout.subtitleMaxHeight};
         overflow: hidden;
-        font-size: 2.35mm;
+        font-size: ${layout.subtitleFontSize};
         line-height: 1.05;
       }
 
@@ -315,16 +360,16 @@ export const buildBarcodeLabelPrintHtml = ({
       .label-barcode svg {
         display: block;
         width: 100%;
-        max-height: ${safePreset.heightMm >= 40 ? "18mm" : "14mm"};
+        max-height: ${layout.barcodeMaxHeight};
       }
 
       .label-code {
         overflow: hidden;
         white-space: nowrap;
         text-align: center;
-        font-size: ${safePreset.heightMm >= 40 ? "4.1mm" : "3.7mm"};
+        font-size: ${layout.codeFontSize};
         font-weight: 700;
-        letter-spacing: 0.15mm;
+        letter-spacing: ${layout.codeLetterSpacing};
         line-height: 1;
       }
 
@@ -333,7 +378,7 @@ export const buildBarcodeLabelPrintHtml = ({
         justify-content: space-between;
         gap: 2mm;
         overflow: hidden;
-        font-size: 2mm;
+        font-size: ${layout.metaFontSize};
         line-height: 1.05;
         letter-spacing: 0.05em;
         text-transform: uppercase;
@@ -349,7 +394,7 @@ export const buildBarcodeLabelPrintHtml = ({
       .label-footer {
         overflow: hidden;
         text-align: center;
-        font-size: 2.1mm;
+        font-size: ${layout.footerFontSize};
         line-height: 1.08;
       }
 

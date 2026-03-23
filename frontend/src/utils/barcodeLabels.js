@@ -91,6 +91,27 @@ export const resolveBarcodeLabelValue = (target = {}, preferredSource = "auto") 
 export const hasPrintableBarcodeValue = (target = {}) =>
   Boolean(resolveBarcodeLabelValue(target, "auto").value);
 
+export const hasPrintableLabelContent = (
+  label = {},
+  { allowTextOnly = false } = {},
+) => {
+  const textValues = [
+    label?.title,
+    label?.subtitle,
+    label?.code,
+    label?.vendor,
+    ...(Array.isArray(label?.footerLines) ? label.footerLines : []),
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  if (allowTextOnly) {
+    return textValues.length > 0;
+  }
+
+  return hasPrintableBarcodeValue(label);
+};
+
 export const getBarcodeModuleWidth = (value) => {
   const length = String(value || "").trim().length;
 
@@ -141,6 +162,8 @@ export const buildBarcodeLabelPrintHtml = ({
         .map((line) => String(line || "").trim())
         .filter(Boolean)
     : [];
+  const hasBarcodeMarkup = Boolean(String(safeLabel.barcodeSvgMarkup || "").trim());
+  const hasCodeText = Boolean(String(safeLabel.code || "").trim());
 
   const metaMarkup =
     safeLabel.vendor || safeLabel.codeSourceLabel
@@ -164,17 +187,27 @@ export const buildBarcodeLabelPrintHtml = ({
   const pageMarkup = `
     <section class="label-page">
       <article class="label-card" dir="${direction}">
-        <div class="label-header">
-          <div class="label-title">${escapeHtml(safeLabel.title || "")}</div>
+        <div class="label-body ${hasBarcodeMarkup ? "label-body--barcode" : "label-body--text"}">
+          <div class="label-header">
+            <div class="label-title">${escapeHtml(safeLabel.title || "")}</div>
+            ${
+              safeLabel.subtitle
+                ? `<div class="label-subtitle">${escapeHtml(safeLabel.subtitle)}</div>`
+                : ""
+            }
+          </div>
           ${
-            safeLabel.subtitle
-              ? `<div class="label-subtitle">${escapeHtml(safeLabel.subtitle)}</div>`
+            hasBarcodeMarkup
+              ? `<div class="label-barcode">${safeLabel.barcodeSvgMarkup || ""}</div>`
               : ""
           }
+          ${
+            hasCodeText
+              ? `<div class="label-code" dir="ltr">${escapeHtml(safeLabel.code || "")}</div>`
+              : ""
+          }
+          ${metaMarkup}
         </div>
-        <div class="label-barcode">${safeLabel.barcodeSvgMarkup || ""}</div>
-        <div class="label-code" dir="ltr">${escapeHtml(safeLabel.code || "")}</div>
-        ${metaMarkup}
         ${footerMarkup}
       </article>
     </section>
@@ -224,13 +257,24 @@ export const buildBarcodeLabelPrintHtml = ({
       }
 
       .label-card {
-        display: grid;
-        grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+        display: flex;
+        flex-direction: column;
         gap: 0.7mm;
         width: 100%;
         height: 100%;
         padding: 1.5mm;
-        align-content: stretch;
+      }
+
+      .label-body {
+        display: flex;
+        min-height: 0;
+        flex: 1 1 auto;
+        flex-direction: column;
+        gap: 0.7mm;
+      }
+
+      .label-body--text {
+        justify-content: center;
       }
 
       .label-header {
@@ -255,6 +299,7 @@ export const buildBarcodeLabelPrintHtml = ({
 
       .label-barcode {
         display: flex;
+        flex: 1 1 auto;
         min-height: 0;
         align-items: center;
         justify-content: center;

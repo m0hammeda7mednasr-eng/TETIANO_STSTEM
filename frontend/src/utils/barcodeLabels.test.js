@@ -1,6 +1,7 @@
 import {
   buildBarcodeLabelPrintHtml,
   getBarcodeLabelPresetById,
+  hasPrintableLabelContent,
   normalizeBarcodeVariantTitle,
   normalizeLabelCopies,
   resolveBarcodeLabelValue,
@@ -34,6 +35,32 @@ describe("barcodeLabels", () => {
     expect(normalizeLabelCopies("999")).toBe(200);
   });
 
+  test("hasPrintableLabelContent allows text-only custom labels when requested", () => {
+    expect(
+      hasPrintableLabelContent(
+        {
+          title: "Custom Promo",
+          subtitle: "",
+          code: "",
+          footerLines: [],
+        },
+        { allowTextOnly: true },
+      ),
+    ).toBe(true);
+
+    expect(
+      hasPrintableLabelContent(
+        {
+          title: "",
+          subtitle: "",
+          code: "",
+          footerLines: [],
+        },
+        { allowTextOnly: true },
+      ),
+    ).toBe(false);
+  });
+
   test("buildBarcodeLabelPrintHtml injects page size and escapes text", () => {
     const html = buildBarcodeLabelPrintHtml({
       label: {
@@ -54,5 +81,24 @@ describe("barcodeLabels", () => {
     expect(html).toContain("size: 50mm 30mm;");
     expect(html).toContain("Dress &lt;Main&gt;");
     expect(html.match(/class="label-page"/g)).toHaveLength(2);
+  });
+
+  test("buildBarcodeLabelPrintHtml supports text-only labels without barcode markup", () => {
+    const html = buildBarcodeLabelPrintHtml({
+      label: {
+        title: "Custom Text Only",
+        subtitle: "Shelf label",
+        footerLines: ["Tetiano"],
+        barcodeSvgMarkup: "",
+        code: "",
+      },
+      preset: getBarcodeLabelPresetById("40x30"),
+      copies: 1,
+      direction: "ltr",
+    });
+
+    expect(html).toContain("Custom Text Only");
+    expect(html).not.toContain('class="label-barcode"');
+    expect(html).not.toContain('class="label-code"');
   });
 });

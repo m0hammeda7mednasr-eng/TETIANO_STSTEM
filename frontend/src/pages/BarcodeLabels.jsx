@@ -5,6 +5,7 @@ import {
   useState,
 } from "react";
 import {
+  FileText,
   Package,
   Printer,
   RefreshCw,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import BarcodeLabelModal from "../components/BarcodeLabelModal";
+import CustomLabelCreatorModal from "../components/CustomLabelCreatorModal";
 import { EmptyState, ErrorAlert, LoadingSpinner } from "../components/Common";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
@@ -143,6 +145,7 @@ export default function BarcodeLabels() {
     message: "",
   });
   const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
+  const [isCustomLabelModalOpen, setIsCustomLabelModalOpen] = useState(false);
   const [barcodeModalTargets, setBarcodeModalTargets] = useState([]);
   const [barcodeModalTargetKey, setBarcodeModalTargetKey] = useState("");
 
@@ -300,6 +303,65 @@ export default function BarcodeLabels() {
             </button>
           </div>
 
+          <div className="app-surface-strong rounded-[30px] p-6">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+              <div className="max-w-3xl">
+                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
+                  <FileText size={14} />
+                  {select("منشئ ليبل مخصص", "Custom label studio")}
+                </div>
+                <h2 className="mt-4 text-2xl font-bold text-slate-950">
+                  {select("اعمل ليبل لأي كلام أو كود", "Create a label for any text or code")}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {select(
+                    "ده فوق الجزء الحالي الخاص بمنتجات السيستم. يعني تقدر تعمل ليبل حر للعروض أو أسماء الرفوف أو أي ملاحظة، ومعاك اختيار تضيف باركود أو تكتفي بالنص فقط.",
+                    "This sits above the existing system-product labels. You can create a free-form label for promos, shelf names, or any note, with the option to add a barcode or keep it text-only.",
+                  )}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsCustomLabelModalOpen(true)}
+                className="app-button-primary inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold text-white"
+              >
+                <Printer size={16} />
+                {select("إنشاء ليبل مخصص", "Create custom label")}
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              <MetricCard
+                icon={FileText}
+                label={select("حرية الطباعة", "Printing flexibility")}
+                value={select("نص أو باركود", "Text or barcode")}
+                helper={select(
+                  "ينفع تطبع عنوان فقط، عنوان مع كود، أو كود يتحول لباركود.",
+                  "Print a title only, a title with a code, or a code rendered as a barcode.",
+                )}
+              />
+              <MetricCard
+                icon={Tags}
+                label={select("أفضل استخدام", "Best use")}
+                value={select("عروض + رفوف", "Promos + shelves")}
+                helper={select(
+                  "مناسب للعروض المؤقتة، أسماء الأماكن، والليبلات السريعة.",
+                  "Great for temporary promos, location names, and quick ad hoc labels.",
+                )}
+              />
+              <MetricCard
+                icon={Printer}
+                label={select("الجودة", "Output quality")}
+                value={select("مقاس ثابت", "Exact size")}
+                helper={select(
+                  "نفس نظام المقاسات الدقيقة المستخدم في ليبلات الباركود الحالية.",
+                  "Uses the same exact-size print engine as the existing barcode labels.",
+                )}
+              />
+            </div>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-3">
             <MetricCard
               icon={Package}
@@ -399,6 +461,10 @@ export default function BarcodeLabels() {
         onClose={() => setIsBarcodeModalOpen(false)}
         targets={barcodeModalTargets}
         defaultTargetKey={barcodeModalTargetKey}
+      />
+      <CustomLabelCreatorModal
+        open={isCustomLabelModalOpen}
+        onClose={() => setIsCustomLabelModalOpen(false)}
       />
     </div>
   );

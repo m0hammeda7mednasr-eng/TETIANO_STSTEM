@@ -371,10 +371,10 @@ export default function ProductDetails() {
     );
   };
 
-  const showNotification = (message, type = "info") => {
+  const showNotification = useCallback((message, type = "info") => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 5000);
-  };
+  }, []);
 
   const openBarcodeModal = useCallback(
     (targetKey = "") => {

@@ -181,6 +181,11 @@ export default function ProductDetails() {
 
   const hasPrintableBarcodeTarget = barcodeTargets.length > 0;
 
+  const showNotification = useCallback((message, type = "info") => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 5000);
+  }, []);
+
   const fetchProductDetails = useCallback(async () => {
     setLoading(true);
     try {
@@ -194,7 +199,7 @@ export default function ProductDetails() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, showNotification]);
 
   useEffect(() => {
     fetchProductDetails();
@@ -370,11 +375,6 @@ export default function ProductDetails() {
       ),
     );
   };
-
-  const showNotification = useCallback((message, type = "info") => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 5000);
-  }, []);
 
   const openBarcodeModal = useCallback(
     (targetKey = "") => {

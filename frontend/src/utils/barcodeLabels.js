@@ -50,8 +50,13 @@ export const normalizeBarcodeVariantTitle = (value, productTitle = "") => {
     return "";
   }
 
-  const normalizedProductTitle = String(productTitle || "").trim().toLowerCase();
-  if (normalizedProductTitle && normalizedLowercaseValue === normalizedProductTitle) {
+  const normalizedProductTitle = String(productTitle || "")
+    .trim()
+    .toLowerCase();
+  if (
+    normalizedProductTitle &&
+    normalizedLowercaseValue === normalizedProductTitle
+  ) {
     return "";
   }
 
@@ -71,7 +76,10 @@ export const getBarcodeLabelPresetById = (presetId) =>
   BARCODE_LABEL_PRESETS.find((preset) => preset.id === presetId) ||
   BARCODE_LABEL_PRESETS[0];
 
-export const resolveBarcodeLabelValue = (target = {}, preferredSource = "auto") => {
+export const resolveBarcodeLabelValue = (
+  target = {},
+  preferredSource = "auto",
+) => {
   const barcode = String(target?.barcode || "").trim();
   const sku = String(target?.sku || "").trim();
 
@@ -164,11 +172,23 @@ const getLabelLayoutProfile = (preset, codeValue = "") => {
   return {
     paddingMm: isCompactLabel ? "1.1mm" : "1.5mm",
     gapMm: isCompactLabel ? "0.45mm" : "0.7mm",
-    titleMaxHeight: isCompactLabel ? "4.8mm" : resolvedPreset.heightMm >= 40 ? "8.4mm" : "6.8mm",
-    titleFontSize: isCompactLabel ? "2.45mm" : resolvedPreset.heightMm >= 40 ? "3.4mm" : "3.05mm",
+    titleMaxHeight: isCompactLabel
+      ? "4.8mm"
+      : resolvedPreset.heightMm >= 40
+        ? "8.4mm"
+        : "6.8mm",
+    titleFontSize: isCompactLabel
+      ? "2.45mm"
+      : resolvedPreset.heightMm >= 40
+        ? "3.4mm"
+        : "3.05mm",
     subtitleMaxHeight: isCompactLabel ? "3.2mm" : "4.8mm",
     subtitleFontSize: isCompactLabel ? "1.85mm" : "2.35mm",
-    barcodeMaxHeight: isCompactLabel ? "8.4mm" : resolvedPreset.heightMm >= 40 ? "18mm" : "14mm",
+    barcodeMaxHeight: isCompactLabel
+      ? "8.4mm"
+      : resolvedPreset.heightMm >= 40
+        ? "18mm"
+        : "14mm",
     codeFontSize: isCompactLabel
       ? isVeryLongCode
         ? "2mm"
@@ -213,7 +233,9 @@ export const buildBarcodeLabelPrintHtml = ({
         .map((line) => String(line || "").trim())
         .filter(Boolean)
     : [];
-  const hasBarcodeMarkup = Boolean(String(safeLabel.barcodeSvgMarkup || "").trim());
+  const hasBarcodeMarkup = Boolean(
+    String(safeLabel.barcodeSvgMarkup || "").trim(),
+  );
   const hasCodeText = Boolean(String(safeLabel.code || "").trim());
 
   const metaMarkup =
@@ -271,7 +293,7 @@ export const buildBarcodeLabelPrintHtml = ({
     <title>Barcode Label Print</title>
     <style>
       @page {
-        size: ${safePreset.widthMm}mm ${safePreset.heightMm}mm;
+        size: ${safePreset.widthMm}mm ${safePreset.heightMm}mm landscape;
         margin: 0;
       }
 
@@ -292,6 +314,7 @@ export const buildBarcodeLabelPrintHtml = ({
       body {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
+        transform-origin: top left;
       }
 
       .label-page {
@@ -402,6 +425,18 @@ export const buildBarcodeLabelPrintHtml = ({
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      @media print {
+        @page {
+          size: ${safePreset.widthMm}mm ${safePreset.heightMm}mm landscape;
+          margin: 0;
+        }
+        
+        body {
+          width: ${safePreset.widthMm}mm;
+          height: ${safePreset.heightMm}mm;
+        }
       }
     </style>
   </head>

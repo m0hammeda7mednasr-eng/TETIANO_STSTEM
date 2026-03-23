@@ -12,6 +12,12 @@ export const BARCODE_LABEL_PRESETS = [
     recommended: true,
   },
   {
+    id: "50x25",
+    widthMm: 50,
+    heightMm: 25,
+    recommended: false,
+  },
+  {
     id: "40x30",
     widthMm: 40,
     heightMm: 30,

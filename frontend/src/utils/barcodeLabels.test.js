@@ -35,6 +35,14 @@ describe("barcodeLabels", () => {
     expect(normalizeLabelCopies("999")).toBe(200);
   });
 
+  test("getBarcodeLabelPresetById resolves the new 50x25 preset", () => {
+    expect(getBarcodeLabelPresetById("50x25")).toMatchObject({
+      id: "50x25",
+      widthMm: 50,
+      heightMm: 25,
+    });
+  });
+
   test("hasPrintableLabelContent allows text-only custom labels when requested", () => {
     expect(
       hasPrintableLabelContent(

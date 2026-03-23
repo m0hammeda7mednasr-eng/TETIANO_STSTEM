@@ -5,6 +5,7 @@ import {
   buildAssistantContextSnapshot,
   buildMetaDecisionBoard,
   buildMetaOverview,
+  buildMetaQuestionSuggestions,
   extractActionMetric,
   normalizeAdAccountId,
 } from "./metaAnalyticsService.js";
@@ -313,6 +314,137 @@ describe("services/metaAnalyticsService", () => {
     expect(overview.ads[1].is_active).toBe(true);
   });
 
+  it("builds context-aware operator questions from performance and store state", () => {
+    const overview = {
+      summary: {
+        rows_count: 6,
+        spend: 530,
+        impressions: 22000,
+        reach: 18000,
+        clicks: 520,
+        inline_link_clicks: 380,
+        purchases: 12,
+        purchase_value: 1240,
+        ctr: 2.36,
+        link_ctr: 1.73,
+        cpm: 24.09,
+        frequency: 3.9,
+        conversion_rate: 3.16,
+        cost_per_purchase: 44.16,
+        roas: 2.34,
+      },
+      campaigns: [
+        {
+          id: "cmp_scale",
+          name: "Scale Winner",
+          spend: 180,
+          purchases: 5,
+          roas: 3.1,
+          link_ctr: 2.2,
+          conversion_rate: 4.4,
+          frequency: 1.4,
+          cpm: 21,
+        },
+        {
+          id: "cmp_pause",
+          name: "Wasted Spend",
+          spend: 95,
+          purchases: 0,
+          roas: 0,
+          link_ctr: 0.5,
+          conversion_rate: 0,
+          frequency: 1.7,
+          cpm: 29,
+          video_hold_rate: 12,
+        },
+        {
+          id: "cmp_test",
+          name: "Needs Testing",
+          spend: 120,
+          purchases: 2,
+          roas: 1.6,
+          link_ctr: 1.1,
+          conversion_rate: 1.2,
+          frequency: 4.1,
+          cpm: 31,
+        },
+      ],
+      adsets: [],
+      ads: [
+        {
+          id: "ad_hold",
+          name: "Weak Hook Creative",
+          spend: 70,
+          purchases: 0,
+          roas: 0,
+          link_ctr: 0.7,
+          conversion_rate: 0,
+          frequency: 1.4,
+          video_plays: 1000,
+          thruplays: 120,
+          video_hold_rate: 12,
+          video_completion_rate: 4,
+        },
+        {
+          id: "ad_drop",
+          name: "Click But No Sale",
+          spend: 90,
+          purchases: 1,
+          roas: 1.1,
+          link_ctr: 2.8,
+          conversion_rate: 0.5,
+          frequency: 1.8,
+          video_plays: 1200,
+          thruplays: 300,
+          video_hold_rate: 25,
+          video_completion_rate: 9,
+        },
+      ],
+    };
+    const storeSnapshot = {
+      financial: {
+        average_order_value: 120,
+      },
+      orders: {
+        pending: 10,
+        cancellation_rate: 11,
+        refund_rate: 4,
+      },
+      catalog: {
+        low_stock_count: 3,
+      },
+      low_stock_products: [
+        {
+          id: "prod_low",
+          title: "Low Stock Product",
+          inventory_quantity: 2,
+        },
+      ],
+    };
+
+    const decisionBoard = buildMetaDecisionBoard({
+      overview,
+      storeSnapshot,
+    });
+    const suggestions = buildMetaQuestionSuggestions({
+      storeSnapshot,
+      metaOverview: overview,
+      decisionBoard,
+    });
+
+    expect(suggestions.map((item) => item.id)).toEqual(
+      expect.arrayContaining([
+        "pause-now",
+        "scale-winners",
+        "test-next",
+        "creative-rebuild",
+        "post-click-diagnosis",
+        "commerce-friction",
+      ]),
+    );
+    expect(suggestions[0].question).toContain("pause");
+  });
+
   it("builds a compact assistant context snapshot instead of sending full raw datasets", () => {
     const snapshot = buildAssistantContextSnapshot({
       storeSnapshot: {
@@ -363,6 +495,10 @@ describe("services/metaAnalyticsService", () => {
       recommendations: Array.from({ length: 9 }, (_, index) => ({
         title: `Rec ${index}`,
       })),
+      assistantQuestions: Array.from({ length: 8 }, (_, index) => ({
+        id: `question-${index}`,
+        question: `Question ${index}`,
+      })),
     });
 
     expect(snapshot.top_campaigns).toHaveLength(6);
@@ -370,6 +506,7 @@ describe("services/metaAnalyticsService", () => {
     expect(snapshot.decisions).toHaveLength(6);
     expect(snapshot.creative_diagnostics).toHaveLength(5);
     expect(snapshot.recommendations).toHaveLength(6);
+    expect(snapshot.assistant_questions).toHaveLength(6);
     expect(snapshot.store_snapshot.top_products).toHaveLength(5);
     expect(snapshot.store_snapshot.low_stock_products).toHaveLength(5);
     expect(snapshot.decisions[0].why).toHaveLength(2);

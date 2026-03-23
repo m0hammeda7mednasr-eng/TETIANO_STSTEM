@@ -19,6 +19,7 @@ import {
   buildMetaDecisionBoard,
   buildMetaEntityCatalogRows,
   buildMetaInsightSnapshots,
+  buildMetaQuestionSuggestions,
   buildMetaOverview,
   fetchMetaAdAccounts,
   fetchMetaAdSets,
@@ -1448,6 +1449,11 @@ router.get("/overview", async (req, res) => {
       metaOverview,
       decisionBoard,
     });
+    const assistantQuestions = buildMetaQuestionSuggestions({
+      storeSnapshot,
+      metaOverview,
+      decisionBoard,
+    });
 
     return res.json({
       store_id: storeId,
@@ -1459,6 +1465,7 @@ router.get("/overview", async (req, res) => {
       },
       store_snapshot: storeSnapshot,
       recommendations,
+      assistant_questions: assistantQuestions,
       sync_runs: data.syncRuns,
       analyses: data.analyses,
     });
@@ -1650,6 +1657,11 @@ router.post("/assistant/chat", async (req, res) => {
       metaOverview,
       decisionBoard,
     });
+    const assistantQuestions = buildMetaQuestionSuggestions({
+      storeSnapshot,
+      metaOverview,
+      decisionBoard,
+    });
 
     const reply = await generateOpenRouterStoreAssistantReply({
       apiKey: openRouterApiKey,
@@ -1669,6 +1681,7 @@ router.post("/assistant/chat", async (req, res) => {
       metaOverview,
       decisionBoard,
       recommendations,
+      assistantQuestions,
     });
 
     if (integration?.id) {
@@ -1699,6 +1712,7 @@ router.post("/assistant/chat", async (req, res) => {
       decision_board: decisionBoard,
       store_snapshot: storeSnapshot,
       recommendations,
+      assistant_questions: assistantQuestions,
     });
   } catch (error) {
     return handleSchemaAwareError(

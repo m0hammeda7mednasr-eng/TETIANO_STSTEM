@@ -27,6 +27,13 @@ const DEFAULT_ANALYSIS_FOCUS =
   "Use Meta best practices plus campaign data to explain ROAS, identify winners, wasted spend, creative issues, what to pause, what to keep, what to test next, and what should scale now.";
 
 const toArray = (value) => (Array.isArray(value) ? value : []);
+const formatLabel = (value) =>
+  String(value || "")
+    .trim()
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 const truncateText = (value, maxLength = 260) => {
   const normalized = String(value || "").trim();
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength)}...`;
@@ -230,6 +237,85 @@ function CreativeDiagnosticCards({
   );
 }
 
+function QuestionSuggestionCards({ rows, onAsk }) {
+  if (!rows.length) {
+    return (
+      <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-sm text-slate-500">
+        Sync Meta data to surface operator-grade questions from the current account state.
+      </div>
+    );
+  }
+
+  const priorityTone = {
+    high: "border-rose-200 bg-rose-50 text-rose-700",
+    medium: "border-amber-200 bg-amber-50 text-amber-700",
+    low: "border-sky-200 bg-sky-50 text-sky-700",
+  };
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-2">
+      {rows.map((row) => (
+        <article key={row.id} className="rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(145deg,_#ffffff_0%,_#f8fafc_100%)] p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-600">
+                {formatLabel(row.category)}
+              </span>
+              <span className={`rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] ${priorityTone[row.priority] || priorityTone.medium}`}>
+                {formatLabel(row.priority)}
+              </span>
+            </div>
+            {row.source_label ? (
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                {row.source_label}
+              </span>
+            ) : null}
+          </div>
+
+          <h3 className="mt-4 text-lg font-black tracking-tight text-slate-950">{row.question}</h3>
+          <p className="mt-3 text-sm leading-7 text-slate-700">{row.why_now}</p>
+
+          {toArray(row.data_points).length ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {toArray(row.data_points).map((item, index) => (
+                <span key={`${row.id}-point-${index}`} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
+                  {item}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+            {row.reference_note ? (
+              <p className="max-w-xl text-xs leading-5 text-slate-500">{truncateText(row.reference_note, 150)}</p>
+            ) : <span />}
+            <div className="flex flex-wrap items-center gap-2">
+              {row.source_url ? (
+                <a
+                  href={row.source_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Meta Reference
+                </a>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => onAsk(row.question)}
+                className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-3 py-2 text-xs font-bold text-white transition hover:bg-slate-800"
+              >
+                <MessageSquare size={14} />
+                Ask AI
+              </button>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export default function MetaCommandCenter() {
   const { formatCurrency, formatDateTime, formatNumber, formatPercent } = useLocale();
   const [status, setStatus] = useState(null);
@@ -290,18 +376,26 @@ export default function MetaCommandCenter() {
   const allCampaigns = useMemo(() => toArray(metaOverview?.campaigns), [metaOverview]);
   const allAdsets = useMemo(() => toArray(metaOverview?.adsets), [metaOverview]);
   const allAds = useMemo(() => toArray(metaOverview?.ads), [metaOverview]);
+  const assistantQuestions = useMemo(() => toArray(overview?.assistant_questions).slice(0, 6), [overview]);
   const activeCampaigns = useMemo(() => allCampaigns.filter((item) => item?.is_active), [allCampaigns]);
   const activeAdsets = useMemo(() => allAdsets.filter((item) => item?.is_active), [allAdsets]);
   const activeAds = useMemo(() => allAds.filter((item) => item?.is_active), [allAds]);
   const analyses = toArray(overview?.analyses);
   const syncRuns = toArray(overview?.sync_runs);
   const primaryCurrency = metaOverview?.accounts?.[0]?.currency || "USD";
-  const quickPrompts = [
-    "What should I pause right now and why?",
-    "Which campaigns deserve more budget today?",
-    "Why is ROAS weak or strong right now?",
-    "What creative should I rebuild first?",
-  ];
+  const quickPrompts = useMemo(() => {
+    const dynamicPrompts = assistantQuestions.map((item) => item?.question).filter(Boolean);
+    if (dynamicPrompts.length) {
+      return dynamicPrompts;
+    }
+
+    return [
+      "What should I pause right now and why?",
+      "Which campaigns deserve more budget today?",
+      "Why is ROAS weak or strong right now?",
+      "What creative should I rebuild first?",
+    ];
+  }, [assistantQuestions]);
   const formatCount = (value) => formatNumber(value, { maximumFractionDigits: 0 });
   const formatRate = (value) => formatPercent(value, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const formatMoney = (value, currency = "USD") => formatCurrency(value, { currency: currency || "USD", currencyStyle: "intl" });
@@ -528,6 +622,15 @@ export default function MetaCommandCenter() {
             </Section>
 
             <Section title="AI Operator Chat" description="Ask directly what should pause, scale, restock, or get a new hook." actions={<button type="button" onClick={() => handleAssistantSend(quickPrompts[0])} disabled={assistantSending || schemaMissing} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-800 transition hover:bg-slate-100 disabled:opacity-60"><MessageSquare size={16} />Ask AI Now</button>}>
+              <div className="mb-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Suggested Questions</div>
+                    <p className="mt-1 text-sm leading-6 text-slate-500">These prompts are generated from decision-board state, creative diagnostics, commerce pressure, and Meta guidance topics.</p>
+                  </div>
+                </div>
+                <QuestionSuggestionCards rows={assistantQuestions} onAsk={handleAssistantSend} />
+              </div>
               <div className="mb-4 flex flex-wrap gap-2">{quickPrompts.map((prompt) => <button key={prompt} type="button" onClick={() => handleAssistantSend(prompt)} disabled={assistantSending || schemaMissing} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-white disabled:opacity-60">{prompt}</button>)}</div>
               <div className="space-y-3 rounded-[2rem] bg-slate-50 p-4">{assistantMessages.map((message, index) => <div key={`${message.role}-${message.timestamp || index}-${index}`} className={`flex ${message.role === "assistant" ? "justify-start" : "justify-end"}`}><div className={`max-w-3xl rounded-3xl px-4 py-3 shadow-sm ${message.role === "assistant" ? "border border-slate-200 bg-white text-slate-800" : "bg-slate-950 text-white"}`}><p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p><p className={`mt-2 text-[11px] ${message.role === "assistant" ? "text-slate-400" : "text-slate-300"}`}>{formatDateTime(message.timestamp)}</p></div></div>)}{assistantSending ? <div className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">Analyzing store and Meta context...</div> : null}</div>
               <div className="mt-4"><textarea rows={4} value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} className="w-full rounded-3xl border border-slate-200 px-4 py-3 text-sm leading-6 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100" placeholder="Ask what should pause, scale, test next, or why ROAS is under pressure." /><div className="mt-3 flex items-center justify-between gap-3"><p className="text-xs text-slate-500">The reply is grounded in the latest store snapshot plus Meta decision data.</p><button type="button" onClick={() => handleAssistantSend()} disabled={assistantSending || schemaMissing || !assistantInput.trim()} className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-60"><Send size={16} />{assistantSending ? "Sending..." : "Send to AI"}</button></div></div>

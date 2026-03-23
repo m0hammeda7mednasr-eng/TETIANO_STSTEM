@@ -9,12 +9,54 @@ const DEFAULT_META_LOOKBACK_DAYS = 30;
 const META_API_TIMEOUT_MS = 60 * 1000;
 const OPENROUTER_TIMEOUT_MS = 90 * 1000;
 const MAX_META_PAGES = 25;
-export const META_PLAYBOOK_NOTES = [
-  "Meta recommends using six or more placements to give delivery more room to find efficient inventory.",
-  "Meta recommends Reels-native creative: 9:16 vertical video, audio-friendly assets, safe-zone layouts, and A/B testing Reels-specific creative.",
-  "Meta notes that ad sets enter a learning phase early in delivery, so combine ad sets when possible and avoid frequent changes before judging performance.",
-  "Meta states that Conversions API can improve measurement and attribution across the customer journey.",
+export const META_REFERENCE_LIBRARY = [
+  {
+    id: "placements",
+    title: "Meta placements coverage",
+    source_label: "Meta for Business",
+    source_url: "https://www.facebook.com/business/ads/ad-creative",
+    insight:
+      "Meta recommends giving delivery room across placements so the system can find efficient inventory instead of forcing one narrow surface.",
+  },
+  {
+    id: "reels",
+    title: "Reels-native creative",
+    source_label: "Meta for Business",
+    source_url: "https://www.facebook.com/business/ads/facebook-instagram-reels-ads",
+    insight:
+      "Meta recommends Reels-native creative: vertical video, early brand or product proof, safe-zone layouts, and creative built for sound-on viewing.",
+  },
+  {
+    id: "structure",
+    title: "Ad set structure and learning",
+    source_label: "Meta for Business",
+    source_url: "https://www.facebook.com/business/ads/ad-set-structure",
+    insight:
+      "Meta advises simpler account structure with fewer overlapping ad sets and fewer heavy edits so delivery can exit learning more efficiently.",
+  },
+  {
+    id: "testing",
+    title: "Creative testing discipline",
+    source_label: "Meta for Business",
+    source_url: "https://www.facebook.com/business/ads/ad-creative",
+    insight:
+      "Meta creative guidance favors testing distinct concepts and changing one major variable at a time instead of editing too many things together.",
+  },
+  {
+    id: "measurement",
+    title: "Conversions API measurement",
+    source_label: "Meta Business Help Center",
+    source_url: "https://www.facebook.com/business/help/AboutConversionsAPI",
+    insight:
+      "Meta states that Conversions API can strengthen measurement quality and attribution continuity across the customer journey.",
+  },
 ];
+export const META_PLAYBOOK_NOTES = META_REFERENCE_LIBRARY.map(
+  (reference) => reference.insight,
+);
+const META_REFERENCE_MAP = new Map(
+  META_REFERENCE_LIBRARY.map((reference) => [reference.id, reference]),
+);
 const ACTIVE_META_STATUSES = new Set(["ACTIVE"]);
 const ACTION_TYPE_GROUPS = {
   purchases: [
@@ -44,6 +86,7 @@ const toNumber = (value) => {
 const normalizeArray = (value) => (Array.isArray(value) ? value : []);
 
 const normalizeText = (value) => String(value || "").trim();
+const getMetaReference = (id) => META_REFERENCE_MAP.get(normalizeText(id)) || null;
 
 const normalizeAdAccountId = (value) => {
   const normalized = normalizeText(value);
@@ -1510,6 +1553,322 @@ export const buildMetaDecisionBoard = ({
   };
 };
 
+const buildQuestionDataPoints = (rows = [], formatter) =>
+  normalizeArray(rows)
+    .slice(0, 2)
+    .map((row) => formatter(row))
+    .filter(Boolean);
+
+const buildQuestionSuggestion = ({
+  id,
+  category = "performance",
+  priority = "medium",
+  question,
+  whyNow,
+  sourceId = "",
+  dataPoints = [],
+}) => {
+  const reference = getMetaReference(sourceId);
+
+  return {
+    id: normalizeText(id),
+    category: normalizeText(category) || "performance",
+    priority: normalizeText(priority) || "medium",
+    question: normalizeText(question),
+    why_now: normalizeText(whyNow),
+    data_points: normalizeArray(dataPoints).slice(0, 3),
+    source_id: reference?.id || normalizeText(sourceId),
+    source_label: normalizeText(reference?.title || reference?.source_label),
+    source_url: normalizeText(reference?.source_url),
+    reference_note: normalizeText(reference?.insight),
+  };
+};
+
+export const buildMetaQuestionSuggestions = ({
+  storeSnapshot = {},
+  metaOverview = {},
+  decisionBoard = {},
+}) => {
+  const suggestions = [];
+  const seenIds = new Set();
+  const pushSuggestion = (suggestion) => {
+    if (!suggestion?.id || !suggestion?.question || seenIds.has(suggestion.id)) {
+      return;
+    }
+
+    seenIds.add(suggestion.id);
+    suggestions.push(suggestion);
+  };
+
+  const summary = metaOverview?.summary || {};
+  const benchmarks = decisionBoard?.benchmarks || {};
+  const scaleNow = normalizeArray(decisionBoard?.scale_now);
+  const pauseNow = normalizeArray(decisionBoard?.pause_now);
+  const testNext = normalizeArray(decisionBoard?.test_next);
+  const creativeDiagnostics = normalizeArray(
+    decisionBoard?.creative_diagnostics,
+  );
+  const fatiguedCampaigns = normalizeArray(decisionBoard?.campaigns).filter(
+    (row) => normalizeText(row?.primary_issue) === "fatigue",
+  );
+  const expensiveCampaigns = normalizeArray(decisionBoard?.campaigns).filter(
+    (row) => normalizeText(row?.primary_issue) === "cost",
+  );
+  const conversionPressureCampaigns = normalizeArray(
+    decisionBoard?.campaigns,
+  ).filter((row) => normalizeText(row?.primary_issue) === "conversion");
+  const weakCreativeDiagnostics = creativeDiagnostics.filter((row) =>
+    ["weak_thumb_stop", "weak_hold", "late_offer"].includes(
+      normalizeText(row?.diagnosis),
+    ),
+  );
+  const postClickDrops = creativeDiagnostics.filter(
+    (row) => normalizeText(row?.diagnosis) === "post_click_drop",
+  );
+  const orders = storeSnapshot?.orders || {};
+  const catalog = storeSnapshot?.catalog || {};
+
+  if (pauseNow.length > 0) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "pause-now",
+        category: "budget",
+        priority: "high",
+        question:
+          "Which campaigns should we pause in the next 24 hours, and what exact metric is failing first: CTR, conversion rate, or creative hold?",
+        whyNow: `${pauseNow.length} campaigns already clear the spend gate but still sit in the pause bucket.`,
+        sourceId: "structure",
+        dataPoints: buildQuestionDataPoints(
+          pauseNow,
+          (row) =>
+            `${normalizeText(row?.name) || normalizeText(row?.id)} | ROAS ${toFixedMetric(row?.roas)}x | Spend ${toFixedMetric(row?.spend)}`,
+        ),
+      }),
+    );
+  }
+
+  if (scaleNow.length > 0) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "scale-winners",
+        category: "scaling",
+        priority: "high",
+        question:
+          "Which winner can take a controlled 10-15% budget increase without destabilizing learning, and what guardrail should we watch right after scaling?",
+        whyNow: `${scaleNow.length} campaigns are above the current scale threshold and still look efficient.`,
+        sourceId: "structure",
+        dataPoints: buildQuestionDataPoints(
+          scaleNow,
+          (row) =>
+            `${normalizeText(row?.name) || normalizeText(row?.id)} | ROAS ${toFixedMetric(row?.roas)}x | Frequency ${toFixedMetric(row?.frequency)}`,
+        ),
+      }),
+    );
+  }
+
+  if (testNext.length > 0) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "test-next",
+        category: "testing",
+        priority: "high",
+        question:
+          "For the mixed campaigns, what single variable should we test next first: hook, offer, landing page match, audience, or placement?",
+        whyNow: `${testNext.length} campaigns are neither strong enough to scale nor weak enough to pause outright.`,
+        sourceId: "testing",
+        dataPoints: buildQuestionDataPoints(
+          testNext,
+          (row) =>
+            `${normalizeText(row?.name) || normalizeText(row?.id)} | Issue ${normalizeText(row?.primary_issue) || "mixed"} | ROAS ${toFixedMetric(row?.roas)}x`,
+        ),
+      }),
+    );
+  }
+
+  if (weakCreativeDiagnostics.length > 0) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "creative-rebuild",
+        category: "creative",
+        priority: "high",
+        question:
+          "Which creatives need a new opening hook or earlier product proof because thumb-stop, hold, or completion is weak?",
+        whyNow: `${weakCreativeDiagnostics.length} ads are showing early creative drop-off before the core message lands.`,
+        sourceId: "reels",
+        dataPoints: buildQuestionDataPoints(
+          weakCreativeDiagnostics,
+          (row) =>
+            `${normalizeText(row?.name) || normalizeText(row?.id)} | ${normalizeText(row?.diagnosis)} | Hold ${toFixedMetric(row?.video_hold_rate)}%`,
+        ),
+      }),
+    );
+  }
+
+  if (postClickDrops.length > 0 || conversionPressureCampaigns.length > 0) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "post-click-diagnosis",
+        category: "conversion",
+        priority: "high",
+        question:
+          "Which ads are earning the click but losing after the click, and is the real issue offer framing, landing page match, or product-page trust?",
+        whyNow:
+          postClickDrops.length > 0
+            ? `${postClickDrops.length} ads show strong click intent but weak post-click conversion.`
+            : `${conversionPressureCampaigns.length} campaigns are flagged with conversion-side pressure.`,
+        sourceId: "measurement",
+        dataPoints: buildQuestionDataPoints(
+          postClickDrops.length > 0 ? postClickDrops : conversionPressureCampaigns,
+          (row) =>
+            `${normalizeText(row?.name) || normalizeText(row?.id)} | Link CTR ${toFixedMetric(row?.link_ctr)}% | CVR ${toFixedMetric(row?.conversion_rate)}%`,
+        ),
+      }),
+    );
+  }
+
+  if (
+    fatiguedCampaigns.length > 0 ||
+    toNumber(summary?.frequency) >= Math.max(3, toNumber(benchmarks?.high_frequency))
+  ) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "fatigue",
+        category: "creative",
+        priority: "medium",
+        question:
+          "Where is audience fatigue building, and should we rotate creative before we expand budget or audience size?",
+        whyNow:
+          fatiguedCampaigns.length > 0
+            ? `${fatiguedCampaigns.length} campaigns are already flagged for fatigue through rising frequency.`
+            : `Account frequency ${toFixedMetric(summary?.frequency)} is approaching the fatigue threshold.`,
+        sourceId: "structure",
+        dataPoints: buildQuestionDataPoints(
+          fatiguedCampaigns,
+          (row) =>
+            `${normalizeText(row?.name) || normalizeText(row?.id)} | Frequency ${toFixedMetric(row?.frequency)} | ROAS ${toFixedMetric(row?.roas)}x`,
+        ),
+      }),
+    );
+  }
+
+  if (
+    expensiveCampaigns.length > 0 ||
+    (toNumber(summary?.cpm) > 0 &&
+      toNumber(summary?.link_ctr) > 0 &&
+      toNumber(summary?.link_ctr) < Math.max(1.2, toNumber(benchmarks?.strong_link_ctr)))
+  ) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "placements-and-cost",
+        category: "delivery",
+        priority: "medium",
+        question:
+          "Which campaigns are paying premium CPM without earning enough attention, and should placements or creative format change first?",
+        whyNow:
+          expensiveCampaigns.length > 0
+            ? `${expensiveCampaigns.length} campaigns are flagged with cost pressure against current attention quality.`
+            : `Account CPM is elevated while link CTR is still soft.`,
+        sourceId: "placements",
+        dataPoints: buildQuestionDataPoints(
+          expensiveCampaigns,
+          (row) =>
+            `${normalizeText(row?.name) || normalizeText(row?.id)} | CPM ${toFixedMetric(row?.cpm)} | Link CTR ${toFixedMetric(row?.link_ctr)}%`,
+        ),
+      }),
+    );
+  }
+
+  if (scaleNow.length > 0 && toNumber(catalog?.low_stock_count) > 0) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "inventory-guardrail",
+        category: "operations",
+        priority: toNumber(catalog?.low_stock_count) >= 5 ? "high" : "medium",
+        question:
+          "Which winners should stay capped because stock is tight, even if Meta performance says they can scale?",
+        whyNow: `${catalog.low_stock_count} products are low on stock while there are live scale candidates in Meta.`,
+        sourceId: "measurement",
+        dataPoints: buildQuestionDataPoints(
+          normalizeArray(storeSnapshot?.low_stock_products),
+          (row) =>
+            `${normalizeText(row?.title) || normalizeText(row?.id)} | Stock ${toFixedMetric(row?.inventory_quantity, 0)}`,
+        ),
+      }),
+    );
+  }
+
+  if (
+    toNumber(orders?.pending) >= 8 ||
+    toNumber(orders?.cancellation_rate) >= 10 ||
+    toNumber(orders?.refund_rate) >= 8
+  ) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "commerce-friction",
+        category: "operations",
+        priority: "high",
+        question:
+          "Should we slow scaling until pending, canceled, or refunded orders are under control, even if front-end ROAS still looks healthy?",
+        whyNow: `${toFixedMetric(orders?.pending, 0)} pending orders, ${toFixedMetric(orders?.cancellation_rate)}% cancellation rate, and ${toFixedMetric(orders?.refund_rate)}% refund rate can distort scaling decisions.`,
+        sourceId: "measurement",
+        dataPoints: [
+          `Pending orders ${toFixedMetric(orders?.pending, 0)}`,
+          `Cancellation rate ${toFixedMetric(orders?.cancellation_rate)}%`,
+          `Refund rate ${toFixedMetric(orders?.refund_rate)}%`,
+        ],
+      }),
+    );
+  }
+
+  if (toNumber(summary?.rows_count) === 0 || toNumber(summary?.spend) === 0) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "measurement-readiness",
+        category: "measurement",
+        priority: "high",
+        question:
+          "What is missing in our Meta setup before we trust optimization calls: sync freshness, conversion tracking, or Conversions API coverage?",
+        whyNow:
+          "There is not enough current Meta delivery data loaded to make reliable pause or scale decisions.",
+        sourceId: "measurement",
+      }),
+    );
+  }
+
+  if (!suggestions.length) {
+    pushSuggestion(
+      buildQuestionSuggestion({
+        id: "roas-pressure",
+        category: "performance",
+        priority: "medium",
+        question:
+          "Is ROAS pressure coming more from weak attention, poor post-click conversion, high CPM, or simple lack of delivery volume right now?",
+        whyNow:
+          "This is the fastest diagnostic split before making creative, budget, or landing-page changes.",
+        sourceId: "testing",
+        dataPoints: [
+          `ROAS ${toFixedMetric(summary?.roas)}x`,
+          `Link CTR ${toFixedMetric(summary?.link_ctr)}%`,
+          `Conversion rate ${toFixedMetric(summary?.conversion_rate)}%`,
+        ],
+      }),
+    );
+  }
+
+  const priorityRank = {
+    high: 0,
+    medium: 1,
+    low: 2,
+  };
+
+  return suggestions
+    .sort(
+      (left, right) =>
+        (priorityRank[left.priority] ?? 99) - (priorityRank[right.priority] ?? 99),
+    )
+    .slice(0, 8);
+};
+
 const extractFirstJsonObject = (content) => {
   const text = String(content || "").trim();
   if (!text) {
@@ -1728,6 +2087,11 @@ const buildAiPrompt = ({
       top_ads: normalizeArray(overview?.ads).slice(0, 10),
       top_accounts: normalizeArray(overview?.accounts).slice(0, 5),
       decision_board: decisionBoard || {},
+      assistant_questions: buildMetaQuestionSuggestions({
+        storeSnapshot,
+        metaOverview: overview,
+        decisionBoard,
+      }).slice(0, 6),
       meta_playbook_notes: META_PLAYBOOK_NOTES,
     },
     null,
@@ -1830,6 +2194,7 @@ export const buildAssistantContextSnapshot = ({
   metaOverview = {},
   decisionBoard = {},
   recommendations = [],
+  assistantQuestions = [],
 }) => ({
   store_snapshot: {
     financial: storeSnapshot?.financial || {},
@@ -1848,6 +2213,7 @@ export const buildAssistantContextSnapshot = ({
     decisionBoard?.creative_diagnostics,
     5,
   ),
+  assistant_questions: normalizeArray(assistantQuestions).slice(0, 6),
   recommendations: normalizeArray(recommendations).slice(0, 6),
   meta_playbook_notes: META_PLAYBOOK_NOTES,
 });
@@ -1863,6 +2229,7 @@ export const generateOpenRouterStoreAssistantReply = async ({
   metaOverview = {},
   decisionBoard = {},
   recommendations = [],
+  assistantQuestions = [],
 }) => {
   const normalizedMessage = normalizeText(message);
   const compactContext = buildAssistantContextSnapshot({
@@ -1870,6 +2237,7 @@ export const generateOpenRouterStoreAssistantReply = async ({
     metaOverview,
     decisionBoard,
     recommendations,
+    assistantQuestions,
   });
   const prompt = {
     system: [

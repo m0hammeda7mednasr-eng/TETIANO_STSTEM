@@ -13,6 +13,7 @@ import {
   Menu,
   Megaphone,
   Package,
+  Printer,
   Server,
   Settings,
   Shield,
@@ -109,6 +110,12 @@ const buildSharedNav = (t, select) => [
       "Warehouse, scanner, and movements",
     ),
     items: [
+      {
+        icon: Printer,
+        label: select("الباركود والطباعة", "Barcode Labels"),
+        path: "/barcode-labels",
+        permission: "can_view_products",
+      },
       {
         icon: Server,
         label: t("sidebar.warehouse", "Warehouse"),
@@ -207,7 +214,8 @@ const buildAdminNav = (t) => [
 const getAutoExpandedGroups = (pathname) => ({
   orders: pathname.startsWith("/orders"),
   catalog: pathname.startsWith("/products") || pathname.startsWith("/suppliers"),
-  inventory: pathname.startsWith("/warehouse"),
+  inventory:
+    pathname.startsWith("/warehouse") || pathname.startsWith("/barcode-labels"),
 });
 
 const isPathActive = (pathname, itemPath) => {

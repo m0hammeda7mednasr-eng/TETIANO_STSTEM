@@ -1,0 +1,405 @@
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  Package,
+  Printer,
+  RefreshCw,
+  Search,
+  Tags,
+} from "lucide-react";
+import Sidebar from "../components/Sidebar";
+import BarcodeLabelModal from "../components/BarcodeLabelModal";
+import { EmptyState, ErrorAlert, LoadingSpinner } from "../components/Common";
+import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
+import api from "../utils/api";
+import { formatDateTime, formatNumber } from "../utils/helpers";
+import { fetchAllPagesProgressively } from "../utils/pagination";
+import {
+  hasPrintableBarcodeValue,
+  normalizeBarcodeVariantTitle,
+} from "../utils/barcodeLabels";
+import { buildVariantRows } from "../utils/productsView";
+
+const PRODUCTS_PAGE_SIZE = 200;
+
+const buildPrintableTarget = (variant) => ({
+  key: String(variant?.key || variant?.variant_id || variant?.id || ""),
+  title: String(variant?.product_title || "").trim(),
+  subtitle: normalizeBarcodeVariantTitle(
+    variant?.variant_title,
+    variant?.product_title,
+  ),
+  sku: String(variant?.sku || "").trim(),
+  barcode: String(variant?.barcode || "").trim(),
+  vendor: String(variant?.vendor || "").trim(),
+});
+
+function MetricCard({ icon: Icon, label, value, helper }) {
+  return (
+    <div className="app-surface rounded-[24px] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+            {label}
+          </p>
+          <p className="mt-3 text-2xl font-bold text-slate-950">{value}</p>
+          {helper ? <p className="mt-2 text-sm text-slate-500">{helper}</p> : null}
+        </div>
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-50 text-sky-700">
+          <Icon size={22} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VariantCard({ target, variant, onPrint, select }) {
+  return (
+    <div className="app-surface rounded-[26px] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="truncate text-lg font-bold text-slate-950">
+            {target.title}
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">
+            {target.subtitle || select("بدون متغير", "No variant title")}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onPrint(variant)}
+          className="app-button-primary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-white"
+        >
+          <Printer size={16} />
+          {select("طباعة", "Print")}
+        </button>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+            Barcode
+          </div>
+          <div className="mt-2 break-all font-semibold text-slate-900">
+            {target.barcode || "-"}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+            SKU
+          </div>
+          <div className="mt-2 break-all font-semibold text-slate-900">
+            {target.sku || "-"}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {target.vendor ? (
+          <span className="app-chip px-3 py-1.5 text-xs font-medium text-slate-700">
+            {target.vendor}
+          </span>
+        ) : null}
+        {Array.isArray(variant?.option_values) &&
+          variant.option_values.map((value) => (
+            <span
+              key={`${target.key}-${value}`}
+              className="app-chip px-3 py-1.5 text-xs font-medium text-slate-700"
+            >
+              {value}
+            </span>
+          ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+        <span>
+          {select("آخر تحديث", "Updated")}: {formatDateTime(variant?.updated_at)}
+        </span>
+        <span>
+          {select("المخزون", "Stock")}:{" "}
+          {formatNumber(variant?.inventory_quantity, {
+            maximumFractionDigits: 0,
+          })}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export default function BarcodeLabels() {
+  const { isAdmin } = useAuth();
+  const { select } = useLocale();
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [loadStatus, setLoadStatus] = useState({
+    active: false,
+    message: "",
+  });
+  const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
+  const [barcodeModalTargets, setBarcodeModalTargets] = useState([]);
+  const [barcodeModalTargetKey, setBarcodeModalTargetKey] = useState("");
+
+  const fetchProducts = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    setLoadStatus({
+      active: true,
+      message: select(
+        "جاري تحميل المنتجات القابلة للطباعة...",
+        "Loading printable products...",
+      ),
+    });
+
+    try {
+      const rows = await fetchAllPagesProgressively(
+        ({ limit, offset }) =>
+          api.get("/shopify/products", {
+            params: {
+              limit,
+              offset,
+              sort_by: "updated_at",
+              sort_dir: "desc",
+            },
+          }),
+        {
+          limit: PRODUCTS_PAGE_SIZE,
+          onPage: ({ rows: accumulatedRows, hasMore }) => {
+            setProducts(accumulatedRows);
+            setLoadStatus({
+              active: hasMore,
+              message: hasMore
+                ? select(
+                    `تم تحميل ${formatNumber(accumulatedRows.length, {
+                      maximumFractionDigits: 0,
+                    })} منتج حتى الآن...`,
+                    `Loaded ${formatNumber(accumulatedRows.length, {
+                      maximumFractionDigits: 0,
+                    })} products so far...`,
+                  )
+                : select(
+                    `تم تحميل ${formatNumber(accumulatedRows.length, {
+                      maximumFractionDigits: 0,
+                    })} منتج`,
+                    `Loaded ${formatNumber(accumulatedRows.length, {
+                      maximumFractionDigits: 0,
+                    })} products`,
+                  ),
+            });
+          },
+        },
+      );
+
+      setProducts(rows);
+      setLoadStatus({
+        active: false,
+        message: "",
+      });
+    } catch (requestError) {
+      console.error("Failed to load barcode labels page data", requestError);
+      setError(
+        select(
+          "فشل تحميل المنتجات. حاول تحديث الصفحة مرة ثانية.",
+          "Failed to load products. Try refreshing the page.",
+        ),
+      );
+      setLoadStatus({
+        active: false,
+        message: "",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [select]);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  const printableVariants = useMemo(
+    () =>
+      buildVariantRows(products, isAdmin).filter((variant) =>
+        hasPrintableBarcodeValue(variant),
+      ),
+    [isAdmin, products],
+  );
+
+  const filteredVariants = useMemo(() => {
+    const keyword = String(searchTerm || "").trim().toLowerCase();
+    if (!keyword) {
+      return printableVariants;
+    }
+
+    return printableVariants.filter((variant) => {
+      const target = buildPrintableTarget(variant);
+      const fields = [
+        target.title,
+        target.subtitle,
+        target.sku,
+        target.barcode,
+        target.vendor,
+        ...(Array.isArray(variant?.option_values) ? variant.option_values : []),
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .filter(Boolean);
+
+      return fields.some((value) => value.includes(keyword));
+    });
+  }, [printableVariants, searchTerm]);
+
+  const openBarcodeLabelModal = useCallback(
+    (variant) => {
+      const target = buildPrintableTarget(variant);
+      if (!hasPrintableBarcodeValue(target)) {
+        return;
+      }
+
+      setBarcodeModalTargets([target]);
+      setBarcodeModalTargetKey(target.key);
+      setIsBarcodeModalOpen(true);
+    },
+    [],
+  );
+
+  return (
+    <div className="flex h-screen bg-slate-100">
+      <Sidebar />
+
+      <main className="flex-1 overflow-auto">
+        <div className="p-8 space-y-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-sky-700">
+                <Tags size={14} />
+                {select("مركز الباركود", "Barcode hub")}
+              </div>
+              <h1 className="mt-4 text-3xl font-bold text-slate-950">
+                {select("طباعة الباركود", "Barcode label printing")}
+              </h1>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                {select(
+                  "دي شاشة مستقلة في النافبار مخصوص للبحث عن أي منتج أو متغير وطباعة الليبل مباشرة من غير ما تدخل على تفاصيل المنتج.",
+                  "This page is a dedicated navbar entry for finding any product or variant and printing its label directly without opening product details.",
+                )}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={fetchProducts}
+              className="app-button-primary inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-white"
+            >
+              <RefreshCw size={16} />
+              {select("تحديث", "Refresh")}
+            </button>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <MetricCard
+              icon={Package}
+              label={select("المنتجات المحملة", "Loaded products")}
+              value={formatNumber(products.length, { maximumFractionDigits: 0 })}
+              helper={select("إجمالي المنتجات التي تم جلبها من السيستم", "Total products fetched from the system")}
+            />
+            <MetricCard
+              icon={Tags}
+              label={select("العناصر القابلة للطباعة", "Printable items")}
+              value={formatNumber(printableVariants.length, {
+                maximumFractionDigits: 0,
+              })}
+              helper={select("منتجات أو متغيرات تحتوي على SKU أو باركود", "Products or variants that have a SKU or barcode")}
+            />
+            <MetricCard
+              icon={Printer}
+              label={select("نتيجة البحث الحالية", "Current search result")}
+              value={formatNumber(filteredVariants.length, {
+                maximumFractionDigits: 0,
+              })}
+              helper={select("العناصر الظاهرة بعد الفلترة الحالية", "Items shown after the current filter")}
+            />
+          </div>
+
+          <div className="app-toolbar rounded-[28px] p-4">
+            <div className="relative">
+              <Search
+                size={18}
+                className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder={select(
+                  "ابحث باسم المنتج أو المتغير أو SKU أو الباركود...",
+                  "Search by product, variant, SKU, or barcode...",
+                )}
+                className="app-input rounded-2xl py-3 pl-11 pr-4 text-sm"
+              />
+            </div>
+            {loadStatus.message ? (
+              <p className="mt-3 text-sm text-sky-700">{loadStatus.message}</p>
+            ) : null}
+          </div>
+
+          {error ? <ErrorAlert message={error} onClose={() => setError("")} /> : null}
+
+          {loading ? (
+            <LoadingSpinner
+              label={select(
+                "جاري تجهيز صفحة الباركود...",
+                "Preparing the barcode page...",
+              )}
+            />
+          ) : filteredVariants.length > 0 ? (
+            <div className="grid gap-4 xl:grid-cols-2">
+              {filteredVariants.map((variant) => {
+                const target = buildPrintableTarget(variant);
+
+                return (
+                  <VariantCard
+                    key={target.key}
+                    target={target}
+                    variant={variant}
+                    onPrint={openBarcodeLabelModal}
+                    select={select}
+                  />
+                );
+              })}
+            </div>
+          ) : printableVariants.length > 0 ? (
+            <EmptyState
+              icon={Search}
+              title={select("مفيش نتيجة للبحث الحالي", "No results for this search")}
+              message={select(
+                "غيّر كلمة البحث أو امسحها عشان تظهر العناصر القابلة للطباعة.",
+                "Change or clear the search term to show printable items.",
+              )}
+            />
+          ) : (
+            <EmptyState
+              icon={Printer}
+              title={select("لا يوجد باركود أو SKU جاهز للطباعة", "No printable barcode or SKU found")}
+              message={select(
+                "أضف SKU أو باركود للمنتجات أولًا، وبعدها هتظهر هنا تلقائيًا.",
+                "Add a SKU or barcode to products first, then they will appear here automatically.",
+              )}
+            />
+          )}
+        </div>
+      </main>
+
+      <BarcodeLabelModal
+        open={isBarcodeModalOpen}
+        onClose={() => setIsBarcodeModalOpen(false)}
+        targets={barcodeModalTargets}
+        defaultTargetKey={barcodeModalTargetKey}
+      />
+    </div>
+  );
+}

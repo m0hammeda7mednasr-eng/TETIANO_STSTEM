@@ -20,6 +20,7 @@ const Products = lazy(() => import("./pages/Products"));
 const Suppliers = lazy(() => import("./pages/Suppliers"));
 const ProductAnalysis = lazy(() => import("./pages/ProductAnalysis"));
 const ProductDetails = lazy(() => import("./pages/ProductDetails"));
+const BarcodeLabels = lazy(() => import("./pages/BarcodeLabels"));
 const Orders = lazy(() => import("./pages/Orders"));
 const MissingOrders = lazy(() => import("./pages/MissingOrders"));
 const OrderDetails = lazy(() => import("./pages/OrderDetails"));
@@ -113,6 +114,14 @@ function App() {
                 element={
                   <ProtectedRoute permission="can_view_products">
                     <ProductDetails />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/barcode-labels"
+                element={
+                  <ProtectedRoute permission="can_view_products">
+                    <BarcodeLabels />
                   </ProtectedRoute>
                 }
               />

@@ -32,7 +32,13 @@ import {
 } from "../services/metaAnalyticsService.js";
 
 const router = express.Router();
-const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
+const SCHEMA_ERROR_CODES = new Set([
+  "42P01",
+  "42P10",
+  "42703",
+  "PGRST204",
+  "PGRST205",
+]);
 
 const META_SCHEMA_ERROR = {
   code: "META_ANALYTICS_SCHEMA_MISSING",
@@ -168,7 +174,12 @@ const isSchemaCompatibilityError = (error) => {
   return (
     text.includes("does not exist") ||
     text.includes("relation") ||
-    text.includes("column")
+    text.includes("column") ||
+    text.includes("schema cache") ||
+    text.includes("on conflict") ||
+    text.includes("unique or exclusion constraint") ||
+    text.includes("permission denied") ||
+    text.includes("row-level security")
   );
 };
 

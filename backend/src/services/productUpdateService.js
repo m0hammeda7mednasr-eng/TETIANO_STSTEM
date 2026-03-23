@@ -6,6 +6,8 @@ import {
   preserveProductLocalMetadata,
 } from "../helpers/productLocalMetadata.js";
 
+const SHOPIFY_API_VERSION = "2024-01";
+
 const getShopifyTokenForStore = async (storeId, fallbackUserId) => {
   const { supabase } = await import("../supabaseClient.js");
 
@@ -61,6 +63,11 @@ const cloneJsonValue = (value) => JSON.parse(JSON.stringify(value || {}));
 
 const getProductVariants = (productData = {}) =>
   Array.isArray(productData?.variants) ? productData.variants : [];
+
+const buildShopifyHeaders = (accessToken) => ({
+  "X-Shopify-Access-Token": accessToken,
+  "Content-Type": "application/json",
+});
 
 const getTotalInventory = (variants = [], fallbackInventory = 0) => {
   if (!Array.isArray(variants) || variants.length === 0) {
@@ -221,16 +228,6 @@ export const buildShopifyVariantPayloads = (
       payload.sku = resolvedSku;
     }
 
-    const resolvedInventory =
-      requestedUpdate?.inventory_quantity !== undefined
-        ? requestedUpdate.inventory_quantity
-        : isPrimaryVariant && updates.inventory_quantity !== undefined
-          ? updates.inventory_quantity
-          : undefined;
-    if (resolvedInventory !== undefined) {
-      payload.inventory_quantity = resolvedInventory;
-    }
-
     return payload;
   });
 
@@ -242,6 +239,129 @@ export const buildShopifyVariantPayloads = (
   }
 
   return variantPayloads;
+};
+
+export const buildShopifyInventoryLevelPayloads = (
+  parsedProductData = {},
+  updates = {},
+) => {
+  const variants = getProductVariants(parsedProductData);
+  if (variants.length === 0) {
+    return [];
+  }
+
+  const variantUpdates = Array.isArray(updates?.variant_updates)
+    ? updates.variant_updates
+    : [];
+  const inventoryUpdatesById = new Map(
+    variantUpdates
+      .filter((variantUpdate) => variantUpdate?.inventory_quantity !== undefined)
+      .map((variantUpdate) => [String(variantUpdate?.id || ""), variantUpdate]),
+  );
+  const seenVariantIds = new Set();
+  const payloads = [];
+
+  for (const [index, variant] of variants.entries()) {
+    const variantId = String(variant?.id || "");
+    const requestedUpdate = inventoryUpdatesById.get(variantId);
+    const isPrimaryVariant = index === 0;
+    const resolvedInventory =
+      requestedUpdate?.inventory_quantity !== undefined
+        ? requestedUpdate.inventory_quantity
+        : isPrimaryVariant && updates.inventory_quantity !== undefined
+          ? updates.inventory_quantity
+          : undefined;
+
+    if (resolvedInventory === undefined) {
+      continue;
+    }
+
+    if (!variantId) {
+      throw new Error("Variant ID not found for this product.");
+    }
+    if (!variant?.inventory_item_id) {
+      throw new Error(
+        `Variant ${variantId} is missing Shopify inventory_item_id.`,
+      );
+    }
+
+    seenVariantIds.add(variantId);
+    payloads.push({
+      variant_id: variantId,
+      inventory_item_id: String(variant.inventory_item_id),
+      available: resolvedInventory,
+    });
+  }
+
+  for (const [variantId] of inventoryUpdatesById.entries()) {
+    if (!seenVariantIds.has(variantId)) {
+      throw new Error(`Variant ${variantId} was not found for this product.`);
+    }
+  }
+
+  return payloads;
+};
+
+const fetchPrimaryShopifyLocationId = async (tokenData) => {
+  const response = await axios.get(
+    `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/locations.json`,
+    {
+      headers: buildShopifyHeaders(tokenData.access_token),
+      params: { limit: 20 },
+    },
+  );
+
+  const locations = Array.isArray(response?.data?.locations)
+    ? response.data.locations
+    : [];
+  const activeLocation =
+    locations.find((location) => location?.active !== false) || locations[0];
+
+  if (!activeLocation?.id) {
+    throw new Error("No active Shopify location was found for inventory updates");
+  }
+
+  return activeLocation.id;
+};
+
+const fetchShopifyProductById = async (tokenData, shopifyProductId) => {
+  const response = await axios.get(
+    `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/products/${shopifyProductId}.json`,
+    {
+      headers: buildShopifyHeaders(tokenData.access_token),
+    },
+  );
+
+  return response?.data?.product || null;
+};
+
+const hasVariantProductFieldUpdates = (updates = {}) =>
+  Array.isArray(updates?.variant_updates) &&
+  updates.variant_updates.some(
+    (variantUpdate) =>
+      variantUpdate?.price !== undefined || variantUpdate?.sku !== undefined,
+  );
+
+const applyShopifyUpdateFallback = (parsedProductData = {}, updates = {}) => {
+  let nextProductData = parsedProductData;
+
+  if (
+    updates?.price !== undefined ||
+    updates?.sku !== undefined ||
+    updates?.inventory_quantity !== undefined
+  ) {
+    nextProductData = applyPrimaryVariantUpdates(nextProductData, {
+      price: updates.price,
+      sku: updates.sku,
+      inventory_quantity: updates.inventory_quantity,
+    });
+  }
+
+  if (Array.isArray(updates?.variant_updates) && updates.variant_updates.length > 0) {
+    nextProductData = applyVariantUpdates(nextProductData, updates.variant_updates);
+  }
+
+  return nextProductData;
 };
 
 export class ProductUpdateService {
@@ -641,33 +761,75 @@ export class ProductUpdateService {
 
       // Build Shopify API payload
       const parsedProductData = parseProductData(product.data);
-
-      const variantPayloads = buildShopifyVariantPayloads(
+      const inventoryLevelPayloads = buildShopifyInventoryLevelPayloads(
         parsedProductData,
         updates,
       );
+      const requiresProductUpdate =
+        updates.price !== undefined ||
+        updates.sku !== undefined ||
+        hasVariantProductFieldUpdates(updates);
+      let latestShopifyProduct = null;
 
-      const shopifyPayload = {
-        product: {
-          id: parseInt(product.shopify_id),
-          variants: variantPayloads,
-        },
-      };
-
-      // Send to Shopify
-      const response = await axios.put(
-        `https://${tokenData.shop}/admin/api/2024-01/products/${product.shopify_id}.json`,
-        shopifyPayload,
-        {
-          headers: {
-            "X-Shopify-Access-Token": tokenData.access_token,
-            "Content-Type": "application/json",
+      if (requiresProductUpdate) {
+        const variantPayloads = buildShopifyVariantPayloads(
+          parsedProductData,
+          updates,
+        );
+        const shopifyPayload = {
+          product: {
+            id: parseInt(product.shopify_id),
+            variants: variantPayloads,
           },
-        },
-      );
+        };
+
+        const response = await axios.put(
+          `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/products/${product.shopify_id}.json`,
+          shopifyPayload,
+          {
+            headers: buildShopifyHeaders(tokenData.access_token),
+          },
+        );
+
+        latestShopifyProduct = response?.data?.product || null;
+      }
+
+      if (inventoryLevelPayloads.length > 0) {
+        const locationId = await fetchPrimaryShopifyLocationId(tokenData);
+
+        await Promise.all(
+          inventoryLevelPayloads.map((inventoryLevelPayload) =>
+            axios.post(
+              `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/inventory_levels/set.json`,
+              {
+                location_id: locationId,
+                inventory_item_id: inventoryLevelPayload.inventory_item_id,
+                available: inventoryLevelPayload.available,
+              },
+              {
+                headers: buildShopifyHeaders(tokenData.access_token),
+              },
+            ),
+          ),
+        );
+      }
+
+      if (requiresProductUpdate || inventoryLevelPayloads.length > 0) {
+        try {
+          latestShopifyProduct =
+            (await fetchShopifyProductById(tokenData, product.shopify_id)) ||
+            latestShopifyProduct;
+        } catch (refreshError) {
+          console.warn(
+            "Failed to refresh Shopify product after sync; using local fallback snapshot.",
+            refreshError,
+          );
+        }
+      }
 
       // Update sync status
-      const syncedProductData = response.data?.product || parsedProductData;
+      const syncedProductData =
+        latestShopifyProduct || applyShopifyUpdateFallback(parsedProductData, updates);
       const mergedSyncedProductData = preserveProductLocalMetadata(
         syncedProductData,
         product.data,
@@ -709,7 +871,8 @@ export class ProductUpdateService {
       await Product.update(productId, {
         pending_sync: false,
         last_synced_at: new Date().toISOString(),
-        shopify_updated_at: response.data.product.updated_at,
+        shopify_updated_at:
+          syncedProductData?.updated_at || new Date().toISOString(),
         sync_error: null,
         data: mergedSyncedProductData,
         inventory_quantity: getTotalInventory(
@@ -725,7 +888,10 @@ export class ProductUpdateService {
         userId,
         productId,
         "success",
-        response.data,
+        {
+          product: syncedProductData,
+          inventory_level_updates: inventoryLevelPayloads,
+        },
       );
 
       console.log(`Product ${productId} synced successfully to Shopify`);

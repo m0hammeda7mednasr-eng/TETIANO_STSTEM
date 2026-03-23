@@ -9,6 +9,7 @@ import {
 
 import {
   buildShopifyVariantPayloads,
+  buildShopifyInventoryLevelPayloads,
   ProductUpdateService,
 } from "./productUpdateService.js";
 import { Product } from "../models/index.js";
@@ -246,6 +247,65 @@ describe("ProductUpdateService", () => {
         sku: "WHITE-L",
       },
     ]);
+  });
+
+  it("builds Shopify inventory level payloads from product and variant inventory edits", () => {
+    const payload = buildShopifyInventoryLevelPayloads(
+      {
+        variants: [
+          {
+            id: "101",
+            inventory_item_id: "1001",
+            inventory_quantity: 5,
+          },
+          {
+            id: "102",
+            inventory_item_id: "1002",
+            inventory_quantity: 3,
+          },
+        ],
+      },
+      {
+        inventory_quantity: 7,
+        variant_updates: [
+          {
+            id: "102",
+            inventory_quantity: 1,
+          },
+        ],
+      },
+    );
+
+    expect(payload).toEqual([
+      {
+        variant_id: "101",
+        inventory_item_id: "1001",
+        available: 7,
+      },
+      {
+        variant_id: "102",
+        inventory_item_id: "1002",
+        available: 1,
+      },
+    ]);
+  });
+
+  it("fails inventory sync preparation when a variant lacks inventory_item_id", () => {
+    expect(() =>
+      buildShopifyInventoryLevelPayloads(
+        {
+          variants: [
+            {
+              id: "101",
+              inventory_quantity: 5,
+            },
+          ],
+        },
+        {
+          inventory_quantity: 6,
+        },
+      ),
+    ).toThrow("missing Shopify inventory_item_id");
   });
 
   it("stores supplier phone and location locally without triggering Shopify sync", async () => {

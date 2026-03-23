@@ -1,4 +1,5 @@
-import { describe, expect, it } from "@jest/globals";
+import axios from "axios";
+import { afterEach, describe, expect, it, jest } from "@jest/globals";
 
 import {
   aggregateMetaSnapshotRows,
@@ -7,10 +8,16 @@ import {
   buildMetaOverview,
   buildMetaQuestionSuggestions,
   extractActionMetric,
+  fetchMetaAdAccounts,
+  fetchMetaCampaigns,
   normalizeAdAccountId,
 } from "./metaAnalyticsService.js";
 
 describe("services/metaAnalyticsService", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it("normalizes numeric ad account ids into Meta account format", () => {
     expect(normalizeAdAccountId("1234567890")).toBe("act_1234567890");
     expect(normalizeAdAccountId("act_987654321")).toBe("act_987654321");
@@ -510,5 +517,56 @@ describe("services/metaAnalyticsService", () => {
     expect(snapshot.store_snapshot.top_products).toHaveLength(5);
     expect(snapshot.store_snapshot.low_stock_products).toHaveLength(5);
     expect(snapshot.decisions[0].why).toHaveLength(2);
+  });
+
+  it("surfaces a clear error when Meta rejects the saved access token", async () => {
+    jest.spyOn(axios, "get").mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          error: {
+            code: 190,
+            type: "OAuthException",
+            message: "Invalid OAuth access token.",
+          },
+        },
+      },
+    });
+
+    await expect(
+      fetchMetaAdAccounts({
+        accessToken: "bad-token",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      publicMessage:
+        "Meta rejected the saved access token. Reconnect Meta and try again.",
+    });
+  });
+
+  it("surfaces a clear error when the selected ad account is invalid", async () => {
+    jest.spyOn(axios, "get").mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          error: {
+            code: 100,
+            message:
+              "Unsupported get request. Object with ID 'act_123456' does not exist.",
+          },
+        },
+      },
+    });
+
+    await expect(
+      fetchMetaCampaigns({
+        accessToken: "token",
+        adAccountId: "act_123456",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      publicMessage:
+        "One of the selected Meta business or ad account IDs is invalid or no longer accessible.",
+    });
   });
 });

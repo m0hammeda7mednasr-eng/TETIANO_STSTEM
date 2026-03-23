@@ -88,6 +88,13 @@ const normalizeArray = (value) => (Array.isArray(value) ? value : []);
 const normalizeText = (value) => String(value || "").trim();
 const getMetaReference = (id) => META_REFERENCE_MAP.get(normalizeText(id)) || null;
 
+const createServiceError = (status, publicMessage, details = "") => {
+  const error = new Error(details || publicMessage);
+  error.status = status;
+  error.publicMessage = publicMessage;
+  return error;
+};
+
 const normalizeAdAccountId = (value) => {
   const normalized = normalizeText(value);
   if (!normalized) {
@@ -143,13 +150,114 @@ const buildMetaHeaders = (accessToken) => ({
   Authorization: `Bearer ${accessToken}`,
 });
 
+const normalizeMetaRequestError = (error) => {
+  if (error?.publicMessage) {
+    return error;
+  }
+
+  const providerStatus = toNumber(error?.response?.status);
+  const providerCode = toNumber(error?.response?.data?.error?.code);
+  const providerMessage = normalizeText(
+    error?.response?.data?.error?.message ||
+      error?.response?.data?.message ||
+      error?.message,
+  );
+  const normalizedMessage = providerMessage.toLowerCase();
+
+  if (error?.code === "ECONNABORTED") {
+    return createServiceError(
+      504,
+      "Meta API timed out while syncing. Try again in a moment.",
+      providerMessage,
+    );
+  }
+
+  if (!error?.response) {
+    return createServiceError(
+      502,
+      "Could not reach Meta API. Check the connection and try again.",
+      providerMessage,
+    );
+  }
+
+  if (
+    providerStatus === 429 ||
+    normalizedMessage.includes("application request limit reached") ||
+    normalizedMessage.includes("too many calls")
+  ) {
+    return createServiceError(
+      429,
+      "Meta rate-limited this account. Wait a moment, then run sync again.",
+      providerMessage,
+    );
+  }
+
+  if (
+    providerCode === 190 ||
+    normalizedMessage.includes("access token") ||
+    normalizedMessage.includes("oauth")
+  ) {
+    return createServiceError(
+      400,
+      "Meta rejected the saved access token. Reconnect Meta and try again.",
+      providerMessage,
+    );
+  }
+
+  if (
+    providerCode === 10 ||
+    providerCode === 200 ||
+    normalizedMessage.includes("insufficient permission") ||
+    normalizedMessage.includes("permissions error") ||
+    normalizedMessage.includes("missing permissions") ||
+    normalizedMessage.includes("not authorized")
+  ) {
+    return createServiceError(
+      400,
+      "Meta permissions are incomplete for this business or ad account. Check Business Manager access and try again.",
+      providerMessage,
+    );
+  }
+
+  if (
+    normalizedMessage.includes("unsupported get request") ||
+    normalizedMessage.includes("does not exist") ||
+    normalizedMessage.includes("unknown path components") ||
+    normalizedMessage.includes("invalid ad account")
+  ) {
+    return createServiceError(
+      400,
+      "One of the selected Meta business or ad account IDs is invalid or no longer accessible.",
+      providerMessage,
+    );
+  }
+
+  if (providerStatus >= 500) {
+    return createServiceError(
+      502,
+      "Meta is temporarily unavailable. Try syncing again in a moment.",
+      providerMessage,
+    );
+  }
+
+  return createServiceError(
+    400,
+    providerMessage || "Meta API request failed. Check the saved Meta configuration and try again.",
+    providerMessage,
+  );
+};
+
 const requestMetaPage = async ({ url, params = {}, accessToken }) => {
-  const response = await axios.get(url, {
-    params,
-    headers: buildMetaHeaders(accessToken),
-    timeout: META_API_TIMEOUT_MS,
-  });
-  return response.data || {};
+  try {
+    const response = await axios.get(url, {
+      params,
+      headers: buildMetaHeaders(accessToken),
+      timeout: META_API_TIMEOUT_MS,
+    });
+    return response.data || {};
+  } catch (error) {
+    throw normalizeMetaRequestError(error);
+  }
 };
 
 const fetchMetaPaged = async ({ path, params = {}, accessToken }) => {
@@ -1936,13 +2044,6 @@ const buildOpenRouterHeaders = ({
   }
 
   return headers;
-};
-
-const createServiceError = (status, publicMessage, details = "") => {
-  const error = new Error(details || publicMessage);
-  error.status = status;
-  error.publicMessage = publicMessage;
-  return error;
 };
 
 const requestOpenRouterChatCompletion = async ({

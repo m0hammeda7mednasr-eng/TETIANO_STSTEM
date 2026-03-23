@@ -9,13 +9,8 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import OrderInsightsFilterBar from "../components/OrderInsightsFilterBar";
+import { useLocale } from "../context/LocaleContext";
 import { productAnalysisAPI } from "../utils/api";
-import {
-  formatCurrency,
-  formatDateTime,
-  formatNumber,
-  formatPercent as formatLocalePercent,
-} from "../utils/helpers";
 import { extractArray, extractObject } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import {
@@ -42,13 +37,7 @@ const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-const formatCount = (value) =>
-  formatNumber(value, { maximumFractionDigits: 0 });
-const formatPercent = (value) =>
-  formatLocalePercent(Math.max(0, toNumber(value)), {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  });
+
 const normalizeSummary = (summary) =>
   Object.fromEntries(
     Object.keys(EMPTY_SUMMARY).map((key) => [key, toNumber(summary?.[key])]),
@@ -57,11 +46,20 @@ const normalizeSummary = (summary) =>
 const matchesSearch = (product, keyword) => {
   const normalized = String(keyword || "").trim().toLowerCase();
   if (!normalized) return true;
+
   const variantText = (product?.variants || [])
     .map((variant) => `${variant?.title || ""} ${variant?.sku || ""}`)
     .join(" ");
-  return [product?.title, product?.sku, product?.vendor, product?.product_type, variantText]
-    .some((value) => String(value || "").toLowerCase().includes(normalized));
+
+  return [
+    product?.title,
+    product?.sku,
+    product?.vendor,
+    product?.product_type,
+    variantText,
+  ].some((value) =>
+    String(value || "").toLowerCase().includes(normalized),
+  );
 };
 
 const matchesFilter = (product, filter) => {
@@ -72,14 +70,18 @@ const matchesFilter = (product, filter) => {
       toNumber(product?.cancelled_quantity) > 0
     );
   }
+
   if (filter === "returns") return toNumber(product?.returned_quantity) > 0;
+
   if (filter === "pending") {
     return (
       toNumber(product?.pending_quantity) > 0 ||
       toNumber(product?.cancelled_quantity) > 0
     );
   }
+
   if (filter === "tasks") return toNumber(product?.related_tasks_count) > 0;
+
   return true;
 };
 
@@ -97,32 +99,45 @@ const isProductAnalysisRelatedUpdate = (event) => {
 const buildCompletionRate = (record) => {
   const ordered = toNumber(record?.ordered_quantity);
   return ordered > 0
-    ? Math.min(100, Math.max(0, (toNumber(record?.net_delivered_quantity) / ordered) * 100))
+    ? Math.min(
+        100,
+        Math.max(0, (toNumber(record?.net_delivered_quantity) / ordered) * 100),
+      )
     : 0;
 };
+
 const buildReturnRate = (record) => {
   const deliveredBase = Math.max(
     toNumber(record?.delivered_quantity),
-    toNumber(record?.net_delivered_quantity) + toNumber(record?.returned_quantity),
+    toNumber(record?.net_delivered_quantity) +
+      toNumber(record?.returned_quantity),
   );
+
   return deliveredBase > 0
-    ? Math.min(100, Math.max(0, (toNumber(record?.returned_quantity) / deliveredBase) * 100))
+    ? Math.min(
+        100,
+        Math.max(0, (toNumber(record?.returned_quantity) / deliveredBase) * 100),
+      )
     : 0;
 };
+
 const buildOpenRate = (record) => {
   const ordered = toNumber(record?.ordered_quantity);
+
   return ordered > 0
     ? Math.min(
         100,
         Math.max(
           0,
-          ((toNumber(record?.pending_quantity) + toNumber(record?.cancelled_quantity)) /
+          ((toNumber(record?.pending_quantity) +
+            toNumber(record?.cancelled_quantity)) /
             ordered) *
             100,
         ),
       )
     : 0;
 };
+
 const hasVariantResult = (entry) =>
   toNumber(entry?.ordered_quantity) > 0 ||
   toNumber(entry?.delivered_quantity) > 0 ||
@@ -133,6 +148,7 @@ const hasVariantResult = (entry) =>
   toNumber(entry?.net_sales) > 0 ||
   toNumber(entry?.gross_sales) > 0 ||
   toNumber(entry?.related_tasks_count) > 0;
+
 const countRelevantVariants = (variants = []) => {
   const list = Array.isArray(variants) ? variants : [];
   const activeCount = list.reduce(
@@ -141,23 +157,126 @@ const countRelevantVariants = (variants = []) => {
   );
   return activeCount > 0 ? activeCount : list.length;
 };
-const getVariantDisplayTitle = (product, variant) => {
+
+const getVariantDisplayTitle = (product, variant, defaultLabel) => {
   const title = String(variant?.title || "").trim();
   return !title || title === "Default Title" || title === product?.title
-    ? "الافتراضي"
+    ? defaultLabel
     : title;
 };
-const getSortedVariants = (variants) =>
+
+const getSortedVariants = (variants, locale) =>
   [...(Array.isArray(variants) ? variants : [])].sort((left, right) => {
-    const orderedDelta = toNumber(right?.ordered_quantity) - toNumber(left?.ordered_quantity);
+    const orderedDelta =
+      toNumber(right?.ordered_quantity) - toNumber(left?.ordered_quantity);
     if (orderedDelta !== 0) return orderedDelta;
+
     const salesDelta = toNumber(right?.net_sales) - toNumber(left?.net_sales);
     if (salesDelta !== 0) return salesDelta;
-    return String(left?.title || "").localeCompare(String(right?.title || ""), "ar");
+
+    return String(left?.title || "").localeCompare(
+      String(right?.title || ""),
+      locale === "ar" ? "ar" : "en",
+    );
   });
+
+function ActionButton({ children, dark = false, icon: Icon, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center gap-2 rounded-lg px-4 py-2 text-white ${
+        dark ? "bg-slate-900 hover:bg-slate-950" : "bg-sky-700 hover:bg-sky-800"
+      }`}
+    >
+      <Icon size={18} />
+      {children}
+    </button>
+  );
+}
+
+function SummaryCard({ title, value, subtitle, tone = "blue" }) {
+  const tones = {
+    blue: "border-sky-100 bg-sky-50",
+    sky: "border-cyan-100 bg-cyan-50",
+    slate: "border-slate-200 bg-slate-50",
+    emerald: "border-emerald-100 bg-emerald-50",
+    rose: "border-rose-100 bg-rose-50",
+    amber: "border-amber-100 bg-amber-50",
+  };
+
+  return (
+    <div className={`rounded-2xl border p-5 shadow-sm ${tones[tone] || tones.blue}`}>
+      <p className="text-sm font-medium text-slate-600">{title}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+      <p className="mt-2 text-xs leading-6 text-slate-500">{subtitle}</p>
+    </div>
+  );
+}
+
+function FilterButton({ active, label, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+        active
+          ? "border-sky-700 bg-sky-700 text-white"
+          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function MetricTile({ label, value, hint, tone = "slate" }) {
+  const tones = {
+    slate: "border-slate-200 bg-white",
+    blue: "border-sky-100 bg-sky-50/70",
+    emerald: "border-emerald-100 bg-emerald-50/70",
+    rose: "border-rose-100 bg-rose-50/70",
+  };
+
+  return (
+    <div className={`rounded-xl border p-3 ${tones[tone] || tones.slate}`}>
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-2 text-sm font-semibold text-slate-900">{value}</div>
+      <div className="mt-1 text-xs text-slate-500">{hint}</div>
+    </div>
+  );
+}
+
+function Badge({ children, tone = "slate" }) {
+  const tones = {
+    slate: "border-slate-200 bg-slate-100 text-slate-700",
+    sky: "border-sky-200 bg-sky-50 text-sky-700",
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    amber: "border-amber-200 bg-amber-50 text-amber-700",
+    rose: "border-rose-200 bg-rose-100 text-rose-700",
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${tones[tone] || tones.slate}`}
+    >
+      {children}
+    </span>
+  );
+}
 
 export default function ProductAnalysis() {
   const navigate = useNavigate();
+  const {
+    locale,
+    isRTL,
+    select,
+    formatCurrency,
+    formatDateTime,
+    formatNumber,
+    formatPercent,
+  } = useLocale();
+
   const [products, setProducts] = useState([]);
   const [storeSummary, setStoreSummary] = useState(EMPTY_SUMMARY);
   const [meta, setMeta] = useState({});
@@ -166,8 +285,12 @@ export default function ProductAnalysis() {
   const [scopeFilters, setScopeFilters] = useState(INITIAL_ORDER_SCOPE_FILTERS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   const deferredSearchTerm = useDeferredValue(searchTerm);
-  const scopeParams = useMemo(() => buildOrderScopeApiParams(scopeFilters), [scopeFilters]);
+  const scopeParams = useMemo(
+    () => buildOrderScopeApiParams(scopeFilters),
+    [scopeFilters],
+  );
   const hasScopedOrderFilters = useMemo(
     () => hasActiveOrderScopeFilters(scopeFilters),
     [scopeFilters],
@@ -175,12 +298,38 @@ export default function ProductAnalysis() {
   const hasLocalCriteria =
     filterMode !== "all" || String(deferredSearchTerm || "").trim().length > 0;
 
+  const formatCount = useCallback(
+    (value) => formatNumber(value, { maximumFractionDigits: 0 }),
+    [formatNumber],
+  );
+
+  const formatMetricPercent = useCallback(
+    (value) =>
+      formatPercent(Math.max(0, toNumber(value)), {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      }),
+    [formatPercent],
+  );
+
+  const filterOptions = useMemo(
+    () => [
+      { id: "all", label: select("الكل", "All") },
+      { id: "attention", label: select("يحتاج متابعة", "Needs Attention") },
+      { id: "returns", label: select("مرتجعات", "Returns") },
+      { id: "pending", label: select("معلق", "Pending") },
+      { id: "tasks", label: select("له مهام", "Has Tasks") },
+    ],
+    [select],
+  );
+
   const fetchAnalysis = useCallback(
     async ({ forceRefresh = false, silent = false } = {}) => {
       if (!silent) {
         setLoading(true);
         setError("");
       }
+
       try {
         const response = await productAnalysisAPI.get({
           ...scopeParams,
@@ -192,12 +341,18 @@ export default function ProductAnalysis() {
         setMeta(payload?.meta || {});
       } catch (requestError) {
         console.error("Error fetching product analysis:", requestError);
-        setError(requestError?.response?.data?.error || "فشل تحميل تحليل المنتجات");
+        setError(
+          requestError?.response?.data?.error ||
+            select(
+              "فشل تحميل تحليل المنتجات",
+              "Failed to load product analysis",
+            ),
+        );
       } finally {
         setLoading(false);
       }
     },
-    [scopeParams],
+    [scopeParams, select],
   );
 
   useEffect(() => {
@@ -210,6 +365,7 @@ export default function ProductAnalysis() {
         fetchAnalysis({ silent: true });
       }
     });
+
     return () => unsubscribe();
   }, [fetchAnalysis]);
 
@@ -246,6 +402,9 @@ export default function ProductAnalysis() {
   );
 
   const activeSummary = hasLocalCriteria ? filteredSummary : storeSummary;
+  const textAlignClass = isRTL ? "text-right" : "text-left";
+  const iconPositionClass = isRTL ? "right-3" : "left-3";
+  const inputPaddingClass = isRTL ? "pr-8 pl-3" : "pl-8 pr-3";
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -254,30 +413,49 @@ export default function ProductAnalysis() {
         <div className="space-y-6 p-4 sm:p-6 lg:p-8">
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
+              <div className={textAlignClass}>
                 <h1 className="flex items-center gap-3 text-3xl font-bold text-slate-900">
                   <BarChart3 className="text-sky-700" size={28} />
-                  تحليل المنتجات
+                  {select("تحليل المنتجات", "Product Analysis")}
                 </h1>
                 <p className="mt-1 text-slate-600">
-                  تحليل المبيعات والتسليم والمرتجعات لكل منتج وفاريانت داخل المتجر الحالي.
+                  {select(
+                    "تحليل المبيعات والتسليم والمرتجعات لكل منتج وفاريانت داخل المتجر الحالي.",
+                    "Analyze sales, fulfillment, and returns for every product and variant in the current store.",
+                  )}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  <Badge>{`آخر تحديث ${formatDateTime(meta?.generated_at)}`}</Badge>
-                  <Badge tone={hasScopedOrderFilters || meta?.order_scope_active ? "sky" : "slate"}>
-                    {hasScopedOrderFilters || meta?.order_scope_active ? "النطاق الحالي مفلتر" : "عرض شامل للمتجر"}
+                  <Badge>
+                    {select("آخر تحديث", "Last refresh")} {formatDateTime(meta?.generated_at)}
+                  </Badge>
+                  <Badge
+                    tone={
+                      hasScopedOrderFilters || meta?.order_scope_active
+                        ? "sky"
+                        : "slate"
+                    }
+                  >
+                    {hasScopedOrderFilters || meta?.order_scope_active
+                      ? select("النطاق الحالي مفلتر", "Current scope is filtered")
+                      : select("عرض شامل للمتجر", "Full store view")}
                   </Badge>
                   <Badge tone={meta?.task_metrics_available ? "emerald" : "amber"}>
-                    {meta?.task_metrics_available ? "المهام مربوطة عبر SKU" : "بيانات المهام غير متاحة"}
+                    {meta?.task_metrics_available
+                      ? select("المهام مربوطة عبر SKU", "Tasks linked by SKU")
+                      : select("بيانات المهام غير متاحة", "Task data unavailable")}
                   </Badge>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <ActionButton onClick={() => fetchAnalysis()} icon={RefreshCw}>
-                  تحديث
+                  {select("تحديث", "Refresh")}
                 </ActionButton>
-                <ActionButton onClick={() => fetchAnalysis({ forceRefresh: true })} dark icon={RotateCcw}>
-                  تحديث كامل
+                <ActionButton
+                  onClick={() => fetchAnalysis({ forceRefresh: true })}
+                  dark
+                  icon={RotateCcw}
+                >
+                  {select("تحديث كامل", "Full Refresh")}
                 </ActionButton>
               </div>
             </div>
@@ -287,8 +465,11 @@ export default function ProductAnalysis() {
             filters={scopeFilters}
             onChange={setScopeFilters}
             onReset={() => setScopeFilters(INITIAL_ORDER_SCOPE_FILTERS)}
-            title="فلترة نطاق الطلبات"
-            description="هذا النطاق يحدد الطلبات التي تدخل في حساب أرقام تحليل المنتجات."
+            title={select("فلترة نطاق الطلبات", "Order Scope Filters")}
+            description={select(
+              "هذا النطاق يحدد الطلبات التي تدخل في حساب أرقام تحليل المنتجات.",
+              "This scope controls which orders are included in product analysis figures.",
+            )}
           />
 
           {error ? (
@@ -300,72 +481,134 @@ export default function ProductAnalysis() {
 
           <section className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
             <SummaryCard
-              title="المنتجات"
+              title={select("المنتجات", "Products")}
               value={formatCount(activeSummary.total_products)}
               subtitle={
                 hasLocalCriteria
-                  ? `${formatCount(filteredProducts.length)} من ${formatCount(products.length)} منتج`
+                  ? `${formatCount(filteredProducts.length)} ${select("من أصل", "out of")} ${formatCount(products.length)} ${select("منتج", "products")}`
                   : hasScopedOrderFilters
-                    ? "منتجات داخل نطاق الطلبات الحالي"
-                    : "كل منتجات المتجر"
+                    ? select(
+                        "منتجات داخل نطاق الطلبات الحالي",
+                        "Products inside the current order scope",
+                      )
+                    : select("كل منتجات المتجر", "All store products")
               }
               tone="blue"
             />
-            <SummaryCard title="الفاريانت" value={formatCount(activeSummary.total_variants)} subtitle="إجمالي المتغيرات المرتبطة بالنتائج الحالية" tone="sky" />
-            <SummaryCard title="صافي التسليم" value={formatCount(activeSummary.net_delivered_quantity)} subtitle={`${formatPercent(buildCompletionRate(activeSummary))} من المطلوب`} tone="emerald" />
-            <SummaryCard title="صافي المبيعات" value={formatCurrency(activeSummary.net_sales)} subtitle={`الإجمالي ${formatCurrency(activeSummary.gross_sales)}`} tone="blue" />
-            <SummaryCard title="مرتجعات" value={formatCount(activeSummary.returned_quantity)} subtitle={`${formatPercent(buildReturnRate(activeSummary))} من المُسلَّم`} tone="rose" />
-            <SummaryCard title="معلق / ملغي" value={`${formatCount(activeSummary.pending_quantity)} / ${formatCount(activeSummary.cancelled_quantity)}`} subtitle={`${formatPercent(buildOpenRate(activeSummary))} من المطلوب`} tone="amber" />
-            <SummaryCard title="الوحدات المطلوبة" value={formatCount(activeSummary.ordered_quantity)} subtitle="إجمالي الكميات على الطلبات" tone="slate" />
-            <SummaryCard title="مهام SKU" value={formatCount(activeSummary.related_tasks_count)} subtitle="مرتبطة بالمنتجات عبر SKU" tone="sky" />
+            <SummaryCard
+              title={select("الفاريانتات", "Variants")}
+              value={formatCount(activeSummary.total_variants)}
+              subtitle={select(
+                "إجمالي المتغيرات المرتبطة بالنتائج الحالية",
+                "Total variants tied to the current results",
+              )}
+              tone="sky"
+            />
+            <SummaryCard
+              title={select("صافي التسليم", "Net Delivered")}
+              value={formatCount(activeSummary.net_delivered_quantity)}
+              subtitle={`${formatMetricPercent(buildCompletionRate(activeSummary))} ${select("من المطلوب", "of ordered quantity")}`}
+              tone="emerald"
+            />
+            <SummaryCard
+              title={select("صافي المبيعات", "Net Sales")}
+              value={formatCurrency(activeSummary.net_sales)}
+              subtitle={`${select("الإجمالي", "Gross")} ${formatCurrency(activeSummary.gross_sales)}`}
+              tone="blue"
+            />
+            <SummaryCard
+              title={select("مرتجعات", "Returns")}
+              value={formatCount(activeSummary.returned_quantity)}
+              subtitle={`${formatMetricPercent(buildReturnRate(activeSummary))} ${select("من المُسلَّم", "of delivered quantity")}`}
+              tone="rose"
+            />
+            <SummaryCard
+              title={select("معلق / ملغي", "Pending / Cancelled")}
+              value={`${formatCount(activeSummary.pending_quantity)} / ${formatCount(activeSummary.cancelled_quantity)}`}
+              subtitle={`${formatMetricPercent(buildOpenRate(activeSummary))} ${select("من المطلوب", "of ordered quantity")}`}
+              tone="amber"
+            />
+            <SummaryCard
+              title={select("الوحدات المطلوبة", "Ordered Units")}
+              value={formatCount(activeSummary.ordered_quantity)}
+              subtitle={select(
+                "إجمالي الكميات على الطلبات",
+                "Total units across matching orders",
+              )}
+              tone="slate"
+            />
+            <SummaryCard
+              title={select("مهام SKU", "SKU Tasks")}
+              value={formatCount(activeSummary.related_tasks_count)}
+              subtitle={select(
+                "مهام مرتبطة بالمنتجات عبر SKU",
+                "Tasks linked to products through SKU",
+              )}
+              tone="sky"
+            />
           </section>
 
           <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">قائمة التحليل</h2>
-                <p className="text-sm text-slate-500">الأرقام التالية تعكس صافي المبيعات بعد خصم الاسترجاعات ومراعاة حالة كل طلب.</p>
+              <div className={textAlignClass}>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  {select("قائمة التحليل", "Analysis List")}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  {select(
+                    "الأرقام التالية تعكس صافي المبيعات بعد خصم الاسترجاعات ومراعاة حالة كل طلب.",
+                    "The figures below reflect net sales after refunds while respecting each order status.",
+                  )}
+                </p>
               </div>
               <div className="flex w-full flex-col gap-3 sm:flex-row xl:w-auto">
                 <div className="relative w-full sm:w-80">
-                  <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                  <Search
+                    className={`absolute top-2.5 text-slate-400 ${iconPositionClass}`}
+                    size={16}
+                  />
                   <input
                     type="text"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder="ابحث باسم المنتج أو SKU أو الفاريانت"
-                    className="w-full rounded-lg border border-slate-200 py-2 pl-8 pr-3 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    placeholder={select(
+                      "ابحث باسم المنتج أو SKU أو الفاريانت",
+                      "Search by product name, SKU, or variant",
+                    )}
+                    className={`w-full rounded-lg border border-slate-200 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500 ${inputPaddingClass}`}
                   />
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {[
-                    ["all", "الكل"],
-                    ["attention", "يحتاج متابعة"],
-                    ["returns", "مرتجعات"],
-                    ["pending", "معلق"],
-                    ["tasks", "له مهام"],
-                  ].map(([id, label]) => (
-                    <FilterButton key={id} active={filterMode === id} label={label} onClick={() => setFilterMode(id)} />
+                  {filterOptions.map((option) => (
+                    <FilterButton
+                      key={option.id}
+                      active={filterMode === option.id}
+                      label={option.label}
+                      onClick={() => setFilterMode(option.id)}
+                    />
                   ))}
                 </div>
               </div>
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              عرض {formatCount(filteredProducts.length)} منتج من أصل {formatCount(products.length)}.
+              {select("عرض", "Showing")} {formatCount(filteredProducts.length)}{" "}
+              {select("منتج من أصل", "products out of")} {formatCount(products.length)}.
               {meta?.filtered_orders_count !== undefined ? (
-                <span className="mr-2 inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
+                <span className="mx-2 inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
                   {meta?.applied_orders_limit ? (
                     <>
-                      تحليل آخر {formatCount(meta.filtered_orders_count)} طلب
+                      {select("تحليل آخر", "Analyzing latest")}{" "}
+                      {formatCount(meta.filtered_orders_count)}{" "}
+                      {select("طلب", "orders")}
                       {meta?.total_orders_in_scope !== undefined
-                        ? ` من أصل ${formatCount(meta.total_orders_in_scope)}`
+                        ? ` ${select("من أصل", "out of")} ${formatCount(meta.total_orders_in_scope)}`
                         : ""}
-                      {" "}داخل النطاق الحالي
                     </>
                   ) : (
                     <>
-                      {formatCount(meta.filtered_orders_count)} طلب داخل النطاق الحالي
+                      {formatCount(meta.filtered_orders_count)}{" "}
+                      {select("طلب داخل النطاق الحالي", "orders in the current scope")}
                     </>
                   )}
                 </span>
@@ -374,79 +617,204 @@ export default function ProductAnalysis() {
 
             {loading ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
-                جاري تحميل تحليل المنتجات...
+                {select("جارٍ تحميل تحليل المنتجات...", "Loading product analysis...")}
               </div>
             ) : filteredProducts.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
                 {hasScopedOrderFilters
-                  ? "لا توجد منتجات داخل هذا النطاق. جرّب توسيع الفلاتر أو تغيير الحالة."
-                  : "لا توجد منتجات مطابقة للبحث أو الفلتر الحالي."}
+                  ? select(
+                      "لا توجد منتجات داخل هذا النطاق. جرّب توسيع الفلاتر أو تغيير الحالة.",
+                      "No products were found inside this scope. Try widening the filters or changing the status.",
+                    )
+                  : select(
+                      "لا توجد منتجات مطابقة للبحث أو الفلتر الحالي.",
+                      "No products match the current search or filter.",
+                    )}
               </div>
             ) : (
               <div className="space-y-4">
                 {filteredProducts.map((product) => {
-                  const sortedVariants = getSortedVariants(product?.variants);
+                  const sortedVariants = getSortedVariants(product?.variants, locale);
+
                   return (
-                    <article key={product.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <article
+                      key={product.id}
+                      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                    >
                       <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div className="min-w-0 flex-1">
+                        <div className={`min-w-0 flex-1 ${textAlignClass}`}>
                           <div className="flex flex-wrap items-center gap-2">
-                            <button onClick={() => navigate(`/products/${product.id}`)} className="text-right text-xl font-semibold text-slate-900 hover:text-sky-700">
+                            <button
+                              onClick={() => navigate(`/products/${product.id}`)}
+                              className={`text-xl font-semibold text-slate-900 hover:text-sky-700 ${textAlignClass}`}
+                            >
                               {product.title}
                             </button>
-                            <Badge>{`${formatCount(countRelevantVariants(sortedVariants))} فاريانت`}</Badge>
-                            {toNumber(product.returned_quantity) > 0 ? <Badge tone="rose">{`مرتجع ${formatCount(product.returned_quantity)}`}</Badge> : null}
-                            {toNumber(product.pending_quantity) > 0 ? <Badge tone="amber">{`معلق ${formatCount(product.pending_quantity)}`}</Badge> : null}
+                            <Badge>
+                              {formatCount(countRelevantVariants(sortedVariants))}{" "}
+                              {select("فاريانت", "variants")}
+                            </Badge>
+                            {toNumber(product.returned_quantity) > 0 ? (
+                              <Badge tone="rose">
+                                {select("مرتجع", "Returns")}{" "}
+                                {formatCount(product.returned_quantity)}
+                              </Badge>
+                            ) : null}
+                            {toNumber(product.pending_quantity) > 0 ? (
+                              <Badge tone="amber">
+                                {select("معلق", "Pending")}{" "}
+                                {formatCount(product.pending_quantity)}
+                              </Badge>
+                            ) : null}
                           </div>
                           <p className="mt-2 text-sm text-slate-700">
-                            SKU: {product.sku || "-"} • المورد: {product.vendor || "-"} • النوع: {product.product_type || "-"} • المخزون: {formatCount(product.inventory_quantity)}
+                            SKU: {product.sku || "-"} | {select("المورد", "Vendor")}:{" "}
+                            {product.vendor || "-"} | {select("النوع", "Type")}:{" "}
+                            {product.product_type || "-"} | {select("المخزون", "Inventory")}:{" "}
+                            {formatCount(product.inventory_quantity)}
                           </p>
-                          <p className="mt-1 text-xs text-slate-500">آخر نشاط: {formatDateTime(product.last_task_at || product.last_return_at || product.last_fulfillment_at || product.last_order_at)}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {select("آخر نشاط", "Last activity")}:{" "}
+                            {formatDateTime(
+                              product.last_task_at ||
+                                product.last_return_at ||
+                                product.last_fulfillment_at ||
+                                product.last_order_at,
+                            )}
+                          </p>
                         </div>
-                        <div className="text-right text-sm text-slate-600">
-                          <p>معدل التسليم: <span className="font-semibold text-slate-900">{formatPercent(buildCompletionRate(product))}</span></p>
-                          <p>ما لم يكتمل: <span className="font-semibold text-slate-900">{formatPercent(buildOpenRate(product))}</span></p>
+                        <div className={`text-sm text-slate-600 ${textAlignClass}`}>
+                          <p>
+                            {select("معدل التسليم", "Delivery rate")}:{" "}
+                            <span className="font-semibold text-slate-900">
+                              {formatMetricPercent(buildCompletionRate(product))}
+                            </span>
+                          </p>
+                          <p>
+                            {select("ما لم يكتمل", "Still open")}:{" "}
+                            <span className="font-semibold text-slate-900">
+                              {formatMetricPercent(buildOpenRate(product))}
+                            </span>
+                          </p>
                         </div>
                       </div>
 
                       <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-                        <MetricTile label="مطلوب" value={formatCount(product.ordered_quantity)} hint="كل الوحدات على الطلبات" />
-                        <MetricTile label="تم تسليمه" value={formatCount(product.delivered_quantity)} hint="قبل خصم المرتجع" />
-                        <MetricTile label="صافي التسليم" value={formatCount(product.net_delivered_quantity)} hint={`${formatPercent(buildCompletionRate(product))} من المطلوب`} tone="emerald" />
-                        <MetricTile label="مرتجعات" value={formatCount(product.returned_quantity)} hint={`${formatPercent(buildReturnRate(product))} من المُسلَّم`} tone="rose" />
-                        <MetricTile label="المبيعات" value={formatCurrency(product.net_sales)} hint={`الإجمالي ${formatCurrency(product.gross_sales)}`} tone="blue" />
-                        <MetricTile label="مهام SKU" value={formatCount(product.related_tasks_count)} hint="مرتبطة عبر SKU" />
+                        <MetricTile
+                          label={select("مطلوب", "Ordered")}
+                          value={formatCount(product.ordered_quantity)}
+                          hint={select(
+                            "كل الوحدات على الطلبات",
+                            "All units across matching orders",
+                          )}
+                        />
+                        <MetricTile
+                          label={select("تم تسليمه", "Delivered")}
+                          value={formatCount(product.delivered_quantity)}
+                          hint={select(
+                            "قبل خصم المرتجع",
+                            "Before deducting returns",
+                          )}
+                        />
+                        <MetricTile
+                          label={select("صافي التسليم", "Net delivered")}
+                          value={formatCount(product.net_delivered_quantity)}
+                          hint={`${formatMetricPercent(buildCompletionRate(product))} ${select("من المطلوب", "of ordered quantity")}`}
+                          tone="emerald"
+                        />
+                        <MetricTile
+                          label={select("مرتجعات", "Returns")}
+                          value={formatCount(product.returned_quantity)}
+                          hint={`${formatMetricPercent(buildReturnRate(product))} ${select("من المُسلَّم", "of delivered quantity")}`}
+                          tone="rose"
+                        />
+                        <MetricTile
+                          label={select("المبيعات", "Sales")}
+                          value={formatCurrency(product.net_sales)}
+                          hint={`${select("الإجمالي", "Gross")} ${formatCurrency(product.gross_sales)}`}
+                          tone="blue"
+                        />
+                        <MetricTile
+                          label={select("مهام SKU", "SKU tasks")}
+                          value={formatCount(product.related_tasks_count)}
+                          hint={select("مرتبطة عبر SKU", "Linked through SKU")}
+                        />
                       </div>
 
                       <div className="mt-4 overflow-x-auto">
-                        <table className="min-w-full text-right text-sm">
+                        <table className={`min-w-full text-sm ${textAlignClass}`}>
                           <thead>
                             <tr className="bg-slate-50 text-slate-600">
-                              <th className="px-3 py-2 font-semibold">الفاريانت</th>
+                              <th className="px-3 py-2 font-semibold">
+                                {select("الفاريانت", "Variant")}
+                              </th>
                               <th className="px-3 py-2 font-semibold">SKU</th>
-                              <th className="px-3 py-2 font-semibold">المخزون</th>
-                              <th className="px-3 py-2 font-semibold">مطلوب</th>
-                              <th className="px-3 py-2 font-semibold">صافي التسليم</th>
-                              <th className="px-3 py-2 font-semibold">مرتجع</th>
-                              <th className="px-3 py-2 font-semibold">معلق</th>
-                              <th className="px-3 py-2 font-semibold">ملغي</th>
-                              <th className="px-3 py-2 font-semibold">الطلبات</th>
-                              <th className="px-3 py-2 font-semibold">صافي المبيعات</th>
+                              <th className="px-3 py-2 font-semibold">
+                                {select("المخزون", "Inventory")}
+                              </th>
+                              <th className="px-3 py-2 font-semibold">
+                                {select("مطلوب", "Ordered")}
+                              </th>
+                              <th className="px-3 py-2 font-semibold">
+                                {select("صافي التسليم", "Net delivered")}
+                              </th>
+                              <th className="px-3 py-2 font-semibold">
+                                {select("مرتجع", "Returned")}
+                              </th>
+                              <th className="px-3 py-2 font-semibold">
+                                {select("معلق", "Pending")}
+                              </th>
+                              <th className="px-3 py-2 font-semibold">
+                                {select("ملغي", "Cancelled")}
+                              </th>
+                              <th className="px-3 py-2 font-semibold">
+                                {select("الطلبات", "Orders")}
+                              </th>
+                              <th className="px-3 py-2 font-semibold">
+                                {select("صافي المبيعات", "Net sales")}
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
                             {sortedVariants.map((variant) => (
-                              <tr key={`${product.id}-${variant.id}-${variant.sku}`} className="border-t border-slate-200">
-                                <td className="px-3 py-2 font-medium text-slate-900">{getVariantDisplayTitle(product, variant)}</td>
-                                <td className="px-3 py-2 text-slate-700">{variant.sku || "-"}</td>
-                                <td className="px-3 py-2">{formatCount(variant.inventory_quantity)}</td>
-                                <td className="px-3 py-2">{formatCount(variant.ordered_quantity)}</td>
-                                <td className="px-3 py-2">{formatCount(variant.net_delivered_quantity)}</td>
-                                <td className="px-3 py-2 text-rose-700">{formatCount(variant.returned_quantity)}</td>
-                                <td className="px-3 py-2 text-amber-700">{formatCount(variant.pending_quantity)}</td>
-                                <td className="px-3 py-2">{formatCount(variant.cancelled_quantity)}</td>
-                                <td className="px-3 py-2">{formatCount(variant.orders_count)}</td>
-                                <td className="px-3 py-2 font-medium text-slate-900">{formatCurrency(variant.net_sales)}</td>
+                              <tr
+                                key={`${product.id}-${variant.id}-${variant.sku}`}
+                                className="border-t border-slate-200"
+                              >
+                                <td className="px-3 py-2 font-medium text-slate-900">
+                                  {getVariantDisplayTitle(
+                                    product,
+                                    variant,
+                                    select("الافتراضي", "Default"),
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-slate-700">
+                                  {variant.sku || "-"}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {formatCount(variant.inventory_quantity)}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {formatCount(variant.ordered_quantity)}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {formatCount(variant.net_delivered_quantity)}
+                                </td>
+                                <td className="px-3 py-2 text-rose-700">
+                                  {formatCount(variant.returned_quantity)}
+                                </td>
+                                <td className="px-3 py-2 text-amber-700">
+                                  {formatCount(variant.pending_quantity)}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {formatCount(variant.cancelled_quantity)}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {formatCount(variant.orders_count)}
+                                </td>
+                                <td className="px-3 py-2 font-medium text-slate-900">
+                                  {formatCurrency(variant.net_sales)}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -461,82 +829,5 @@ export default function ProductAnalysis() {
         </div>
       </main>
     </div>
-  );
-}
-
-function ActionButton({ children, dark = false, icon: Icon, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2 rounded-lg px-4 py-2 text-white ${
-        dark ? "bg-slate-900 hover:bg-slate-950" : "bg-sky-700 hover:bg-sky-800"
-      }`}
-    >
-      <Icon size={18} />
-      {children}
-    </button>
-  );
-}
-
-function SummaryCard({ title, value, subtitle, tone = "blue" }) {
-  const tones = {
-    blue: "border-sky-100 bg-sky-50",
-    sky: "border-cyan-100 bg-cyan-50",
-    slate: "border-slate-200 bg-slate-50",
-    emerald: "border-emerald-100 bg-emerald-50",
-    rose: "border-rose-100 bg-rose-50",
-    amber: "border-amber-100 bg-amber-50",
-  };
-  return (
-    <div className={`rounded-2xl border p-5 shadow-sm ${tones[tone] || tones.blue}`}>
-      <p className="text-sm font-medium text-slate-600">{title}</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
-      <p className="mt-2 text-xs leading-6 text-slate-500">{subtitle}</p>
-    </div>
-  );
-}
-
-function FilterButton({ active, label, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-        active ? "border-sky-700 bg-sky-700 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function MetricTile({ label, value, hint, tone = "slate" }) {
-  const tones = {
-    slate: "border-slate-200 bg-white",
-    blue: "border-sky-100 bg-sky-50/70",
-    emerald: "border-emerald-100 bg-emerald-50/70",
-    rose: "border-rose-100 bg-rose-50/70",
-  };
-  return (
-    <div className={`rounded-xl border p-3 ${tones[tone] || tones.slate}`}>
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="mt-2 text-sm font-semibold text-slate-900">{value}</div>
-      <div className="mt-1 text-xs text-slate-500">{hint}</div>
-    </div>
-  );
-}
-
-function Badge({ children, tone = "slate" }) {
-  const tones = {
-    slate: "border-slate-200 bg-slate-100 text-slate-700",
-    sky: "border-sky-200 bg-sky-50 text-sky-700",
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    amber: "border-amber-200 bg-amber-50 text-amber-700",
-    rose: "border-rose-200 bg-rose-100 text-rose-700",
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${tones[tone] || tones.slate}`}>
-      {children}
-    </span>
   );
 }

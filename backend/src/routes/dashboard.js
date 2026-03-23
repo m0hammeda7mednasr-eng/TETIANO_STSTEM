@@ -17,6 +17,7 @@ import {
   hasActiveOrderScopeFilters,
   normalizeOrderScopeFilters,
 } from "../helpers/orderScope.js";
+import { calculateDashboardOrderStats } from "../helpers/dashboardStats.js";
 import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 
 const router = express.Router();
@@ -1240,20 +1241,12 @@ router.get("/stats", authenticateToken, async (req, res) => {
     ]);
 
     const filteredOrders = filterOrdersByScope(orders, req.query || {});
-    const saleOrders = filteredOrders.filter(
-      (order) => getOrderNetSalesAmount(order) > 0,
-    );
-    const totalOrderValue = filteredOrders.reduce(
-      (sum, order) => sum + getOrderGrossAmount(order),
-      0,
-    );
-    const totalSales = saleOrders.reduce(
-      (sum, order) => sum + getOrderNetSalesAmount(order),
-      0,
-    );
-    const pendingOrderValue = filteredOrders
-      .filter((order) => isPendingOrder(order))
-      .reduce((sum, order) => sum + getOrderGrossAmount(order), 0);
+    const {
+      saleOrders,
+      totalOrderValue,
+      totalSales,
+      pendingOrderValue,
+    } = calculateDashboardOrderStats(filteredOrders);
     const lowStockProductsCount = countLowStockProducts(products);
     const filteredEntitySummary = hasScopedOrderFilters
       ? buildFilteredOrderEntitySummary(filteredOrders)

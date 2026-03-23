@@ -488,8 +488,8 @@ export default function Dashboard() {
           title: "Collected Net Sales",
           value: formatCurrency(stats.total_sales),
           subtitle: hasScopedOrderFilters
-            ? "Paid orders minus refunds inside the current filtered scope"
-            : "Paid orders minus refunds across all synced orders",
+            ? "Paid-like orders after refunds inside the current filtered scope"
+            : "Paid-like orders after refunds across all synced orders",
           icon: TrendingUp,
           color: "from-emerald-500 to-emerald-700",
           actionLabel: canViewOrders ? "View orders" : "",
@@ -500,8 +500,8 @@ export default function Dashboard() {
           title: "Gross Order Value",
           value: formatCurrency(stats.total_order_value),
           subtitle: hasScopedOrderFilters
-            ? "Gross order total before refunds inside the current filtered scope"
-            : "Gross order total before refunds across all synced orders",
+            ? "Paid-like order total before refunds inside the current filtered scope"
+            : "Paid-like order total before refunds across all synced orders",
           icon: TrendingUp,
           color: "from-amber-500 to-amber-700",
           actionLabel: canViewOrders ? "View orders" : "",

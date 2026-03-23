@@ -161,6 +161,89 @@ const applyVariantUpdates = (productData, variantUpdates = []) => {
   };
 };
 
+export const buildShopifyVariantPayloads = (
+  parsedProductData = {},
+  updates = {},
+) => {
+  const variants = getProductVariants(parsedProductData);
+  if (variants.length === 0) {
+    throw new Error("Variant ID not found for this product.");
+  }
+
+  const requestedVariantUpdates = Array.isArray(updates?.variant_updates)
+    ? updates.variant_updates
+    : [];
+  const updatesById = new Map(
+    requestedVariantUpdates.map((variantUpdate) => [
+      String(variantUpdate?.id || ""),
+      variantUpdate,
+    ]),
+  );
+  const seenVariantIds = new Set();
+
+  const variantPayloads = variants.map((variant, index) => {
+    const variantId = String(variant?.id || "");
+    if (!variantId) {
+      throw new Error("Variant ID not found for this product.");
+    }
+
+    const requestedUpdate = updatesById.get(variantId);
+    if (requestedUpdate) {
+      seenVariantIds.add(variantId);
+    }
+
+    const isPrimaryVariant = index === 0;
+    const payload = {
+      id: parseInt(variantId, 10),
+    };
+
+    const resolvedPrice =
+      requestedUpdate?.price !== undefined
+        ? requestedUpdate.price
+        : isPrimaryVariant && updates.price !== undefined
+          ? updates.price
+          : variant?.price;
+    if (
+      resolvedPrice !== undefined &&
+      resolvedPrice !== null &&
+      String(resolvedPrice).trim() !== ""
+    ) {
+      payload.price = resolvedPrice.toString();
+    }
+
+    const resolvedSku =
+      requestedUpdate?.sku !== undefined
+        ? normalizeSku(requestedUpdate.sku)
+        : isPrimaryVariant && updates.sku !== undefined
+          ? normalizeSku(updates.sku)
+          : normalizeSku(variant?.sku);
+    if (resolvedSku) {
+      payload.sku = resolvedSku;
+    }
+
+    const resolvedInventory =
+      requestedUpdate?.inventory_quantity !== undefined
+        ? requestedUpdate.inventory_quantity
+        : isPrimaryVariant && updates.inventory_quantity !== undefined
+          ? updates.inventory_quantity
+          : undefined;
+    if (resolvedInventory !== undefined) {
+      payload.inventory_quantity = resolvedInventory;
+    }
+
+    return payload;
+  });
+
+  for (const variantUpdate of requestedVariantUpdates) {
+    const variantId = String(variantUpdate?.id || "");
+    if (!seenVariantIds.has(variantId)) {
+      throw new Error(`Variant ${variantId} was not found for this product.`);
+    }
+  }
+
+  return variantPayloads;
+};
+
 export class ProductUpdateService {
   /**
    * Update product (price, cost_price, inventory, sku) locally and sync with Shopify
@@ -559,62 +642,10 @@ export class ProductUpdateService {
       // Build Shopify API payload
       const parsedProductData = parseProductData(product.data);
 
-      let variantPayloads = [];
-
-      if (
-        Array.isArray(updates.variant_updates) &&
-        updates.variant_updates.length > 0
-      ) {
-        const variants = getProductVariants(parsedProductData);
-        variantPayloads = updates.variant_updates.map((variantUpdate) => {
-          const matchingVariant = variants.find(
-            (variant) =>
-              String(variant?.id || "") === String(variantUpdate?.id || ""),
-          );
-
-          if (!matchingVariant?.id) {
-            throw new Error(
-              `Variant ${variantUpdate?.id || ""} was not found for this product.`,
-            );
-          }
-
-          const payload = {
-            id: parseInt(matchingVariant.id, 10),
-          };
-
-          if (variantUpdate.inventory_quantity !== undefined) {
-            payload.inventory_quantity = variantUpdate.inventory_quantity;
-          }
-          if (variantUpdate.price !== undefined) {
-            payload.price = variantUpdate.price?.toString();
-          }
-          if (variantUpdate.sku !== undefined) {
-            payload.sku = normalizeSku(variantUpdate.sku);
-          }
-
-          return payload;
-        });
-      } else {
-        const variant_id = parsedProductData?.variants?.[0]?.id;
-        if (!variant_id) {
-          throw new Error("Variant ID not found for this product.");
-        }
-
-        const variantPayload = {
-          id: parseInt(variant_id, 10),
-        };
-        if (updates.price !== undefined) {
-          variantPayload.price = updates.price?.toString();
-        }
-        if (updates.inventory_quantity !== undefined) {
-          variantPayload.inventory_quantity = updates.inventory_quantity;
-        }
-        if (updates.sku !== undefined) {
-          variantPayload.sku = normalizeSku(updates.sku);
-        }
-
-        variantPayloads = [variantPayload];
-      }
+      const variantPayloads = buildShopifyVariantPayloads(
+        parsedProductData,
+        updates,
+      );
 
       const shopifyPayload = {
         product: {

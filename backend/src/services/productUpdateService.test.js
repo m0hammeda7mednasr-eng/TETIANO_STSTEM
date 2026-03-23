@@ -7,7 +7,10 @@ import {
   jest,
 } from "@jest/globals";
 
-import { ProductUpdateService } from "./productUpdateService.js";
+import {
+  buildShopifyVariantPayloads,
+  ProductUpdateService,
+} from "./productUpdateService.js";
 import { Product } from "../models/index.js";
 
 describe("ProductUpdateService", () => {
@@ -190,6 +193,59 @@ describe("ProductUpdateService", () => {
         variant_updates: variantUpdates,
       }),
     );
+  });
+
+  it("builds a full Shopify variants payload when one variant SKU changes", () => {
+    const payload = buildShopifyVariantPayloads(
+      {
+        variants: [
+          {
+            id: "101",
+            price: "250",
+            sku: "BLUE-S",
+            inventory_quantity: 5,
+          },
+          {
+            id: "102",
+            price: "260",
+            sku: "BLACK-M",
+            inventory_quantity: 3,
+          },
+          {
+            id: "103",
+            price: "265",
+            sku: "WHITE-L",
+            inventory_quantity: 2,
+          },
+        ],
+      },
+      {
+        variant_updates: [
+          {
+            id: "102",
+            sku: "BLACK-L",
+          },
+        ],
+      },
+    );
+
+    expect(payload).toEqual([
+      {
+        id: 101,
+        price: "250",
+        sku: "BLUE-S",
+      },
+      {
+        id: 102,
+        price: "260",
+        sku: "BLACK-L",
+      },
+      {
+        id: 103,
+        price: "265",
+        sku: "WHITE-L",
+      },
+    ]);
   });
 
   it("stores supplier phone and location locally without triggering Shopify sync", async () => {

@@ -95,6 +95,141 @@ function Table({ columns, rows, renderRow, emptyText }) {
   );
 }
 
+function MetricChip({ label, value, tone = "slate" }) {
+  const tones = {
+    slate: "border-slate-200 bg-slate-50 text-slate-700",
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    sky: "border-sky-200 bg-sky-50 text-sky-700",
+    amber: "border-amber-200 bg-amber-50 text-amber-700",
+    rose: "border-rose-200 bg-rose-50 text-rose-700",
+  };
+
+  return (
+    <div className={`rounded-2xl border px-3 py-3 ${tones[tone] || tones.slate}`}>
+      <div className="text-[11px] font-bold uppercase tracking-[0.18em] opacity-70">{label}</div>
+      <div className="mt-2 text-sm font-black tracking-tight">{value}</div>
+    </div>
+  );
+}
+
+function NarrativeList({ items, emptyText = "No details available." }) {
+  const rows = toArray(items).filter(Boolean);
+
+  if (!rows.length) {
+    return <p className="text-sm leading-6 text-slate-500">{emptyText}</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {rows.map((item, index) => (
+        <div key={`${item}-${index}`} className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-700">
+          {item}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DecisionBoardCards({
+  rows,
+  primaryCurrency,
+  formatMoney,
+  formatRate,
+  formatTimes,
+  formatNumber,
+}) {
+  if (!rows.length) {
+    return <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-sm text-slate-500">Sync Meta data to start receiving campaign decisions.</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      {rows.map((row) => (
+        <article key={row.id} className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(135deg,_#ffffff_0%,_#f8fafc_100%)] shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+            <div className="min-w-0 flex-1">
+              <div className="text-lg font-black tracking-tight text-slate-950">{row.name || row.id}</div>
+              <div className="mt-1 text-sm text-slate-500">{row.objective || "No objective"} | Spend {formatMoney(row.spend, primaryCurrency)}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge value={row.decision} />
+              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                {row.confidence || "medium"}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid gap-3 px-5 py-4 md:grid-cols-4">
+            <MetricChip label="ROAS" value={formatTimes(row.roas)} tone="emerald" />
+            <MetricChip label="Link CTR" value={formatRate(row.link_ctr)} tone="sky" />
+            <MetricChip label="Conv. Rate" value={formatRate(row.conversion_rate)} tone="amber" />
+            <MetricChip label="Frequency" value={formatNumber(row.frequency, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} tone="rose" />
+          </div>
+
+          <div className="grid gap-4 px-5 pb-5 lg:grid-cols-[1.15fr,0.85fr]">
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-3 text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Why</div>
+              <NarrativeList items={row.why} />
+            </div>
+            <div className="rounded-3xl border border-slate-200 bg-white p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Action</div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-600">
+                  {row.primary_issue || "mixed"}
+                </span>
+              </div>
+              <p className="text-sm leading-7 text-slate-700">{row.action || "No action available."}</p>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function CreativeDiagnosticCards({
+  rows,
+  primaryCurrency,
+  formatMoney,
+  formatRate,
+  formatTimes,
+  formatCount,
+}) {
+  if (!rows.length) {
+    return <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-sm text-slate-500">No creative diagnostics available yet.</div>;
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-2">
+      {rows.map((row) => (
+        <article key={row.id} className="rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(145deg,_#ffffff_0%,_#fffdf6_100%)] p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-lg font-black tracking-tight text-slate-950">{row.name || row.id}</div>
+              <div className="mt-1 text-sm text-slate-500">Spend {formatMoney(row.spend, primaryCurrency)} | {formatCount(row.video_plays)} video plays</div>
+            </div>
+            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-600">
+              {row.diagnosis || "stable"}
+            </span>
+          </div>
+
+          <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4">
+            <div className="text-sm font-black tracking-tight text-slate-900">{row.headline || row.diagnosis || "Creative read"}</div>
+            <p className="mt-3 text-sm leading-7 text-slate-700">{row.action || "No action available."}</p>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <MetricChip label="ROAS" value={formatTimes(row.roas)} tone="emerald" />
+            <MetricChip label="Hold" value={formatRate(row.video_hold_rate)} tone="amber" />
+            <MetricChip label="Completion" value={formatRate(row.video_completion_rate)} tone="rose" />
+            <MetricChip label="Link CTR" value={formatRate(row.link_ctr)} tone="sky" />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export default function MetaCommandCenter() {
   const { formatCurrency, formatDateTime, formatNumber, formatPercent } = useLocale();
   const [status, setStatus] = useState(null);
@@ -263,25 +398,13 @@ export default function MetaCommandCenter() {
                 <Tile title="Pause Now" value={formatCount(decisionSummary?.pause_count)} subtitle="Spend that is failing the current decision rules." icon={PauseCircle} tone="rose" />
               </div>
 
-              <Table
-                columns={["Campaign", "Decision", "ROAS", "Link CTR", "Conv. Rate", "Frequency", "Why", "Action"]}
+              <DecisionBoardCards
                 rows={decisionCampaigns}
-                emptyText="Sync Meta data to start receiving campaign decisions."
-                renderRow={(row) => (
-                  <tr key={row.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 align-top">
-                      <div className="font-semibold text-slate-950">{row.name || row.id}</div>
-                      <div className="mt-1 text-xs text-slate-500">{row.objective || "No objective"} • Spend {formatMoney(row.spend, primaryCurrency)}</div>
-                    </td>
-                    <td className="px-4 py-3 align-top"><Badge value={row.decision} /></td>
-                    <td className="px-4 py-3 align-top text-slate-700">{formatTimes(row.roas)}</td>
-                    <td className="px-4 py-3 align-top text-slate-700">{formatRate(row.link_ctr)}</td>
-                    <td className="px-4 py-3 align-top text-slate-700">{formatRate(row.conversion_rate)}</td>
-                    <td className="px-4 py-3 align-top text-slate-700">{formatNumber(row.frequency, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="px-4 py-3 align-top text-xs leading-6 text-slate-600">{toArray(row.why).length ? toArray(row.why).join(" ") : "No extra explanation available."}</td>
-                    <td className="px-4 py-3 align-top text-xs leading-6 text-slate-600">{row.action}</td>
-                  </tr>
-                )}
+                primaryCurrency={primaryCurrency}
+                formatMoney={formatMoney}
+                formatRate={formatRate}
+                formatTimes={formatTimes}
+                formatNumber={formatNumber}
               />
             </Section>
 
@@ -384,21 +507,13 @@ export default function MetaCommandCenter() {
 
           <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
             <Section title="Creative Diagnostics" description="Ad-level reads built from thumb-stop, hold, completion, click quality, and post-click conversion.">
-              <Table
-                columns={["Ad", "Diagnosis", "ROAS", "Hold", "Completion", "Link CTR", "Action"]}
+              <CreativeDiagnosticCards
                 rows={creativeDiagnostics}
-                emptyText="No creative diagnostics available yet."
-                renderRow={(row) => (
-                  <tr key={row.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 align-top"><div className="font-semibold text-slate-950">{row.name || row.id}</div><div className="mt-1 text-xs text-slate-500">Spend {formatMoney(row.spend, primaryCurrency)} - {formatCount(row.video_plays)} video plays</div></td>
-                    <td className="px-4 py-3 align-top"><div className="font-semibold text-slate-900">{row.headline || row.diagnosis}</div><div className="mt-1 text-xs uppercase tracking-wide text-slate-500">{row.diagnosis || "stable"}</div></td>
-                    <td className="px-4 py-3 align-top text-slate-700">{formatTimes(row.roas)}</td>
-                    <td className="px-4 py-3 align-top text-slate-700">{formatRate(row.video_hold_rate)}</td>
-                    <td className="px-4 py-3 align-top text-slate-700">{formatRate(row.video_completion_rate)}</td>
-                    <td className="px-4 py-3 align-top text-slate-700">{formatRate(row.link_ctr)}</td>
-                    <td className="px-4 py-3 align-top text-xs leading-6 text-slate-600">{row.action}</td>
-                  </tr>
-                )}
+                primaryCurrency={primaryCurrency}
+                formatMoney={formatMoney}
+                formatRate={formatRate}
+                formatTimes={formatTimes}
+                formatCount={formatCount}
               />
             </Section>
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "@jest/globals";
 
 import {
   aggregateMetaSnapshotRows,
+  buildAssistantContextSnapshot,
   buildMetaDecisionBoard,
   buildMetaOverview,
   extractActionMetric,
@@ -310,5 +311,67 @@ describe("services/metaAnalyticsService", () => {
     expect(overview.ads).toHaveLength(2);
     expect(overview.ads[1].id).toBe("ad_zero");
     expect(overview.ads[1].is_active).toBe(true);
+  });
+
+  it("builds a compact assistant context snapshot instead of sending full raw datasets", () => {
+    const snapshot = buildAssistantContextSnapshot({
+      storeSnapshot: {
+        financial: { net_revenue: 1200 },
+        orders: { total: 22 },
+        catalog: { low_stock_count: 3 },
+        top_products: Array.from({ length: 8 }, (_, index) => ({
+          id: `product-${index}`,
+          title: `Product ${index}`,
+        })),
+        low_stock_products: Array.from({ length: 7 }, (_, index) => ({
+          id: `low-${index}`,
+          title: `Low ${index}`,
+        })),
+      },
+      metaOverview: {
+        summary: { spend: 500, roas: 2.4 },
+        campaigns: Array.from({ length: 9 }, (_, index) => ({
+          id: `cmp-${index}`,
+          name: `Campaign ${index}`,
+          spend: 100 + index,
+          roas: 2 + index / 10,
+        })),
+        ads: Array.from({ length: 9 }, (_, index) => ({
+          id: `ad-${index}`,
+          name: `Ad ${index}`,
+          spend: 50 + index,
+          roas: 1.5 + index / 10,
+        })),
+      },
+      decisionBoard: {
+        summary: { scale_count: 2, pause_count: 1 },
+        roas_framework: { scale_threshold: 2.8 },
+        campaigns: Array.from({ length: 10 }, (_, index) => ({
+          id: `decision-${index}`,
+          name: `Decision ${index}`,
+          decision: index < 2 ? "scale" : "keep",
+          why: ["Reason one", "Reason two", "Reason three"],
+          action: "Do something",
+        })),
+        creative_diagnostics: Array.from({ length: 7 }, (_, index) => ({
+          id: `creative-${index}`,
+          name: `Creative ${index}`,
+          diagnosis: "winner",
+          action: "Protect it",
+        })),
+      },
+      recommendations: Array.from({ length: 9 }, (_, index) => ({
+        title: `Rec ${index}`,
+      })),
+    });
+
+    expect(snapshot.top_campaigns).toHaveLength(6);
+    expect(snapshot.top_ads).toHaveLength(6);
+    expect(snapshot.decisions).toHaveLength(6);
+    expect(snapshot.creative_diagnostics).toHaveLength(5);
+    expect(snapshot.recommendations).toHaveLength(6);
+    expect(snapshot.store_snapshot.top_products).toHaveLength(5);
+    expect(snapshot.store_snapshot.low_stock_products).toHaveLength(5);
+    expect(snapshot.decisions[0].why).toHaveLength(2);
   });
 });

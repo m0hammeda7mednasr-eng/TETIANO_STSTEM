@@ -1579,6 +1579,13 @@ const buildOpenRouterHeaders = ({
   return headers;
 };
 
+const createServiceError = (status, publicMessage, details = "") => {
+  const error = new Error(details || publicMessage);
+  error.status = status;
+  error.publicMessage = publicMessage;
+  return error;
+};
+
 const requestOpenRouterChatCompletion = async ({
   apiKey,
   model = DEFAULT_OPENROUTER_MODEL,
@@ -1586,34 +1593,97 @@ const requestOpenRouterChatCompletion = async ({
   siteName = "",
   temperature = 0.2,
   messages = [],
+  maxCompletionTokens = 900,
 }) => {
-  const response = await axios.post(
-    `${OPENROUTER_BASE_URL}/chat/completions`,
-    {
-      model: normalizeText(model) || DEFAULT_OPENROUTER_MODEL,
-      temperature,
-      messages: normalizeArray(messages).filter(
-        (message) =>
-          normalizeText(message?.role) &&
-          normalizeText(message?.content),
-      ),
-    },
-    {
-      headers: buildOpenRouterHeaders({
-        apiKey,
-        siteUrl,
-        siteName,
-      }),
-      timeout: OPENROUTER_TIMEOUT_MS,
-    },
-  );
+  try {
+    const response = await axios.post(
+      `${OPENROUTER_BASE_URL}/chat/completions`,
+      {
+        model: normalizeText(model) || DEFAULT_OPENROUTER_MODEL,
+        temperature,
+        max_completion_tokens: Math.max(128, toNumber(maxCompletionTokens) || 900),
+        messages: normalizeArray(messages).filter(
+          (message) =>
+            normalizeText(message?.role) &&
+            normalizeText(message?.content),
+        ),
+      },
+      {
+        headers: buildOpenRouterHeaders({
+          apiKey,
+          siteUrl,
+          siteName,
+        }),
+        timeout: OPENROUTER_TIMEOUT_MS,
+      },
+    );
 
-  const choice = response?.data?.choices?.[0];
-  return {
-    model: response?.data?.model || model,
-    content: normalizeText(choice?.message?.content),
-    raw: response?.data || {},
-  };
+    const choice = response?.data?.choices?.[0];
+    const content = normalizeText(choice?.message?.content);
+
+    if (!content) {
+      throw createServiceError(
+        502,
+        "OpenRouter returned an empty reply. Try again in a moment.",
+      );
+    }
+
+    return {
+      model: response?.data?.model || model,
+      content,
+      raw: response?.data || {},
+    };
+  } catch (error) {
+    if (error?.publicMessage) {
+      throw error;
+    }
+
+    const providerStatus = toNumber(error?.response?.status);
+    const providerMessage = normalizeText(
+      error?.response?.data?.error?.message ||
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message,
+    );
+
+    if (providerStatus === 413) {
+      throw createServiceError(
+        413,
+        "The AI request context is too large. Refresh data or ask a narrower question.",
+        providerMessage,
+      );
+    }
+
+    if (providerStatus === 401 || providerStatus === 403) {
+      throw createServiceError(
+        502,
+        "OpenRouter rejected the saved API key or model settings.",
+        providerMessage,
+      );
+    }
+
+    if (providerStatus === 402) {
+      throw createServiceError(
+        502,
+        "OpenRouter credits are unavailable for this request.",
+        providerMessage,
+      );
+    }
+
+    if (providerStatus === 429) {
+      throw createServiceError(
+        429,
+        "OpenRouter rate limit was reached. Retry in a moment.",
+        providerMessage,
+      );
+    }
+
+    throw createServiceError(
+      502,
+      "OpenRouter is temporarily unavailable. Retry in a moment.",
+      providerMessage,
+    );
+  }
 };
 
 const buildAiPrompt = ({
@@ -1721,6 +1791,67 @@ const sanitizeChatHistory = (history = []) =>
     }))
     .filter((entry) => entry.content);
 
+const buildAssistantCampaignRows = (rows = [], limit = 6) =>
+  normalizeArray(rows)
+    .slice(0, limit)
+    .map((row) => ({
+      id: normalizeText(row?.id),
+      name: normalizeText(row?.name) || normalizeText(row?.id),
+      objective: normalizeText(row?.objective),
+      decision: normalizeText(row?.decision),
+      spend: toNumber(row?.spend),
+      roas: toNumber(row?.roas),
+      link_ctr: toNumber(row?.link_ctr),
+      conversion_rate: toNumber(row?.conversion_rate),
+      frequency: toNumber(row?.frequency),
+      purchases: toNumber(row?.purchases),
+      why: normalizeArray(row?.why).slice(0, 2),
+      action: normalizeText(row?.action),
+    }));
+
+const buildAssistantCreativeRows = (rows = [], limit = 5) =>
+  normalizeArray(rows)
+    .slice(0, limit)
+    .map((row) => ({
+      id: normalizeText(row?.id),
+      name: normalizeText(row?.name) || normalizeText(row?.id),
+      diagnosis: normalizeText(row?.diagnosis),
+      headline: normalizeText(row?.headline),
+      spend: toNumber(row?.spend),
+      roas: toNumber(row?.roas),
+      video_hold_rate: toNumber(row?.video_hold_rate),
+      video_completion_rate: toNumber(row?.video_completion_rate),
+      link_ctr: toNumber(row?.link_ctr),
+      action: normalizeText(row?.action),
+    }));
+
+export const buildAssistantContextSnapshot = ({
+  storeSnapshot = {},
+  metaOverview = {},
+  decisionBoard = {},
+  recommendations = [],
+}) => ({
+  store_snapshot: {
+    financial: storeSnapshot?.financial || {},
+    orders: storeSnapshot?.orders || {},
+    catalog: storeSnapshot?.catalog || {},
+    top_products: normalizeArray(storeSnapshot?.top_products).slice(0, 5),
+    low_stock_products: normalizeArray(storeSnapshot?.low_stock_products).slice(0, 5),
+  },
+  meta_summary: metaOverview?.summary || {},
+  top_campaigns: buildAssistantCampaignRows(metaOverview?.campaigns, 6),
+  top_ads: buildAssistantCreativeRows(metaOverview?.ads, 6),
+  decision_summary: decisionBoard?.summary || {},
+  roas_framework: decisionBoard?.roas_framework || {},
+  decisions: buildAssistantCampaignRows(decisionBoard?.campaigns, 6),
+  creative_diagnostics: buildAssistantCreativeRows(
+    decisionBoard?.creative_diagnostics,
+    5,
+  ),
+  recommendations: normalizeArray(recommendations).slice(0, 6),
+  meta_playbook_notes: META_PLAYBOOK_NOTES,
+});
+
 export const generateOpenRouterStoreAssistantReply = async ({
   apiKey,
   model = DEFAULT_OPENROUTER_MODEL,
@@ -1734,6 +1865,12 @@ export const generateOpenRouterStoreAssistantReply = async ({
   recommendations = [],
 }) => {
   const normalizedMessage = normalizeText(message);
+  const compactContext = buildAssistantContextSnapshot({
+    storeSnapshot,
+    metaOverview,
+    decisionBoard,
+    recommendations,
+  });
   const prompt = {
     system: [
       "You are Tetiano AI, an internal commerce operations strategist.",
@@ -1746,13 +1883,7 @@ export const generateOpenRouterStoreAssistantReply = async ({
       "When data is missing, say that clearly instead of inventing numbers.",
     ].join(" "),
     context: JSON.stringify(
-      {
-        store_snapshot: storeSnapshot || {},
-        meta_overview: metaOverview || {},
-        decision_board: decisionBoard || {},
-        recommendations: normalizeArray(recommendations).slice(0, 8),
-        meta_playbook_notes: META_PLAYBOOK_NOTES,
-      },
+      compactContext,
       null,
       2,
     ),
@@ -1764,6 +1895,7 @@ export const generateOpenRouterStoreAssistantReply = async ({
     siteUrl,
     siteName,
     temperature: 0.25,
+    maxCompletionTokens: 700,
     messages: [
       {
         role: "system",

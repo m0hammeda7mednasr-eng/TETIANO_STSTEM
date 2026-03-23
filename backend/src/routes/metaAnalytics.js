@@ -948,6 +948,12 @@ const handleSchemaAwareError = (res, error, fallbackMessage) => {
   }
 
   console.error(fallbackMessage, error);
+  if (error?.status && error?.publicMessage) {
+    return res.status(error.status).json({
+      error: error.publicMessage,
+    });
+  }
+
   return res.status(500).json({
     error: fallbackMessage,
   });

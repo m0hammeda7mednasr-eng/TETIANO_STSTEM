@@ -83,6 +83,7 @@ const toNumber = (value) => {
 const normalizeArray = (value) => (Array.isArray(value) ? value : []);
 
 const normalizeText = (value) => String(value || "").trim();
+const normalizeSearchText = (value) => normalizeText(value).toLowerCase();
 const getMetaReference = (id) =>
   META_REFERENCE_MAP.get(normalizeText(id)) || null;
 
@@ -2200,6 +2201,8 @@ const buildAiPrompt = ({
     "You are a senior performance marketing analyst.",
     "Analyze Meta ads performance data and produce direct, commercial recommendations.",
     "Use the decision board and Meta playbook notes to explain what to pause, keep, test, and scale.",
+    "Prioritize active campaigns and only mention inactive or old campaigns if they directly explain the recommendation.",
+    "Keep the output compact and executive. Do not pad with low-value observations.",
     "Explain why ROAS is strong or weak using CTR, conversion rate, CPM, frequency, and video engagement when available.",
     "Respond in valid JSON only.",
     "Required shape:",
@@ -2268,6 +2271,7 @@ export const generateOpenRouterMetaAnalysis = async ({
     siteUrl,
     siteName,
     temperature: 0.2,
+    maxCompletionTokens: 650,
     messages: [
       {
         role: "system",
@@ -2326,6 +2330,8 @@ const buildAssistantCreativeRows = (rows = [], limit = 5) =>
     .map((row) => ({
       id: normalizeText(row?.id),
       name: normalizeText(row?.name) || normalizeText(row?.id),
+      campaign_id: normalizeText(row?.campaign_id),
+      adset_id: normalizeText(row?.adset_id),
       diagnosis: normalizeText(row?.diagnosis),
       headline: normalizeText(row?.headline),
       spend: toNumber(row?.spend),
@@ -2336,37 +2342,189 @@ const buildAssistantCreativeRows = (rows = [], limit = 5) =>
       action: normalizeText(row?.action),
     }));
 
+const tokenizeAssistantMessage = (message = "") =>
+  Array.from(
+    new Set(
+      normalizeSearchText(message)
+        .split(/[^\p{L}\p{N}]+/u)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3),
+    ),
+  );
+
+const scoreAssistantEntityMatch = (message = "", row = {}) => {
+  const normalizedMessage = normalizeSearchText(message);
+  if (!normalizedMessage) {
+    return 0;
+  }
+
+  const entityValues = [
+    row?.id,
+    row?.name,
+    row?.campaign_id,
+    row?.adset_id,
+    row?.headline,
+    row?.objective,
+  ]
+    .map((value) => normalizeSearchText(value))
+    .filter(Boolean);
+
+  if (!entityValues.length) {
+    return 0;
+  }
+
+  const directMatch = entityValues.some(
+    (value) =>
+      value.length >= 4 &&
+      (normalizedMessage.includes(value) || value.includes(normalizedMessage)),
+  );
+  if (directMatch) {
+    return 100;
+  }
+
+  const messageTokens = tokenizeAssistantMessage(message);
+  if (!messageTokens.length) {
+    return 0;
+  }
+
+  return messageTokens.reduce((score, token) => {
+    if (entityValues.some((value) => value.includes(token))) {
+      return score + (token.length >= 6 ? 3 : 2);
+    }
+
+    return score;
+  }, 0);
+};
+
+const uniqueAssistantRows = (rows = []) => {
+  const seen = new Set();
+  const uniqueRows = [];
+
+  for (const row of normalizeArray(rows)) {
+    const key = normalizeText(row?.id || row?.name);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    uniqueRows.push(row);
+  }
+
+  return uniqueRows;
+};
+
+const getAssistantFocusedContext = ({
+  message = "",
+  metaOverview = {},
+  decisionBoard = {},
+}) => {
+  const scoredCampaigns = uniqueAssistantRows([
+    ...normalizeArray(decisionBoard?.campaigns),
+    ...normalizeArray(metaOverview?.campaigns),
+  ])
+    .map((row) => ({
+      row,
+      score: scoreAssistantEntityMatch(message, row),
+    }))
+    .filter((entry) => entry.score >= 3)
+    .sort((left, right) => right.score - left.score);
+
+  const scoredCreatives = uniqueAssistantRows([
+    ...normalizeArray(decisionBoard?.creative_diagnostics),
+    ...normalizeArray(metaOverview?.ads),
+  ])
+    .map((row) => ({
+      row,
+      score: scoreAssistantEntityMatch(message, row),
+    }))
+    .filter((entry) => entry.score >= 3)
+    .sort((left, right) => right.score - left.score);
+
+  const matchedCampaigns = scoredCampaigns.map((entry) => entry.row).slice(0, 4);
+  const matchedCreatives = scoredCreatives.map((entry) => entry.row).slice(0, 4);
+  const matchedCampaignIds = new Set(
+    matchedCampaigns.map((row) => normalizeText(row?.id)).filter(Boolean),
+  );
+
+  const supportingCreatives = normalizeArray(decisionBoard?.creative_diagnostics)
+    .filter((row) =>
+      matchedCampaignIds.has(normalizeText(row?.campaign_id)) ||
+      matchedCampaignIds.has(normalizeText(row?.id)),
+    )
+    .slice(0, 4);
+
+  const hasFocusedScope =
+    matchedCampaigns.length > 0 ||
+    matchedCreatives.length > 0 ||
+    supportingCreatives.length > 0;
+
+  return {
+    scope: hasFocusedScope ? "targeted" : "account_overview",
+    matchedCampaigns,
+    matchedCreatives:
+      matchedCreatives.length > 0 ? matchedCreatives : supportingCreatives,
+  };
+};
+
 export const buildAssistantContextSnapshot = ({
+  message = "",
   storeSnapshot = {},
   metaOverview = {},
   decisionBoard = {},
   recommendations = [],
   assistantQuestions = [],
-}) => ({
-  store_snapshot: {
-    financial: storeSnapshot?.financial || {},
-    orders: storeSnapshot?.orders || {},
-    catalog: storeSnapshot?.catalog || {},
-    top_products: normalizeArray(storeSnapshot?.top_products).slice(0, 5),
-    low_stock_products: normalizeArray(storeSnapshot?.low_stock_products).slice(
-      0,
-      5,
+}) => {
+  const focusedContext = getAssistantFocusedContext({
+    message,
+    metaOverview,
+    decisionBoard,
+  });
+  const useFocusedScope = focusedContext.scope === "targeted";
+
+  return {
+    context_scope: focusedContext.scope,
+    store_snapshot: {
+      financial: storeSnapshot?.financial || {},
+      orders: storeSnapshot?.orders || {},
+      catalog: storeSnapshot?.catalog || {},
+      top_products: normalizeArray(storeSnapshot?.top_products).slice(0, 4),
+      low_stock_products: normalizeArray(storeSnapshot?.low_stock_products).slice(
+        0,
+        4,
+      ),
+    },
+    meta_summary: metaOverview?.summary || {},
+    decision_summary: decisionBoard?.summary || {},
+    roas_framework: decisionBoard?.roas_framework || {},
+    focused_campaigns: buildAssistantCampaignRows(
+      focusedContext.matchedCampaigns,
+      4,
     ),
-  },
-  meta_summary: metaOverview?.summary || {},
-  top_campaigns: buildAssistantCampaignRows(metaOverview?.campaigns, 6),
-  top_ads: buildAssistantCreativeRows(metaOverview?.ads, 6),
-  decision_summary: decisionBoard?.summary || {},
-  roas_framework: decisionBoard?.roas_framework || {},
-  decisions: buildAssistantCampaignRows(decisionBoard?.campaigns, 6),
-  creative_diagnostics: buildAssistantCreativeRows(
-    decisionBoard?.creative_diagnostics,
-    5,
-  ),
-  assistant_questions: normalizeArray(assistantQuestions).slice(0, 6),
-  recommendations: normalizeArray(recommendations).slice(0, 6),
-  meta_playbook_notes: META_PLAYBOOK_NOTES,
-});
+    focused_creatives: buildAssistantCreativeRows(
+      focusedContext.matchedCreatives,
+      4,
+    ),
+    decisions: buildAssistantCampaignRows(
+      useFocusedScope ? [] : decisionBoard?.campaigns,
+      4,
+    ),
+    creative_diagnostics: buildAssistantCreativeRows(
+      useFocusedScope ? [] : decisionBoard?.creative_diagnostics,
+      4,
+    ),
+    recommendations: normalizeArray(recommendations).slice(
+      0,
+      useFocusedScope ? 3 : 4,
+    ),
+    assistant_questions: normalizeArray(assistantQuestions).slice(
+      0,
+      useFocusedScope ? 0 : 4,
+    ),
+    meta_playbook_notes: useFocusedScope
+      ? []
+      : META_PLAYBOOK_NOTES.slice(0, 4),
+  };
+};
 
 export const generateOpenRouterStoreAssistantReply = async ({
   apiKey,
@@ -2383,6 +2541,7 @@ export const generateOpenRouterStoreAssistantReply = async ({
 }) => {
   const normalizedMessage = normalizeText(message);
   const compactContext = buildAssistantContextSnapshot({
+    message: normalizedMessage,
     storeSnapshot,
     metaOverview,
     decisionBoard,
@@ -2396,6 +2555,11 @@ export const generateOpenRouterStoreAssistantReply = async ({
       "Use the provided store snapshot, Meta data, decision board, and recommendations only.",
       "Reply in the same language as the user. Prefer Arabic when the user writes Arabic.",
       "Be specific, operational, and concise.",
+      "Default to a short operator brief: one direct verdict sentence, then no more than 4 short bullets.",
+      "Answer only what the user asked. Do not volunteer unrelated campaigns, inactive campaigns, old campaigns, or extra calculations unless they are necessary to answer.",
+      "If the user asks about one campaign, ad set, or ad, stay tightly focused on that entity.",
+      "If the user seems to mean a specific campaign or ad but the context does not clearly identify one, say that plainly and ask for the exact name.",
+      "Mention at most 3 metrics, and only if those metrics change the decision.",
       "When relevant, answer in four buckets: pause, keep running, test next, and scale now.",
       "Explain ROAS in plain language using CTR, conversion rate, CPM, frequency, and video diagnostics when available.",
       "When data is missing, say that clearly instead of inventing numbers.",
@@ -2408,8 +2572,8 @@ export const generateOpenRouterStoreAssistantReply = async ({
     model,
     siteUrl,
     siteName,
-    temperature: 0.25,
-    maxCompletionTokens: 700,
+    temperature: 0.15,
+    maxCompletionTokens: 420,
     messages: [
       {
         role: "system",

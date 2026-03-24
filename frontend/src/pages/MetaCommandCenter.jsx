@@ -24,7 +24,14 @@ import { useLocale } from "../context/LocaleContext";
 import { getErrorMessage, metaAnalyticsAPI } from "../utils/api";
 
 const DEFAULT_ANALYSIS_FOCUS =
-  "Use Meta best practices plus campaign data to explain ROAS, identify winners, wasted spend, creative issues, what to pause, what to keep, what to test next, and what should scale now.";
+  "Review only the decisions that matter now: what to scale, what to keep, what to test, and what to pause. Ignore inactive or old campaigns unless they directly matter.";
+
+const META_VIEW_TABS = [
+  { id: "overview", label: "Overview", icon: Target },
+  { id: "ai", label: "AI Workspace", icon: MessageSquare },
+  { id: "details", label: "Detailed Tables", icon: Settings },
+  { id: "history", label: "History", icon: RefreshCw },
+];
 
 const toArray = (value) => (Array.isArray(value) ? value : []);
 const formatLabel = (value) =>
@@ -86,6 +93,23 @@ function Badge({ value }) {
     pause: "bg-rose-100 text-rose-800",
   };
   return <span className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wide ${tones[value] || tones.keep}`}>{value || "keep"}</span>;
+}
+
+function ViewTabButton({ label, active, icon: Icon, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold transition ${
+        active
+          ? "bg-slate-950 text-white shadow-sm"
+          : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      <Icon size={16} />
+      {label}
+    </button>
+  );
 }
 
 function Table({ columns, rows, renderRow, emptyText }) {
@@ -320,6 +344,7 @@ export default function MetaCommandCenter() {
   const { formatCurrency, formatDateTime, formatNumber, formatPercent } = useLocale();
   const [status, setStatus] = useState(null);
   const [overview, setOverview] = useState(null);
+  const [activeView, setActiveView] = useState("overview");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -330,7 +355,12 @@ export default function MetaCommandCenter() {
   const [analysisFocus, setAnalysisFocus] = useState(DEFAULT_ANALYSIS_FOCUS);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantMessages, setAssistantMessages] = useState([
-    { role: "assistant", content: "Ready. Ask what should pause, scale, keep running, or why ROAS is moving.", timestamp: new Date().toISOString() },
+    {
+      role: "assistant",
+      content:
+        "Ready. Ask about one campaign, one problem, or one decision, and I will stay on that scope.",
+      timestamp: new Date().toISOString(),
+    },
   ]);
 
   const loadPage = async ({ silent = false } = {}) => {
@@ -369,14 +399,14 @@ export default function MetaCommandCenter() {
   const decisionSummary = decisionBoard?.summary || {};
   const roasFramework = decisionBoard?.roas_framework || {};
   const storeSnapshot = overview?.store_snapshot || {};
-  const recommendations = useMemo(() => toArray(overview?.recommendations).slice(0, 8), [overview]);
-  const decisionCampaigns = useMemo(() => toArray(decisionBoard?.campaigns).slice(0, 8), [decisionBoard]);
+  const recommendations = useMemo(() => toArray(overview?.recommendations).slice(0, 6), [overview]);
+  const decisionCampaigns = useMemo(() => toArray(decisionBoard?.campaigns).slice(0, 6), [decisionBoard]);
   const creativeDiagnostics = useMemo(() => toArray(decisionBoard?.creative_diagnostics).slice(0, 6), [decisionBoard]);
-  const playbookNotes = useMemo(() => toArray(decisionBoard?.playbook_notes).slice(0, 6), [decisionBoard]);
+  const playbookNotes = useMemo(() => toArray(decisionBoard?.playbook_notes).slice(0, 4), [decisionBoard]);
   const allCampaigns = useMemo(() => toArray(metaOverview?.campaigns), [metaOverview]);
   const allAdsets = useMemo(() => toArray(metaOverview?.adsets), [metaOverview]);
   const allAds = useMemo(() => toArray(metaOverview?.ads), [metaOverview]);
-  const assistantQuestions = useMemo(() => toArray(overview?.assistant_questions).slice(0, 6), [overview]);
+  const assistantQuestions = useMemo(() => toArray(overview?.assistant_questions).slice(0, 4), [overview]);
   const activeCampaigns = useMemo(() => allCampaigns.filter((item) => item?.is_active), [allCampaigns]);
   const activeAdsets = useMemo(() => allAdsets.filter((item) => item?.is_active), [allAdsets]);
   const activeAds = useMemo(() => allAds.filter((item) => item?.is_active), [allAds]);
@@ -386,7 +416,7 @@ export default function MetaCommandCenter() {
   const quickPrompts = useMemo(() => {
     const dynamicPrompts = assistantQuestions.map((item) => item?.question).filter(Boolean);
     if (dynamicPrompts.length) {
-      return dynamicPrompts;
+      return dynamicPrompts.slice(0, 4);
     }
 
     return [
@@ -426,6 +456,7 @@ export default function MetaCommandCenter() {
   const handleAssistantSend = async (message = assistantInput) => {
     const normalizedMessage = String(message || "").trim();
     if (!normalizedMessage) return;
+    setActiveView("ai");
     const history = assistantMessages.slice(-6).map((entry) => ({ role: entry.role, content: entry.content }));
     const userMessage = { role: "user", content: normalizedMessage, timestamp: new Date().toISOString() };
     setAssistantMessages((current) => [...current, userMessage]);
@@ -483,6 +514,21 @@ export default function MetaCommandCenter() {
             <Tile title="Video hold rate" value={formatRate(summary?.video_hold_rate)} subtitle={`Completion ${formatRate(summary?.video_completion_rate)}`} icon={Film} tone="slate" />
           </div>
 
+          <section className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap gap-3">
+              {META_VIEW_TABS.map((tab) => (
+                <ViewTabButton
+                  key={tab.id}
+                  label={tab.label}
+                  icon={tab.icon}
+                  active={activeView === tab.id}
+                  onClick={() => setActiveView(tab.id)}
+                />
+              ))}
+            </div>
+          </section>
+
+          {activeView === "overview" ? (
           <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1.08fr,0.92fr]">
             <Section title="Campaign Command Board" description="Decision engine for campaigns built from ROAS, spend gate, link CTR, conversion rate, CPM, frequency, and video engagement.">
               <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -522,7 +568,9 @@ export default function MetaCommandCenter() {
               </Section>
             </div>
           </div>
+          ) : null}
 
+          {activeView === "details" ? (
           <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
             <Section title="All Campaigns" description="Full campaign list from the stored Meta catalog, including zero-spend and active items.">
               <Table
@@ -560,7 +608,9 @@ export default function MetaCommandCenter() {
               />
             </Section>
           </div>
+          ) : null}
 
+          {activeView === "details" ? (
           <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
             <Section title="Active Ad Sets" description="All active ad sets with their parent campaign and delivery metadata.">
               <Table
@@ -598,7 +648,9 @@ export default function MetaCommandCenter() {
               />
             </Section>
           </div>
+          ) : null}
 
+          {activeView === "overview" ? (
           <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
             <Section title="Creative Diagnostics" description="Ad-level reads built from thumb-stop, hold, completion, click quality, and post-click conversion.">
               <CreativeDiagnosticCards
@@ -615,7 +667,14 @@ export default function MetaCommandCenter() {
               {playbookNotes.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-sm text-slate-500">No playbook notes available.</div> : <div className="space-y-3">{playbookNotes.map((note, index) => <div key={`playbook-${index}`} className="rounded-3xl border border-slate-200 bg-[linear-gradient(135deg,_#f8fafc_0%,_#fffdf6_100%)] p-4"><div className="flex items-start gap-3"><div className="rounded-2xl bg-slate-950 p-2 text-white">{index % 2 === 0 ? <Film size={16} /> : <Sparkles size={16} />}</div><p className="text-sm leading-7 text-slate-700">{note}</p></div></div>)}</div>}
             </Section>
           </div>
+          ) : null}
 
+          {activeView === "ai" ? (
+          <>
+          <div className="rounded-[2rem] border border-sky-200 bg-sky-50 px-5 py-4 text-sm text-sky-900">
+            <div className="font-bold">AI replies are now tighter by default.</div>
+            <p className="mt-1 leading-6">Ask about one campaign, one ad, or one problem. The assistant will stay focused and will not pull in unrelated campaigns unless they change the decision.</p>
+          </div>
           <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[0.92fr,1.08fr]">
             <Section title="AI Brief Focus" description="This instruction goes into the formal AI analysis using the latest Meta overview, decision board, and store context." actions={<button type="button" onClick={handleAnalyze} disabled={analyzing || schemaMissing} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-800 transition hover:bg-slate-100 disabled:opacity-60"><Brain size={16} />{analyzing ? "Analyzing..." : "Run AI Analysis"}</button>}>
               <textarea rows={6} value={analysisFocus} onChange={(event) => setAnalysisFocus(event.target.value)} className="w-full rounded-3xl border border-slate-200 px-4 py-3 text-sm leading-6 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100" />
@@ -633,10 +692,13 @@ export default function MetaCommandCenter() {
               </div>
               <div className="mb-4 flex flex-wrap gap-2">{quickPrompts.map((prompt) => <button key={prompt} type="button" onClick={() => handleAssistantSend(prompt)} disabled={assistantSending || schemaMissing} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-white disabled:opacity-60">{prompt}</button>)}</div>
               <div className="space-y-3 rounded-[2rem] bg-slate-50 p-4">{assistantMessages.map((message, index) => <div key={`${message.role}-${message.timestamp || index}-${index}`} className={`flex ${message.role === "assistant" ? "justify-start" : "justify-end"}`}><div className={`max-w-3xl rounded-3xl px-4 py-3 shadow-sm ${message.role === "assistant" ? "border border-slate-200 bg-white text-slate-800" : "bg-slate-950 text-white"}`}><p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p><p className={`mt-2 text-[11px] ${message.role === "assistant" ? "text-slate-400" : "text-slate-300"}`}>{formatDateTime(message.timestamp)}</p></div></div>)}{assistantSending ? <div className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">Analyzing store and Meta context...</div> : null}</div>
-              <div className="mt-4"><textarea rows={4} value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} className="w-full rounded-3xl border border-slate-200 px-4 py-3 text-sm leading-6 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100" placeholder="Ask what should pause, scale, test next, or why ROAS is under pressure." /><div className="mt-3 flex items-center justify-between gap-3"><p className="text-xs text-slate-500">The reply is grounded in the latest store snapshot plus Meta decision data.</p><button type="button" onClick={() => handleAssistantSend()} disabled={assistantSending || schemaMissing || !assistantInput.trim()} className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-60"><Send size={16} />{assistantSending ? "Sending..." : "Send to AI"}</button></div></div>
+              <div className="mt-4"><textarea rows={4} value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} className="w-full rounded-3xl border border-slate-200 px-4 py-3 text-sm leading-6 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100" placeholder="Ask about one campaign, one ad, or one issue only." /><div className="mt-3 flex items-center justify-between gap-3"><p className="text-xs text-slate-500">The reply is grounded in the latest store snapshot plus Meta decision data.</p><button type="button" onClick={() => handleAssistantSend()} disabled={assistantSending || schemaMissing || !assistantInput.trim()} className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-60"><Send size={16} />{assistantSending ? "Sending..." : "Send to AI"}</button></div></div>
             </Section>
           </div>
+          </>
+          ) : null}
 
+          {activeView === "history" ? (
           <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
             <Section title="Recent AI Briefs" description="Saved OpenRouter analyses generated from the latest Meta performance data.">
               {analyses.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-sm text-slate-500">Generate your first AI brief after syncing Meta data.</div> : <div className="space-y-4">{analyses.map((analysis) => { const summaryJson = analysis?.summary_json || {}; return <div key={analysis.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4"><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><p className="font-bold text-slate-950">{analysis.model || "OpenRouter analysis"}</p><p className="text-xs text-slate-500">{formatDateTime(analysis.created_at)}</p></div>{analysis.focus_area ? <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">{analysis.focus_area}</span> : null}</div><p className="text-sm leading-6 text-slate-700">{summaryJson?.executive_summary ? summaryJson.executive_summary : truncateText(analysis.recommendation_text, 320)}</p></div>; })}</div>}
@@ -646,6 +708,7 @@ export default function MetaCommandCenter() {
               {syncRuns.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-sm text-slate-500">No sync runs recorded yet.</div> : <div className="space-y-3">{syncRuns.map((run) => <div key={run.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-bold text-slate-950">{run.status === "completed" ? "Completed" : run.status === "failed" ? "Failed" : "Running"}</p><p className="text-xs text-slate-500">{formatDateTime(run.started_at)}</p></div><span className={`rounded-full px-3 py-1 text-xs font-bold ${run.status === "completed" ? "bg-emerald-100 text-emerald-700" : run.status === "failed" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>{run.sync_type || "manual"}</span></div><div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2"><p>Range: {run.date_start || "-"} to {run.date_stop || "-"}</p><p>Finished: {run.completed_at ? formatDateTime(run.completed_at) : "-"}</p></div>{run.error_message ? <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{run.error_message}</div> : null}</div>)}</div>}
             </Section>
           </div>
+          ) : null}
 
           {!status?.schemaReady ? <div className="rounded-[2rem] border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900"><p className="font-bold">Database schema is still missing.</p><p className="mt-1">Run <code>ADD_META_ANALYTICS_MODULE.sql</code> on Supabase first, then save your Meta and OpenRouter credentials in Settings.</p></div> : null}
         </div>

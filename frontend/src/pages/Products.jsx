@@ -25,9 +25,7 @@ import Sidebar from "../components/Sidebar";
 import { SkeletonBlock } from "../components/Common";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
-import {
-  subscribeToSharedDataUpdates,
-} from "../utils/realtime";
+import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
   buildStoreScopedCacheKey,
@@ -149,10 +147,7 @@ export default function Products() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { isAdmin, hasPermission } = useAuth();
   const canEditProducts = hasPermission("can_edit_products");
-  const cacheKey = useMemo(
-    () => buildStoreScopedCacheKey("products:list"),
-    [],
-  );
+  const cacheKey = useMemo(() => buildStoreScopedCacheKey("products:list"), []);
   const initialCachedSnapshot = useMemo(() => {
     const cached = peekCachedView(cacheKey);
     return {
@@ -183,7 +178,10 @@ export default function Products() {
   const deferredSearchTerm = useDeferredValue(filters.searchTerm);
 
   useEffect(() => {
-    const nextSearchParams = buildSearchParamsFromFilters(filters, searchParams);
+    const nextSearchParams = buildSearchParamsFromFilters(
+      filters,
+      searchParams,
+    );
     const currentParamsString = searchParams.toString();
     const nextParamsString = nextSearchParams.toString();
 
@@ -200,8 +198,14 @@ export default function Products() {
     let active = true;
 
     readCachedView(cacheKey).then((cached) => {
-      const cachedRows = Array.isArray(cached?.value?.rows) ? cached.value.rows : [];
-      if (!active || cachedRows.length === 0 || cachedRows.length <= productsRef.current.length) {
+      const cachedRows = Array.isArray(cached?.value?.rows)
+        ? cached.value.rows
+        : [];
+      if (
+        !active ||
+        cachedRows.length === 0 ||
+        cachedRows.length <= productsRef.current.length
+      ) {
         return;
       }
 
@@ -319,7 +323,8 @@ export default function Products() {
         return;
       }
 
-      const hasCachedRows = Array.isArray(cached?.value?.rows) && cached.value.rows.length > 0;
+      const hasCachedRows =
+        Array.isArray(cached?.value?.rows) && cached.value.rows.length > 0;
       if (productsRef.current.length === 0) {
         await fetchProducts({ silent: true });
         return;
@@ -519,9 +524,13 @@ export default function Products() {
         case "price_asc":
           return toNumber(a.price) - toNumber(b.price);
         case "inventory_desc":
-          return toNumber(b.inventory_quantity) - toNumber(a.inventory_quantity);
+          return (
+            toNumber(b.inventory_quantity) - toNumber(a.inventory_quantity)
+          );
         case "inventory_asc":
-          return toNumber(a.inventory_quantity) - toNumber(b.inventory_quantity);
+          return (
+            toNumber(a.inventory_quantity) - toNumber(b.inventory_quantity)
+          );
         case "updated_asc":
           return (
             (a._meta.updatedAt ? a._meta.updatedAt.getTime() : 0) -
@@ -537,7 +546,13 @@ export default function Products() {
     });
 
     return result;
-  }, [deferredSearchTerm, filters, isAdmin, normalizedUpdatedRange, variantRows]);
+  }, [
+    deferredSearchTerm,
+    filters,
+    isAdmin,
+    normalizedUpdatedRange,
+    variantRows,
+  ]);
 
   const summary = useMemo(() => {
     const outOfStock = filteredVariants.filter(
@@ -571,7 +586,8 @@ export default function Products() {
     return buildCatalogCounts(variantRows, filteredVariants);
   }, [filteredVariants, variantRows]);
 
-  const hasLowStockAlert = summary.lowStock > 0 && filters.stockStatus !== "low_stock";
+  const hasLowStockAlert =
+    summary.lowStock > 0 && filters.stockStatus !== "low_stock";
 
   const activeFilterChips = useMemo(() => {
     const chips = [];
@@ -588,14 +604,16 @@ export default function Products() {
     if (filters.stockStatus !== "all") {
       chips.push(
         `Stock: ${
-          PRODUCT_FILTER_LABELS.stockStatus[filters.stockStatus] || filters.stockStatus
+          PRODUCT_FILTER_LABELS.stockStatus[filters.stockStatus] ||
+          filters.stockStatus
         }`,
       );
     }
     if (filters.syncStatus !== "all") {
       chips.push(
         `Sync: ${
-          PRODUCT_FILTER_LABELS.syncStatus[filters.syncStatus] || filters.syncStatus
+          PRODUCT_FILTER_LABELS.syncStatus[filters.syncStatus] ||
+          filters.syncStatus
         }`,
       );
     }
@@ -638,13 +656,23 @@ export default function Products() {
 
   const getSyncStatusIcon = (variant) => {
     if (variant.pending_sync) {
-      return <Clock size={16} className="text-yellow-500" title="Pending sync" />;
+      return (
+        <Clock size={16} className="text-yellow-500" title="Pending sync" />
+      );
     }
     if (variant.sync_error) {
-      return <AlertCircle size={16} className="text-red-500" title={variant.sync_error} />;
+      return (
+        <AlertCircle
+          size={16}
+          className="text-red-500"
+          title={variant.sync_error}
+        />
+      );
     }
     if (variant.last_synced_at) {
-      return <CheckCircle size={16} className="text-green-500" title="Synced" />;
+      return (
+        <CheckCircle size={16} className="text-green-500" title="Synced" />
+      );
     }
     return null;
   };
@@ -677,7 +705,10 @@ export default function Products() {
       };
 
       if (!target.key || (!target.sku && !target.barcode)) {
-        showNotification("This variant does not have a printable SKU or barcode", "error");
+        showNotification(
+          "This variant does not have a printable SKU or barcode",
+          "error",
+        );
         return;
       }
 
@@ -712,7 +743,8 @@ export default function Products() {
             <div>
               <h1 className="text-3xl font-bold text-slate-900">Products</h1>
               <p className="text-slate-600">
-                Products and variants are separated clearly so filters and totals stay easy to read.
+                Products and variants are separated clearly so filters and
+                totals stay easy to read.
               </p>
               {lastUpdatedAt && (
                 <p className="mt-2 text-xs text-slate-500">
@@ -739,7 +771,9 @@ export default function Products() {
           {loadStatus.message && (
             <div className="bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 text-sm text-sky-800 flex items-center justify-between gap-3">
               <span>{loadStatus.message}</span>
-              {loadStatus.active && <span className="text-xs text-sky-600">Updating...</span>}
+              {loadStatus.active && (
+                <span className="text-xs text-sky-600">Updating...</span>
+              )}
             </div>
           )}
 
@@ -753,10 +787,12 @@ export default function Products() {
                   <p className="text-sm font-semibold">
                     {formatNumber(summary.lowStock, {
                       maximumFractionDigits: 0,
-                    })} low-stock variants need follow-up
+                    })}{" "}
+                    low-stock variants need follow-up
                   </p>
                   <p className="mt-1 text-xs text-amber-800/90">
-                    Focus this view on products below the stock threshold to restock faster.
+                    Focus this view on products below the stock threshold to
+                    restock faster.
                   </p>
                 </div>
               </div>
@@ -824,9 +860,12 @@ export default function Products() {
           <div className="bg-white rounded-xl shadow p-4 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">Product & Variant Filters</h2>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Product & Variant Filters
+                </h2>
                 <p className="text-sm text-slate-500">
-                  Filters apply to the variant cards and product totals update with them.
+                  Filters apply to the variant cards and product totals update
+                  with them.
                 </p>
               </div>
               <button
@@ -841,26 +880,39 @@ export default function Products() {
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                 <span>
-                  Showing <strong>{formatNumber(catalogCounts.filteredProducts, {
-                    maximumFractionDigits: 0,
-                  })}</strong> products
+                  Showing{" "}
+                  <strong>
+                    {formatNumber(catalogCounts.filteredProducts, {
+                      maximumFractionDigits: 0,
+                    })}
+                  </strong>{" "}
+                  products
                 </span>
                 <span>
-                  and <strong>{formatNumber(catalogCounts.filteredVariants, {
-                    maximumFractionDigits: 0,
-                  })}</strong> variants
+                  and{" "}
+                  <strong>
+                    {formatNumber(catalogCounts.filteredVariants, {
+                      maximumFractionDigits: 0,
+                    })}
+                  </strong>{" "}
+                  variants
                 </span>
                 <span className="text-slate-500">
-                  from {formatNumber(catalogCounts.totalProducts, {
+                  from{" "}
+                  {formatNumber(catalogCounts.totalProducts, {
                     maximumFractionDigits: 0,
-                  })} total products / {formatNumber(catalogCounts.totalVariants, {
+                  })}{" "}
+                  total products /{" "}
+                  {formatNumber(catalogCounts.totalVariants, {
                     maximumFractionDigits: 0,
-                  })} total variants
+                  })}{" "}
+                  total variants
                 </span>
               </div>
               {normalizedUpdatedRange.wasSwapped && (
                 <p className="mt-2 text-xs text-amber-700">
-                  Date range was auto-corrected because From Date was later than To Date.
+                  Date range was auto-corrected because From Date was later than
+                  To Date.
                 </p>
               )}
               {activeFilterChips.length > 0 && (
@@ -879,9 +931,14 @@ export default function Products() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
               <div className="xl:col-span-2">
-                <label className="block text-xs text-slate-500 mb-1">Search</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Search
+                </label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                  <Search
+                    className="absolute left-3 top-2.5 text-slate-400"
+                    size={16}
+                  />
                   <input
                     type="text"
                     placeholder="Product, variant, SKU, barcode..."
@@ -895,10 +952,14 @@ export default function Products() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Vendor</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Vendor
+                </label>
                 <select
                   value={filters.vendor}
-                  onChange={(event) => handleFilterChange("vendor", event.target.value)}
+                  onChange={(event) =>
+                    handleFilterChange("vendor", event.target.value)
+                  }
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
                 >
                   <option value="all">All</option>
@@ -911,7 +972,9 @@ export default function Products() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Type</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Type
+                </label>
                 <select
                   value={filters.productType}
                   onChange={(event) =>
@@ -929,7 +992,9 @@ export default function Products() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Stock</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Stock
+                </label>
                 <select
                   value={filters.stockStatus}
                   onChange={(event) =>
@@ -945,7 +1010,9 @@ export default function Products() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Sync</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Sync
+                </label>
                 <select
                   value={filters.syncStatus}
                   onChange={(event) =>
@@ -962,27 +1029,37 @@ export default function Products() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Price Min</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Price Min
+                </label>
                 <input
                   type="number"
                   value={filters.minPrice}
-                  onChange={(event) => handleFilterChange("minPrice", event.target.value)}
+                  onChange={(event) =>
+                    handleFilterChange("minPrice", event.target.value)
+                  }
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Price Max</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Price Max
+                </label>
                 <input
                   type="number"
                   value={filters.maxPrice}
-                  onChange={(event) => handleFilterChange("maxPrice", event.target.value)}
+                  onChange={(event) =>
+                    handleFilterChange("maxPrice", event.target.value)
+                  }
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Inventory Min</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Inventory Min
+                </label>
                 <input
                   type="number"
                   value={filters.minInventory}
@@ -994,7 +1071,9 @@ export default function Products() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Inventory Max</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Inventory Max
+                </label>
                 <input
                   type="number"
                   value={filters.maxInventory}
@@ -1006,7 +1085,9 @@ export default function Products() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Updated From</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Updated From
+                </label>
                 <input
                   type="date"
                   value={filters.updatedFrom}
@@ -1018,7 +1099,9 @@ export default function Products() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Updated To</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Updated To
+                </label>
                 <input
                   type="date"
                   value={filters.updatedTo}
@@ -1030,10 +1113,14 @@ export default function Products() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Sort</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Sort
+                </label>
                 <select
                   value={filters.sortBy}
-                  onChange={(event) => handleFilterChange("sortBy", event.target.value)}
+                  onChange={(event) =>
+                    handleFilterChange("sortBy", event.target.value)
+                  }
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
                 >
                   <option value="updated_desc">Newest updates</option>
@@ -1049,7 +1136,9 @@ export default function Products() {
 
               {isAdmin && (
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">Profitability</label>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    Profitability
+                  </label>
                   <select
                     value={filters.profitability}
                     onChange={(event) =>
@@ -1084,7 +1173,10 @@ export default function Products() {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       {Array.from({ length: 4 }).map((__, detailIndex) => (
-                        <div key={`product-skeleton-detail-${index}-${detailIndex}`} className="space-y-2">
+                        <div
+                          key={`product-skeleton-detail-${index}-${detailIndex}`}
+                          className="space-y-2"
+                        >
                           <SkeletonBlock className="h-3 w-14" />
                           <SkeletonBlock className="h-4 w-20" />
                         </div>
@@ -1095,8 +1187,14 @@ export default function Products() {
                       <SkeletonBlock className="h-4 w-4/5" />
                     </div>
                     <div className="flex gap-2">
-                      <SkeletonBlock className="h-10 flex-1 rounded-lg" roundedClassName="" />
-                      <SkeletonBlock className="h-10 flex-1 rounded-lg" roundedClassName="" />
+                      <SkeletonBlock
+                        className="h-10 flex-1 rounded-lg"
+                        roundedClassName=""
+                      />
+                      <SkeletonBlock
+                        className="h-10 flex-1 rounded-lg"
+                        roundedClassName=""
+                      />
                     </div>
                   </div>
                 </div>
@@ -1143,7 +1241,10 @@ export default function Products() {
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 text-sm">
-                      <DetailItem label="Price" value={formatAmount(variant.price)} />
+                      <DetailItem
+                        label="Price"
+                        value={formatAmount(variant.price)}
+                      />
                       <DetailItem
                         label="Stock"
                         value={formatNumber(variant.inventory_quantity, {
@@ -1158,7 +1259,10 @@ export default function Products() {
                         }
                       />
                       <DetailItem label="SKU" value={variant.sku || "-"} />
-                      <DetailItem label="Updated" value={formatDateTime(variant.updated_at)} />
+                      <DetailItem
+                        label="Updated"
+                        value={formatDateTime(variant.updated_at)}
+                      />
                     </div>
 
                     {(variant.vendor || variant.barcode) && (
@@ -1166,7 +1270,9 @@ export default function Products() {
                         {variant.vendor && (
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-slate-500">Vendor</span>
-                            <span className="font-medium text-right">{variant.vendor}</span>
+                            <span className="font-medium text-right">
+                              {variant.vendor}
+                            </span>
                           </div>
                         )}
                         {variant.barcode && (
@@ -1193,14 +1299,15 @@ export default function Products() {
                       </div>
                     )}
 
-                    {variant.compare_at_price && toNumber(variant.compare_at_price) > 0 && (
-                      <div className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600">
-                        Compare at:{" "}
-                        <span className="font-semibold text-slate-900">
-                          {formatAmount(variant.compare_at_price)}
-                        </span>
-                      </div>
-                    )}
+                    {variant.compare_at_price &&
+                      toNumber(variant.compare_at_price) > 0 && (
+                        <div className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600">
+                          Compare at:{" "}
+                          <span className="font-semibold text-slate-900">
+                            {formatAmount(variant.compare_at_price)}
+                          </span>
+                        </div>
+                      )}
 
                     {isAdmin &&
                       variant.cost_price !== undefined &&
@@ -1210,7 +1317,11 @@ export default function Products() {
                             <span>Unit profit</span>
                             <span className="font-bold">
                               {formatAmount(
-                                toNumber(variant.price) - toNumber(variant.cost_price),
+                                toNumber(variant.price) -
+                                  (toNumber(variant.cost_price) +
+                                    toNumber(variant.ads_cost || 0) +
+                                    toNumber(variant.operation_cost || 0) +
+                                    toNumber(variant.shipping_cost || 0)),
                               )}
                             </span>
                           </div>
@@ -1234,7 +1345,9 @@ export default function Products() {
                       </button>
                       {canEditProducts && (
                         <button
-                          onClick={() => openProductWorkspace(variant.id, "edit")}
+                          onClick={() =>
+                            openProductWorkspace(variant.id, "edit")
+                          }
                           className="flex-1 bg-sky-600 hover:bg-sky-700 text-white py-2 rounded-lg flex items-center justify-center gap-2 text-sm"
                         >
                           <Edit2 size={14} />
@@ -1249,7 +1362,9 @@ export default function Products() {
               <div className="col-span-full bg-white rounded-xl shadow p-10 text-center text-slate-500">
                 <Package size={52} className="mx-auto mb-3 text-slate-300" />
                 <p className="font-semibold mb-1">No matching products found</p>
-                <p className="text-sm">Try adjusting the filters or reset them.</p>
+                <p className="text-sm">
+                  Try adjusting the filters or reset them.
+                </p>
               </div>
             )}
           </div>
@@ -1284,7 +1399,9 @@ function DetailItem({ label, value, valueClassName = "" }) {
   return (
     <div className="rounded-lg bg-slate-50 p-3">
       <p className="text-xs text-slate-500">{label}</p>
-      <p className={`mt-1 font-semibold text-slate-900 break-words ${valueClassName}`}>
+      <p
+        className={`mt-1 font-semibold text-slate-900 break-words ${valueClassName}`}
+      >
         {value}
       </p>
     </div>

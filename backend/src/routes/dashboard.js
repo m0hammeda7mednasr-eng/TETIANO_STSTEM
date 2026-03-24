@@ -376,10 +376,16 @@ const buildAnalyticsTrends = (orders = [], rawFilters = {}) => {
   const lastBucketStart =
     granularity === "day" ? startOfDateDay(to) : startOfMonth(to);
 
-  while (cursor && lastBucketStart && cursor.getTime() <= lastBucketStart.getTime()) {
+  while (
+    cursor &&
+    lastBucketStart &&
+    cursor.getTime() <= lastBucketStart.getTime()
+  ) {
     const bucketStart = cloneDate(cursor);
     const rawBucketEnd =
-      granularity === "day" ? endOfDateDay(bucketStart) : endOfMonth(bucketStart);
+      granularity === "day"
+        ? endOfDateDay(bucketStart)
+        : endOfMonth(bucketStart);
     const bucketRangeStart =
       bucketStart.getTime() < from.getTime() ? from : bucketStart;
     const bucketRangeEnd =
@@ -415,8 +421,7 @@ const buildAnalyticsTrends = (orders = [], rawFilters = {}) => {
       refunded: bucketOrders.filter((order) => isRefundedOrder(order)).length,
     });
 
-    cursor =
-      granularity === "day" ? addDays(cursor, 1) : addMonths(cursor, 1);
+    cursor = granularity === "day" ? addDays(cursor, 1) : addMonths(cursor, 1);
   }
 
   return {
@@ -476,7 +481,8 @@ const getLowStockProducts = (products = []) =>
     .filter((product) => product?.id && isLowStockProduct(product))
     .sort((left, right) => {
       const quantityDiff =
-        toNumber(left?.inventory_quantity) - toNumber(right?.inventory_quantity);
+        toNumber(left?.inventory_quantity) -
+        toNumber(right?.inventory_quantity);
       if (quantityDiff !== 0) {
         return quantityDiff;
       }
@@ -493,7 +499,8 @@ const countLowStockProducts = (products = []) =>
     .length;
 
 const buildLowStockNotificationDraft = (product, userId) => {
-  const productTitle = String(product?.title || "").trim() || "Untitled product";
+  const productTitle =
+    String(product?.title || "").trim() || "Untitled product";
   const quantity = toNumber(product?.inventory_quantity);
 
   return {
@@ -504,7 +511,9 @@ const buildLowStockNotificationDraft = (product, userId) => {
     entity_type: "product",
     entity_id: product?.id || null,
     metadata: {
-      route: product?.id ? `/products/${product.id}` : "/products?stockStatus=low_stock",
+      route: product?.id
+        ? `/products/${product.id}`
+        : "/products?stockStatus=low_stock",
       product_id: product?.id || null,
       product_title: productTitle,
       inventory_quantity: quantity,
@@ -534,7 +543,12 @@ const getLowStockNotificationRecipients = async () => {
   }
 
   const nonAdminIds = activeUsers
-    .filter((user) => String(user?.role || "").trim().toLowerCase() !== "admin")
+    .filter(
+      (user) =>
+        String(user?.role || "")
+          .trim()
+          .toLowerCase() !== "admin",
+    )
     .map((user) => user.id);
 
   let permissionByUserId = new Map();
@@ -566,7 +580,10 @@ const getLowStockNotificationRecipients = async () => {
       continue;
     }
 
-    const isAdmin = String(user?.role || "").trim().toLowerCase() === "admin";
+    const isAdmin =
+      String(user?.role || "")
+        .trim()
+        .toLowerCase() === "admin";
     if (!isAdmin) {
       const permissions = permissionByUserId.get(userId);
       if (!permissions?.canViewProducts && !permissions?.canEditProducts) {
@@ -1241,12 +1258,8 @@ router.get("/stats", authenticateToken, async (req, res) => {
     ]);
 
     const filteredOrders = filterOrdersByScope(orders, req.query || {});
-    const {
-      saleOrders,
-      totalOrderValue,
-      totalSales,
-      pendingOrderValue,
-    } = calculateDashboardOrderStats(filteredOrders);
+    const { saleOrders, totalOrderValue, totalSales, pendingOrderValue } =
+      calculateDashboardOrderStats(filteredOrders);
     const lowStockProductsCount = countLowStockProducts(products);
     const filteredEntitySummary = hasScopedOrderFilters
       ? buildFilteredOrderEntitySummary(filteredOrders)
@@ -1273,7 +1286,10 @@ router.get("/stats", authenticateToken, async (req, res) => {
 
     rememberCacheEntry(dashboardStatsCache, cacheKey, payload);
     ensureLowStockNotifications(products).catch((notificationError) => {
-      console.error("Low-stock notification dispatch failed:", notificationError);
+      console.error(
+        "Low-stock notification dispatch failed:",
+        notificationError,
+      );
     });
     res.json(payload);
   } catch (error) {
@@ -1613,7 +1629,11 @@ router.get(
         });
 
         const unitCost = toNumber(product.cost_price);
-        const totalCost = unitCost * soldQuantity;
+        const adsCost = toNumber(product.ads_cost || 0);
+        const operationCost = toNumber(product.operation_cost || 0);
+        const shippingCost = toNumber(product.shipping_cost || 0);
+        const totalUnitCost = unitCost + adsCost + operationCost + shippingCost;
+        const totalCost = totalUnitCost * soldQuantity;
         const grossProfit = totalRevenue - totalCost;
 
         const operationalCosts = costsByProductId.get(product.id) || [];
@@ -1748,11 +1768,24 @@ router.put(
   async (req, res) => {
     try {
       const { id } = req.params;
-      const { cost_price } = req.body;
+      const { cost_price, ads_cost, operation_cost, shipping_cost } = req.body;
 
-      const { data, error } = await Product.update(id, {
-        cost_price: toNumber(cost_price),
-      });
+      const updateData = {};
+
+      if (cost_price !== undefined) {
+        updateData.cost_price = toNumber(cost_price);
+      }
+      if (ads_cost !== undefined) {
+        updateData.ads_cost = toNumber(ads_cost);
+      }
+      if (operation_cost !== undefined) {
+        updateData.operation_cost = toNumber(operation_cost);
+      }
+      if (shipping_cost !== undefined) {
+        updateData.shipping_cost = toNumber(shipping_cost);
+      }
+
+      const { data, error } = await Product.update(id, updateData);
 
       if (error) {
         return res.status(500).json({ error: error.message });
@@ -1760,8 +1793,8 @@ router.put(
 
       res.json(data);
     } catch (error) {
-      console.error("Update product cost price error:", error);
-      res.status(500).json({ error: "Failed to update cost price" });
+      console.error("Update product cost fields error:", error);
+      res.status(500).json({ error: "Failed to update cost fields" });
     }
   },
 );

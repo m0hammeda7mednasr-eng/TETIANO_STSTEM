@@ -87,7 +87,12 @@ export const getProfitabilityState = (item) => {
     item.cost_price !== "";
   if (!hasCost) return "no_cost";
 
-  const profit = toNumber(item.price) - toNumber(item.cost_price);
+  const totalCost =
+    toNumber(item.cost_price) +
+    toNumber(item.ads_cost || 0) +
+    toNumber(item.operation_cost || 0) +
+    toNumber(item.shipping_cost || 0);
+  const profit = toNumber(item.price) - totalCost;
   if (profit > 0) return "profitable";
   if (profit < 0) return "loss";
   return "break_even";
@@ -104,7 +109,9 @@ export const getVariantTitle = (product, variant, index) => {
     return "Default Variant";
   }
 
-  const productTitle = String(product?.title || "").trim().toLowerCase();
+  const productTitle = String(product?.title || "")
+    .trim()
+    .toLowerCase();
   if (productTitle && normalizedTitle === productTitle) {
     return "Default Variant";
   }
@@ -114,21 +121,23 @@ export const getVariantTitle = (product, variant, index) => {
 
 export const buildVariantRows = (products, isAdmin) =>
   (Array.isArray(products) ? products : []).flatMap((product) => {
-    const variants = Array.isArray(product?.variants) && product.variants.length > 0
-      ? product.variants
-      : [
-          {
-            id: null,
-            title: product?.title || "Default Variant",
-            price: product?.price ?? 0,
-            cost_price: product?.cost_price ?? null,
-            sku: product?.sku || "",
-            inventory_quantity: product?.inventory_quantity ?? 0,
-            image_url: product?.image_url || "",
-            updated_at: product?.updated_at || product?.local_updated_at || null,
-            created_at: product?.created_at || null,
-          },
-        ];
+    const variants =
+      Array.isArray(product?.variants) && product.variants.length > 0
+        ? product.variants
+        : [
+            {
+              id: null,
+              title: product?.title || "Default Variant",
+              price: product?.price ?? 0,
+              cost_price: product?.cost_price ?? null,
+              sku: product?.sku || "",
+              inventory_quantity: product?.inventory_quantity ?? 0,
+              image_url: product?.image_url || "",
+              updated_at:
+                product?.updated_at || product?.local_updated_at || null,
+              created_at: product?.created_at || null,
+            },
+          ];
 
     const hasMultipleVariants =
       Boolean(product?.has_multiple_variants) || variants.length > 1;
@@ -140,7 +149,7 @@ export const buildVariantRows = (products, isAdmin) =>
       );
       const price = variant?.price ?? product?.price ?? 0;
       const costPrice = isAdmin
-        ? variant?.cost_price ?? variant?.cost ?? product?.cost_price ?? null
+        ? (variant?.cost_price ?? variant?.cost ?? product?.cost_price ?? null)
         : undefined;
       const updatedAt =
         variant?.updated_at ||
@@ -149,7 +158,11 @@ export const buildVariantRows = (products, isAdmin) =>
         product?.updated_at ||
         product?.created_at ||
         null;
-      const optionValues = [variant?.option1, variant?.option2, variant?.option3]
+      const optionValues = [
+        variant?.option1,
+        variant?.option2,
+        variant?.option3,
+      ]
         .map((value) => String(value || "").trim())
         .filter(Boolean);
 
@@ -167,6 +180,15 @@ export const buildVariantRows = (products, isAdmin) =>
         price,
         compare_at_price: variant?.compare_at_price ?? null,
         cost_price: costPrice,
+        ads_cost: isAdmin
+          ? (variant?.ads_cost ?? product?.ads_cost ?? null)
+          : undefined,
+        operation_cost: isAdmin
+          ? (variant?.operation_cost ?? product?.operation_cost ?? null)
+          : undefined,
+        shipping_cost: isAdmin
+          ? (variant?.shipping_cost ?? product?.shipping_cost ?? null)
+          : undefined,
         inventory_quantity: inventoryQuantity,
         total_inventory: toNumber(
           product?.total_inventory ?? product?.inventory_quantity ?? 0,
@@ -199,13 +221,17 @@ export const buildCatalogCounts = (variantRows = [], filteredVariants = []) => {
     variantRows.map((variant) => String(variant?.id || "")).filter(Boolean),
   );
   const filteredProducts = new Set(
-    filteredVariants.map((variant) => String(variant?.id || "")).filter(Boolean),
+    filteredVariants
+      .map((variant) => String(variant?.id || ""))
+      .filter(Boolean),
   );
 
   return {
     totalProducts: allProducts.size,
     totalVariants: Array.isArray(variantRows) ? variantRows.length : 0,
     filteredProducts: filteredProducts.size,
-    filteredVariants: Array.isArray(filteredVariants) ? filteredVariants.length : 0,
+    filteredVariants: Array.isArray(filteredVariants)
+      ? filteredVariants.length
+      : 0,
   };
 };

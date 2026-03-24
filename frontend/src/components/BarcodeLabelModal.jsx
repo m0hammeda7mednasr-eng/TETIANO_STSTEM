@@ -461,11 +461,12 @@ export default function BarcodeLabelModal({
         ...prev,
         ...updates,
       }));
-      alert(
-        `✅ تم نسخ ${updatedCount} SKU إلى Extra line 1\nدلوقتي تقدر تغير الـ SKUs والـ Extra line 1 مش هيتأثر`,
+      // Use console.log instead of alert to avoid console errors
+      console.log(
+        `✅ تم نسخ ${updatedCount} SKU إلى Extra line 1 - دلوقتي تقدر تغير الـ SKUs والـ Extra line 1 مش هيتأثر`,
       );
     } else {
-      alert("ℹ️ كل المنتجات عندها Extra line 1 محفوظ بالفعل");
+      console.log("ℹ️ كل المنتجات عندها Extra line 1 محفوظ بالفعل");
     }
   };
 

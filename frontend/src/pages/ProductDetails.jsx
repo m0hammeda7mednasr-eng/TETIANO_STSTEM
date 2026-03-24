@@ -1137,63 +1137,182 @@ export default function ProductDetails() {
                     </>
                   )}
 
+                  {/* Live Profit Preview During Editing */}
+                  {isAdmin &&
+                    editing &&
+                    editedProduct.price &&
+                    editedProduct.cost_price && (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                          <span className="text-sm font-semibold text-emerald-800">
+                            معاينة الربح المباشرة
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <span className="text-xs text-emerald-700">
+                              ربح القطعة
+                            </span>
+                            <div className="text-lg font-bold text-emerald-900">
+                              {(
+                                parseFloat(editedProduct.price) -
+                                (parseFloat(editedProduct.cost_price || 0) +
+                                  parseFloat(editedProduct.ads_cost || 0) +
+                                  parseFloat(
+                                    editedProduct.operation_cost || 0,
+                                  ) +
+                                  parseFloat(editedProduct.shipping_cost || 0))
+                              ).toFixed(2)}{" "}
+                              {currencyLabel}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-xs text-emerald-700">
+                              هامش الربح
+                            </span>
+                            <div className="text-lg font-bold text-emerald-900">
+                              {(
+                                ((parseFloat(editedProduct.price) -
+                                  (parseFloat(editedProduct.cost_price || 0) +
+                                    parseFloat(editedProduct.ads_cost || 0) +
+                                    parseFloat(
+                                      editedProduct.operation_cost || 0,
+                                    ) +
+                                    parseFloat(
+                                      editedProduct.shipping_cost || 0,
+                                    ))) /
+                                  parseFloat(editedProduct.price)) *
+                                100
+                              ).toFixed(2)}
+                              %
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                   {/* Profit Calculation */}
-                  {isAdmin && product.price && product.cost_price && (
-                    <div className="pt-4 border-t border-gray-200">
-                      <div className="bg-green-50 rounded-lg p-4 space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium text-green-800">
-                            الربح لكل وحدة:
-                          </span>
-                          <span className="text-lg font-bold text-green-900">
-                            {(
-                              parseFloat(product.price) -
-                              (parseFloat(product.cost_price || 0) +
-                                parseFloat(product.ads_cost || 0) +
-                                parseFloat(product.operation_cost || 0) +
-                                parseFloat(product.shipping_cost || 0))
-                            ).toFixed(2)}{" "}
-                            {currencyLabel}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium text-green-800">
-                            هامش الربح:
-                          </span>
-                          <span className="text-lg font-bold text-green-900">
-                            {(
-                              ((parseFloat(product.price) -
-                                (parseFloat(product.cost_price || 0) +
-                                  parseFloat(product.ads_cost || 0) +
-                                  parseFloat(product.operation_cost || 0) +
-                                  parseFloat(product.shipping_cost || 0))) /
-                                parseFloat(product.price)) *
-                              100
-                            ).toFixed(2)}
-                            %
-                          </span>
-                        </div>
-                        {displayedInventoryQuantity > 0 && (
-                          <div className="flex justify-between items-center pt-2 border-t border-green-200">
+                  {isAdmin &&
+                    (editing ? editedProduct.price : product.price) &&
+                    (editing
+                      ? editedProduct.cost_price
+                      : product.cost_price) && (
+                      <div className="pt-4 border-t border-gray-200">
+                        <div className="bg-green-50 rounded-lg p-4 space-y-2">
+                          <div className="flex justify-between items-center">
                             <span className="text-sm font-medium text-green-800">
-                              الربح المحتمل (المخزون الكلي):
+                              الربح لكل وحدة:
                             </span>
                             <span className="text-lg font-bold text-green-900">
                               {(
-                                (parseFloat(product.price) -
-                                  (parseFloat(product.cost_price || 0) +
-                                    parseFloat(product.ads_cost || 0) +
-                                    parseFloat(product.operation_cost || 0) +
-                                    parseFloat(product.shipping_cost || 0))) *
-                                displayedInventoryQuantity
+                                parseFloat(
+                                  editing ? editedProduct.price : product.price,
+                                ) -
+                                (parseFloat(
+                                  (editing
+                                    ? editedProduct.cost_price
+                                    : product.cost_price) || 0,
+                                ) +
+                                  parseFloat(
+                                    (editing
+                                      ? editedProduct.ads_cost
+                                      : product.ads_cost) || 0,
+                                  ) +
+                                  parseFloat(
+                                    (editing
+                                      ? editedProduct.operation_cost
+                                      : product.operation_cost) || 0,
+                                  ) +
+                                  parseFloat(
+                                    (editing
+                                      ? editedProduct.shipping_cost
+                                      : product.shipping_cost) || 0,
+                                  ))
                               ).toFixed(2)}{" "}
                               {currencyLabel}
                             </span>
                           </div>
-                        )}
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium text-green-800">
+                              هامش الربح:
+                            </span>
+                            <span className="text-lg font-bold text-green-900">
+                              {(
+                                ((parseFloat(
+                                  editing ? editedProduct.price : product.price,
+                                ) -
+                                  (parseFloat(
+                                    (editing
+                                      ? editedProduct.cost_price
+                                      : product.cost_price) || 0,
+                                  ) +
+                                    parseFloat(
+                                      (editing
+                                        ? editedProduct.ads_cost
+                                        : product.ads_cost) || 0,
+                                    ) +
+                                    parseFloat(
+                                      (editing
+                                        ? editedProduct.operation_cost
+                                        : product.operation_cost) || 0,
+                                    ) +
+                                    parseFloat(
+                                      (editing
+                                        ? editedProduct.shipping_cost
+                                        : product.shipping_cost) || 0,
+                                    ))) /
+                                  parseFloat(
+                                    editing
+                                      ? editedProduct.price
+                                      : product.price,
+                                  )) *
+                                100
+                              ).toFixed(2)}
+                              %
+                            </span>
+                          </div>
+                          {displayedInventoryQuantity > 0 && (
+                            <div className="flex justify-between items-center pt-2 border-t border-green-200">
+                              <span className="text-sm font-medium text-green-800">
+                                الربح المحتمل (المخزون الكلي):
+                              </span>
+                              <span className="text-lg font-bold text-green-900">
+                                {(
+                                  (parseFloat(
+                                    editing
+                                      ? editedProduct.price
+                                      : product.price,
+                                  ) -
+                                    (parseFloat(
+                                      (editing
+                                        ? editedProduct.cost_price
+                                        : product.cost_price) || 0,
+                                    ) +
+                                      parseFloat(
+                                        (editing
+                                          ? editedProduct.ads_cost
+                                          : product.ads_cost) || 0,
+                                      ) +
+                                      parseFloat(
+                                        (editing
+                                          ? editedProduct.operation_cost
+                                          : product.operation_cost) || 0,
+                                      ) +
+                                      parseFloat(
+                                        (editing
+                                          ? editedProduct.shipping_cost
+                                          : product.shipping_cost) || 0,
+                                      ))) *
+                                  displayedInventoryQuantity
+                                ).toFixed(2)}{" "}
+                                {currencyLabel}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">

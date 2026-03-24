@@ -17,6 +17,15 @@ export default function ProductEditModal({
   const [costPrice, setCostPrice] = useState(
     canEditCost ? product.cost_price || "" : "",
   );
+  const [adsCost, setAdsCost] = useState(
+    canEditCost ? product.ads_cost || "" : "",
+  );
+  const [operationCost, setOperationCost] = useState(
+    canEditCost ? product.operation_cost || "" : "",
+  );
+  const [shippingCost, setShippingCost] = useState(
+    canEditCost ? product.shipping_cost || "" : "",
+  );
   const [inventory, setInventory] = useState(
     product.total_inventory ?? product.inventory_quantity ?? "",
   );
@@ -25,8 +34,13 @@ export default function ProductEditModal({
 
   const profit = useMemo(() => {
     if (!canEditCost || !price || !costPrice) return "0.00";
-    return (parseFloat(price) - parseFloat(costPrice)).toFixed(2);
-  }, [canEditCost, price, costPrice]);
+    const totalCost =
+      parseFloat(costPrice || 0) +
+      parseFloat(adsCost || 0) +
+      parseFloat(operationCost || 0) +
+      parseFloat(shippingCost || 0);
+    return (parseFloat(price) - totalCost).toFixed(2);
+  }, [canEditCost, price, costPrice, adsCost, operationCost, shippingCost]);
 
   const profitMargin = useMemo(() => {
     if (!canEditCost || !price || !costPrice || parseFloat(price) <= 0) {
@@ -51,6 +65,9 @@ export default function ProductEditModal({
 
       if (canEditCost) {
         payload.cost_price = parseFloat(costPrice || 0);
+        payload.ads_cost = parseFloat(adsCost || 0);
+        payload.operation_cost = parseFloat(operationCost || 0);
+        payload.shipping_cost = parseFloat(shippingCost || 0);
       }
 
       await onSave(payload);
@@ -136,17 +153,63 @@ export default function ProductEditModal({
             </Field>
 
             {canEditCost && (
-              <Field label={`${select("سعر التكلفة", "Cost price")} (${CURRENCY_LABEL})`}>
-                <input
-                  type="number"
-                  value={costPrice}
-                  onChange={(event) => setCostPrice(event.target.value)}
-                  min="0"
-                  step="0.01"
-                  className="app-input px-4 py-3 text-sm"
-                  placeholder="0.00"
-                />
-              </Field>
+              <>
+                <Field
+                  label={`${select("سعر التكلفة", "Cost price")} (${CURRENCY_LABEL})`}
+                >
+                  <input
+                    type="number"
+                    value={costPrice}
+                    onChange={(event) => setCostPrice(event.target.value)}
+                    min="0"
+                    step="0.01"
+                    className="app-input px-4 py-3 text-sm"
+                    placeholder="0.00"
+                  />
+                </Field>
+
+                <Field
+                  label={`${select("تكلفة الإعلانات", "Ads cost")} (${CURRENCY_LABEL})`}
+                >
+                  <input
+                    type="number"
+                    value={adsCost}
+                    onChange={(event) => setAdsCost(event.target.value)}
+                    min="0"
+                    step="0.01"
+                    className="app-input px-4 py-3 text-sm"
+                    placeholder="0.00"
+                  />
+                </Field>
+
+                <Field
+                  label={`${select("تكلفة التشغيل", "Operation cost")} (${CURRENCY_LABEL})`}
+                >
+                  <input
+                    type="number"
+                    value={operationCost}
+                    onChange={(event) => setOperationCost(event.target.value)}
+                    min="0"
+                    step="0.01"
+                    className="app-input px-4 py-3 text-sm"
+                    placeholder="0.00"
+                  />
+                </Field>
+
+                <Field
+                  label={`${select("تكلفة الشحن", "Shipping cost")} (${CURRENCY_LABEL})`}
+                >
+                  <input
+                    type="number"
+                    value={shippingCost}
+                    onChange={(event) => setShippingCost(event.target.value)}
+                    min="0"
+                    step="0.01"
+                    className="app-input px-4 py-3 text-sm"
+                    placeholder="0.00"
+                  />
+                </Field>
+              </>
             )}
 
             <Field
@@ -260,7 +323,9 @@ export default function ProductEditModal({
 function Field({ children, label }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-medium text-slate-700">{label}</span>
+      <span className="mb-2 block text-sm font-medium text-slate-700">
+        {label}
+      </span>
       {children}
     </label>
   );

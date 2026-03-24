@@ -71,6 +71,9 @@ const PRODUCT_LIST_SELECT = [
   "product_type",
   "price",
   "cost_price",
+  "ads_cost",
+  "operation_cost",
+  "shipping_cost",
   "sku",
   "image_url",
   "inventory_quantity",
@@ -1024,7 +1027,14 @@ const sanitizeVariantForRole = (variant, isAdmin) => {
     return variant;
   }
 
-  const { cost, cost_price, ...safeVariant } = variant;
+  const {
+    cost,
+    cost_price,
+    ads_cost,
+    operation_cost,
+    shipping_cost,
+    ...safeVariant
+  } = variant;
   return safeVariant;
 };
 
@@ -1033,7 +1043,14 @@ const sanitizeProductForRole = (product, isAdmin) => {
     return product;
   }
 
-  const { cost_price, data, ...safeProduct } = product;
+  const {
+    cost_price,
+    ads_cost,
+    operation_cost,
+    shipping_cost,
+    data,
+    ...safeProduct
+  } = product;
 
   if (Array.isArray(safeProduct.variants)) {
     safeProduct.variants = safeProduct.variants.map((variant) =>

@@ -431,6 +431,7 @@ export default function BarcodeLabelModal({
         },
       }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTarget?.key, customFooterLines]); // Only depend on target key and custom lines
 
   // Save custom footer lines when they change

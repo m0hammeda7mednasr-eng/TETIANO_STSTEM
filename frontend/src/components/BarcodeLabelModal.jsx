@@ -272,7 +272,6 @@ export default function BarcodeLabelModal({
     savedCustomFooterLines,
   );
   const [printError, setPrintError] = useState("");
-  const processedTargets = useRef(new Set());
 
   const normalizedTargets = useMemo(
     () =>
@@ -409,31 +408,6 @@ export default function BarcodeLabelModal({
     savedSettings.footerLine2,
   ]);
 
-  // Auto-populate Extra line 1 with SKU when target changes (but only if not manually edited)
-  useEffect(() => {
-    if (!selectedTarget) return;
-
-    const targetKey = selectedTarget.key;
-    const customLines = customFooterLines[targetKey];
-
-    // If this target doesn't have any custom lines saved yet AND we haven't processed it before, auto-populate with SKU
-    if (
-      !customLines &&
-      selectedTarget.sku &&
-      !processedTargets.current.has(targetKey)
-    ) {
-      processedTargets.current.add(targetKey);
-      setCustomFooterLines((prev) => ({
-        ...prev,
-        [targetKey]: {
-          line1: selectedTarget.sku,
-          hasCustomLine1: false, // Mark as auto-populated, not manually edited
-        },
-      }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTarget?.key, customFooterLines]); // Only depend on target key and custom lines
-
   // Save custom footer lines when they change
   useEffect(() => {
     writeCustomFooterLines(customFooterLines);
@@ -448,7 +422,6 @@ export default function BarcodeLabelModal({
       [selectedTarget.key]: {
         ...prev[selectedTarget.key],
         line1: value,
-        hasCustomLine1: true, // Mark that user has manually edited this line
       },
     }));
   };

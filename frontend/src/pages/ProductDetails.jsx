@@ -71,20 +71,20 @@ const buildSaveMessage = (result = {}) => {
     : [];
 
   if (shopifyFields.length > 0 && localOnlyFields.length > 0) {
-    return `Saved. ${formatFieldList(shopifyFields)} synced to Shopify. ${formatFieldList(localOnlyFields)} saved locally only.`;
+    return `✅ تم الحفظ بنجاح! ${formatFieldList(shopifyFields)} تم مزامنتها مع Shopify. ${formatFieldList(localOnlyFields)} تم حفظها محلياً فقط.`;
   }
 
   if (shopifyFields.length > 0) {
-    return `Saved. ${formatFieldList(shopifyFields)} synced to Shopify.`;
+    return `✅ تم الحفظ والمزامنة مع Shopify بنجاح! تم تحديث: ${formatFieldList(shopifyFields)}`;
   }
 
   if (localOnlyFields.length > 0) {
-    return `Saved. ${formatFieldList(localOnlyFields)} saved locally only.`;
+    return `✅ تم الحفظ محلياً بنجاح! تم تحديث: ${formatFieldList(localOnlyFields)}`;
   }
 
   return result?.shopifySync === "synced"
-    ? "Saved and synced to Shopify."
-    : "Saved locally.";
+    ? "✅ تم الحفظ والمزامنة مع Shopify بنجاح!"
+    : "✅ تم الحفظ محلياً بنجاح!";
 };
 
 const cloneVariantDrafts = (variants = []) =>
@@ -185,7 +185,9 @@ export default function ProductDetails() {
 
   const showNotification = useCallback((message, type = "info") => {
     setNotification({ message, type });
-    setTimeout(() => setNotification(null), 5000);
+    // Increase timeout for better visibility, especially for success messages
+    const timeout = type === "success" ? 8000 : 5000;
+    setTimeout(() => setNotification(null), timeout);
   }, []);
 
   const fetchProductDetails = useCallback(async () => {
@@ -365,7 +367,24 @@ export default function ProductDetails() {
         payload,
       );
       const saveResult = response.data || {};
-      showNotification(buildSaveMessage(saveResult), "success");
+
+      // Show detailed success message
+      const updatedFields = Object.keys(payload).filter(
+        (key) => key !== "variant_updates",
+      );
+      const variantUpdatesCount = payload.variant_updates
+        ? payload.variant_updates.length
+        : 0;
+
+      let detailedMessage = buildSaveMessage(saveResult);
+      if (updatedFields.length > 0) {
+        detailedMessage += ` تم تحديث: ${updatedFields.join(", ")}`;
+      }
+      if (variantUpdatesCount > 0) {
+        detailedMessage += ` وتم تحديث ${variantUpdatesCount} متغير`;
+      }
+
+      showNotification(detailedMessage, "success");
       setEditing(false);
 
       if (saveResult.shopifySync === "synced") {
@@ -519,17 +538,20 @@ export default function ProductDetails() {
           {/* Notification */}
           {notification && (
             <div
-              className={`fixed top-4 right-4 z-50 px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 ${
+              className={`fixed top-4 right-4 z-50 px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 border-2 animate-in slide-in-from-right-5 duration-300 ${
                 notification.type === "success"
-                  ? "bg-green-500 text-white"
+                  ? "bg-emerald-500 text-white border-emerald-400"
                   : notification.type === "error"
-                    ? "bg-red-500 text-white"
-                    : "bg-blue-500 text-white"
+                    ? "bg-red-500 text-white border-red-400"
+                    : "bg-blue-500 text-white border-blue-400"
               }`}
+              style={{ minWidth: "320px", maxWidth: "500px" }}
             >
-              {notification.type === "success" && <CheckCircle size={20} />}
-              {notification.type === "error" && <AlertCircle size={20} />}
-              <span>{notification.message}</span>
+              {notification.type === "success" && <CheckCircle size={24} />}
+              {notification.type === "error" && <AlertCircle size={24} />}
+              <span className="text-sm font-medium leading-relaxed">
+                {notification.message}
+              </span>
             </div>
           )}
 

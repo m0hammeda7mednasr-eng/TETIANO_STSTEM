@@ -3468,7 +3468,9 @@ router.get(
   async (req, res) => {
     try {
       const searchAllHistoryRequested =
-        String(req.query.search_all || "").toLowerCase().trim() === "true";
+        String(req.query.search_all || "")
+          .toLowerCase()
+          .trim() === "true";
       const searchAllHistory =
         searchAllHistoryRequested && hasActiveOrderScopeFilters(req.query);
       const pagination = searchAllHistory
@@ -3523,10 +3525,13 @@ router.get(
       if (searchAllHistory) {
         const scopedRowsResult = await getScopedEntityRows(req, Order);
         if (scopedRowsResult?.error) {
-          console.error("Error fetching full-history orders search:", scopedRowsResult.error);
-          return res
-            .status(500)
-            .json({ error: scopedRowsResult.error.message || "Failed to search orders" });
+          console.error(
+            "Error fetching full-history orders search:",
+            scopedRowsResult.error,
+          );
+          return res.status(500).json({
+            error: scopedRowsResult.error.message || "Failed to search orders",
+          });
         }
 
         let matchedOrders = applyOrdersQueryFilters(
@@ -3539,14 +3544,19 @@ router.get(
         ).map((order) => buildOrderListItem(order));
         let searchScope = "full_history";
 
-        if (matchedOrders.length === 0 && String(req.query.search || "").trim()) {
+        if (
+          matchedOrders.length === 0 &&
+          String(req.query.search || "").trim()
+        ) {
           try {
-            const shopifyFallbackOrders = await searchOrdersFromShopifyFallback({
-              req,
-              requestedStoreId,
-              isAdmin,
-              searchTerm: req.query.search,
-            });
+            const shopifyFallbackOrders = await searchOrdersFromShopifyFallback(
+              {
+                req,
+                requestedStoreId,
+                isAdmin,
+                searchTerm: req.query.search,
+              },
+            );
 
             if (shopifyFallbackOrders.length > 0) {
               matchedOrders = applyOrdersQueryFilters(
@@ -3950,6 +3960,9 @@ router.post(
       const {
         price,
         cost_price,
+        ads_cost,
+        operation_cost,
+        shipping_cost,
         inventory,
         sku,
         supplier_phone,
@@ -3965,11 +3978,37 @@ router.post(
         });
       }
 
+      if (ads_cost !== undefined && ads_cost !== null && !isAdmin) {
+        return res.status(403).json({
+          error: "Access denied: admin access required for ads cost updates",
+        });
+      }
+
+      if (operation_cost !== undefined && operation_cost !== null && !isAdmin) {
+        return res.status(403).json({
+          error:
+            "Access denied: admin access required for operation cost updates",
+        });
+      }
+
+      if (shipping_cost !== undefined && shipping_cost !== null && !isAdmin) {
+        return res.status(403).json({
+          error:
+            "Access denied: admin access required for shipping cost updates",
+        });
+      }
+
       const updates = {};
       if (price !== undefined && price !== null)
         updates.price = parseFloat(price);
       if (cost_price !== undefined && cost_price !== null)
         updates.cost_price = parseFloat(cost_price);
+      if (ads_cost !== undefined && ads_cost !== null)
+        updates.ads_cost = parseFloat(ads_cost);
+      if (operation_cost !== undefined && operation_cost !== null)
+        updates.operation_cost = parseFloat(operation_cost);
+      if (shipping_cost !== undefined && shipping_cost !== null)
+        updates.shipping_cost = parseFloat(shipping_cost);
       if (inventory !== undefined && inventory !== null)
         updates.inventory = parseInt(inventory, 10);
       if (Object.prototype.hasOwnProperty.call(req.body, "sku")) {
@@ -4311,11 +4350,15 @@ router.post(
       const userId = req.user.id;
       const updates = {};
 
-      if (Object.prototype.hasOwnProperty.call(req.body || {}, "customer_phone")) {
+      if (
+        Object.prototype.hasOwnProperty.call(req.body || {}, "customer_phone")
+      ) {
         updates.customer_phone = String(req.body?.customer_phone ?? "").trim();
       }
 
-      if (Object.prototype.hasOwnProperty.call(req.body || {}, "shipping_address")) {
+      if (
+        Object.prototype.hasOwnProperty.call(req.body || {}, "shipping_address")
+      ) {
         updates.shipping_address =
           req.body?.shipping_address &&
           typeof req.body.shipping_address === "object" &&

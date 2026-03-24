@@ -18,6 +18,7 @@ export const PERMISSION_KEYS = [
   "can_manage_tasks",
   "can_view_all_reports",
   "can_view_activity_log",
+  "can_print_barcode_labels",
 ];
 
 export const DEFAULT_PERMISSIONS = {
@@ -34,6 +35,7 @@ export const DEFAULT_PERMISSIONS = {
   can_manage_tasks: false,
   can_view_all_reports: false,
   can_view_activity_log: false,
+  can_print_barcode_labels: true,
 };
 
 export const normalizePermissions = (permissionsRow = null) => {
@@ -128,7 +130,9 @@ export const getUserPermissions = async (userId) => {
 
 export const requireAdminRole = async (req, res, next) => {
   try {
-    const role = normalizeRole(req.user?.role || (await getUserRole(req.user?.id)));
+    const role = normalizeRole(
+      req.user?.role || (await getUserRole(req.user?.id)),
+    );
 
     if (role !== "admin") {
       return res.status(403).json({

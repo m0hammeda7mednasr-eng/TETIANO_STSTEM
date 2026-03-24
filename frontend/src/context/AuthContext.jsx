@@ -27,6 +27,7 @@ const DEFAULT_CLIENT_PERMISSIONS = {
   can_manage_tasks: false,
   can_view_all_reports: false,
   can_view_activity_log: false,
+  can_print_barcode_labels: true,
 };
 
 const readJsonFromStorage = (key) => {
@@ -48,7 +49,9 @@ const syncCurrentStoreId = (stores = []) => {
     .map((store) => normalizeStoreId(store?.id))
     .filter(Boolean);
 
-  const currentStoreId = normalizeStoreId(localStorage.getItem("currentStoreId"));
+  const currentStoreId = normalizeStoreId(
+    localStorage.getItem("currentStoreId"),
+  );
 
   if (accessibleStoreIds.length === 0) {
     localStorage.removeItem("currentStoreId");
@@ -148,7 +151,11 @@ export const AuthProvider = ({ children }) => {
 
         applyAuthState(
           nextUser,
-          perms || buildCachedPermissions(nextUser, readJsonFromStorage("permissions")),
+          perms ||
+            buildCachedPermissions(
+              nextUser,
+              readJsonFromStorage("permissions"),
+            ),
         );
 
         try {

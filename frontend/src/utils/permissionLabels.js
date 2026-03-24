@@ -16,10 +16,10 @@ const PERMISSION_COPY = {
       can_manage_tasks: "إدارة المهام",
       can_view_all_reports: "عرض جميع التقارير",
       can_view_activity_log: "عرض سجل النشاط",
+      can_print_barcode_labels: "طباعة ليبلات الباركود",
     },
     descriptions: {
-      can_view_dashboard:
-        "يعرض لوحة التحكم والإحصائيات الرئيسية للمتجر.",
+      can_view_dashboard: "يعرض لوحة التحكم والإحصائيات الرئيسية للمتجر.",
       can_view_products:
         "يعرض المنتجات وتفاصيلها وتحليل المنتجات والموردين وشاشات المخزن.",
       can_edit_products:
@@ -30,20 +30,16 @@ const PERMISSION_COPY = {
         "يسمح بتعديل حالة الطلب والدفع وتنفيذ أو restock الطلب كله أو عناصر محددة منه.",
       can_view_customers:
         "يعرض قائمة العملاء وبيانات التواصل والطلبات المرتبطة بهم.",
-      can_edit_customers:
-        "يسمح بتعديل بيانات العملاء والإجراءات المرتبطة بهم.",
-      can_manage_users:
-        "يسمح بإدارة المستخدمين والصلاحيات وطلبات الوصول.",
+      can_edit_customers: "يسمح بتعديل بيانات العملاء والإجراءات المرتبطة بهم.",
+      can_manage_users: "يسمح بإدارة المستخدمين والصلاحيات وطلبات الوصول.",
       can_manage_settings:
         "يسمح بالدخول إلى الإعدادات وإدارة المزامنة والتكوين العام.",
-      can_view_profits:
-        "يعرض صافي الربح وهوامش الربحية والتكلفة.",
-      can_manage_tasks:
-        "يسمح بإدارة المهام وتعيينها ومتابعتها.",
-      can_view_all_reports:
-        "يعرض جميع التقارير وتقارير الموظفين.",
-      can_view_activity_log:
-        "يعرض سجل النشاط والعمليات التي تمت داخل النظام.",
+      can_view_profits: "يعرض صافي الربح وهوامش الربحية والتكلفة.",
+      can_manage_tasks: "يسمح بإدارة المهام وتعيينها ومتابعتها.",
+      can_view_all_reports: "يعرض جميع التقارير وتقارير الموظفين.",
+      can_view_activity_log: "يعرض سجل النشاط والعمليات التي تمت داخل النظام.",
+      can_print_barcode_labels:
+        "يسمح بطباعة ليبلات الباركود للمنتجات بمقاسات مختلفة.",
     },
   },
   en: {
@@ -61,10 +57,10 @@ const PERMISSION_COPY = {
       can_manage_tasks: "Manage Tasks",
       can_view_all_reports: "View All Reports",
       can_view_activity_log: "View Activity Log",
+      can_print_barcode_labels: "Print Barcode Labels",
     },
     descriptions: {
-      can_view_dashboard:
-        "Shows the main dashboard and key store metrics.",
+      can_view_dashboard: "Shows the main dashboard and key store metrics.",
       can_view_products:
         "Shows products, product details, product analysis, suppliers, and warehouse views.",
       can_edit_products:
@@ -75,26 +71,29 @@ const PERMISSION_COPY = {
         "Allows changing order/payment status and fulfilling or restocking full orders or selected items.",
       can_view_customers:
         "Shows the customer list, contact details, and linked orders.",
-      can_edit_customers:
-        "Allows updating customer data and related actions.",
+      can_edit_customers: "Allows updating customer data and related actions.",
       can_manage_users:
         "Allows managing users, permissions, and access requests.",
       can_manage_settings:
         "Allows entering settings and managing sync plus general configuration.",
-      can_view_profits:
-        "Shows net profit, margins, and cost breakdowns.",
+      can_view_profits: "Shows net profit, margins, and cost breakdowns.",
       can_manage_tasks:
         "Allows managing, assigning, and following up on tasks.",
-      can_view_all_reports:
-        "Shows all reports and employee reports.",
+      can_view_all_reports: "Shows all reports and employee reports.",
       can_view_activity_log:
         "Shows the activity log and operations done inside the system.",
+      can_print_barcode_labels:
+        "Allows printing barcode labels for products in different sizes.",
     },
   },
 };
 
 const normalizeLocale = (locale) =>
-  String(locale || "").trim().toLowerCase() === "ar" ? "ar" : "en";
+  String(locale || "")
+    .trim()
+    .toLowerCase() === "ar"
+    ? "ar"
+    : "en";
 
 const buildFallbackLabel = (key) =>
   String(key || "")

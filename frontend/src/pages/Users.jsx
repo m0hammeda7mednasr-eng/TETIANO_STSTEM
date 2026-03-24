@@ -32,6 +32,7 @@ const DEFAULT_PERMISSION_STATE = {
   can_manage_tasks: false,
   can_view_all_reports: false,
   can_view_activity_log: false,
+  can_print_barcode_labels: true,
 };
 
 const TABS = ["users", "requests", "reports"];
@@ -45,7 +46,9 @@ const normalizePermissions = (rawPermissions) => {
 
   return Object.keys(DEFAULT_PERMISSION_STATE).reduce((acc, key) => {
     acc[key] =
-      source[key] !== undefined ? Boolean(source[key]) : DEFAULT_PERMISSION_STATE[key];
+      source[key] !== undefined
+        ? Boolean(source[key])
+        : DEFAULT_PERMISSION_STATE[key];
     return acc;
   }, {});
 };
@@ -61,7 +64,8 @@ const formatRoleLabel = (role, locale) =>
 
 const formatStatusLabel = (status, locale) => {
   const normalized = String(status || "").toLowerCase();
-  if (normalized === "approved") return locale === "ar" ? "موافق عليه" : "Approved";
+  if (normalized === "approved")
+    return locale === "ar" ? "موافق عليه" : "Approved";
   if (normalized === "rejected") return locale === "ar" ? "مرفوض" : "Rejected";
   return locale === "ar" ? "قيد المراجعة" : "Pending Review";
 };
@@ -74,7 +78,9 @@ export default function Users() {
   const [dailyReports, setDailyReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState({ type: "", text: "" });
-  const [activeTab, setActiveTab] = useState(getTabFromQuery(searchParams.get("tab")));
+  const [activeTab, setActiveTab] = useState(
+    getTabFromQuery(searchParams.get("tab")),
+  );
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -85,7 +91,9 @@ export default function Users() {
     role: "user",
   });
   const [editRole, setEditRole] = useState("user");
-  const [permissions, setPermissions] = useState({ ...DEFAULT_PERMISSION_STATE });
+  const [permissions, setPermissions] = useState({
+    ...DEFAULT_PERMISSION_STATE,
+  });
 
   const pendingRequests = useMemo(
     () => accessRequests.filter((item) => item.status === "pending").length,
@@ -110,7 +118,11 @@ export default function Users() {
   const loadPage = useCallback(async () => {
     try {
       setLoading(true);
-      await Promise.all([loadUsers(), loadAccessRequests(), loadDailyReports()]);
+      await Promise.all([
+        loadUsers(),
+        loadAccessRequests(),
+        loadDailyReports(),
+      ]);
     } catch (error) {
       setMessage({
         type: "error",
@@ -288,19 +300,32 @@ export default function Users() {
             <MetricCard
               title={select("المستخدمون", "Users")}
               value={formatNumber(users.length, { maximumFractionDigits: 0 })}
-              subtitle={select("إجمالي الحسابات داخل النظام", "All accounts in the system")}
+              subtitle={select(
+                "إجمالي الحسابات داخل النظام",
+                "All accounts in the system",
+              )}
               icon={UsersIcon}
             />
             <MetricCard
               title={select("طلبات معلقة", "Pending requests")}
-              value={formatNumber(pendingRequests, { maximumFractionDigits: 0 })}
-              subtitle={select("طلبات صلاحيات تحتاج مراجعة", "Access requests waiting for review")}
+              value={formatNumber(pendingRequests, {
+                maximumFractionDigits: 0,
+              })}
+              subtitle={select(
+                "طلبات صلاحيات تحتاج مراجعة",
+                "Access requests waiting for review",
+              )}
               icon={Shield}
             />
             <MetricCard
               title={select("تقارير يومية", "Daily reports")}
-              value={formatNumber(dailyReports.length, { maximumFractionDigits: 0 })}
-              subtitle={select("تقارير الفريق المرفوعة", "Submitted team reports")}
+              value={formatNumber(dailyReports.length, {
+                maximumFractionDigits: 0,
+              })}
+              subtitle={select(
+                "تقارير الفريق المرفوعة",
+                "Submitted team reports",
+              )}
               icon={FileText}
             />
           </section>
@@ -335,11 +360,17 @@ export default function Users() {
                 <table className="data-table w-full min-w-[860px]">
                   <thead className="bg-slate-50">
                     <tr>
-                      <th className="px-6 py-4">{select("المستخدم", "User")}</th>
+                      <th className="px-6 py-4">
+                        {select("المستخدم", "User")}
+                      </th>
                       <th className="px-6 py-4">{select("البريد", "Email")}</th>
                       <th className="px-6 py-4">{select("الدور", "Role")}</th>
-                      <th className="px-6 py-4">{select("الحالة", "Status")}</th>
-                      <th className="px-6 py-4">{select("إجراءات", "Actions")}</th>
+                      <th className="px-6 py-4">
+                        {select("الحالة", "Status")}
+                      </th>
+                      <th className="px-6 py-4">
+                        {select("إجراءات", "Actions")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -351,12 +382,18 @@ export default function Users() {
                               <UsersIcon size={16} />
                             </div>
                             <div>
-                              <p className="font-medium text-slate-900">{user.name}</p>
-                              <p className="text-xs text-slate-400">#{user.id}</p>
+                              <p className="font-medium text-slate-900">
+                                {user.name}
+                              </p>
+                              <p className="text-xs text-slate-400">
+                                #{user.id}
+                              </p>
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm text-slate-600">{user.email}</td>
+                        <td className="px-6 py-4 text-sm text-slate-600">
+                          {user.email}
+                        </td>
                         <td className="px-6 py-4">
                           <span className="app-chip px-3 py-1 text-xs font-semibold text-slate-700">
                             {formatRoleLabel(user.role, locale)}
@@ -407,19 +444,33 @@ export default function Users() {
                 <table className="data-table w-full min-w-[960px]">
                   <thead className="bg-slate-50">
                     <tr>
-                      <th className="px-6 py-4">{select("المستخدم", "User")}</th>
-                      <th className="px-6 py-4">{select("الصلاحية", "Permission")}</th>
+                      <th className="px-6 py-4">
+                        {select("المستخدم", "User")}
+                      </th>
+                      <th className="px-6 py-4">
+                        {select("الصلاحية", "Permission")}
+                      </th>
                       <th className="px-6 py-4">{select("السبب", "Reason")}</th>
                       <th className="px-6 py-4">{select("التاريخ", "Date")}</th>
-                      <th className="px-6 py-4">{select("الحالة", "Status")}</th>
-                      <th className="px-6 py-4">{select("إجراءات", "Actions")}</th>
+                      <th className="px-6 py-4">
+                        {select("الحالة", "Status")}
+                      </th>
+                      <th className="px-6 py-4">
+                        {select("إجراءات", "Actions")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {accessRequests.length === 0 ? (
                       <tr>
-                        <td colSpan="6" className="px-6 py-12 text-center text-slate-500">
-                          {select("لا توجد طلبات صلاحيات", "No access requests")}
+                        <td
+                          colSpan="6"
+                          className="px-6 py-12 text-center text-slate-500"
+                        >
+                          {select(
+                            "لا توجد طلبات صلاحيات",
+                            "No access requests",
+                          )}
                         </td>
                       </tr>
                     ) : (
@@ -428,22 +479,33 @@ export default function Users() {
                           <td className="px-6 py-4">
                             <div>
                               <p className="font-medium text-slate-900">
-                                {request.users?.name || select("غير معروف", "Unknown")}
+                                {request.users?.name ||
+                                  select("غير معروف", "Unknown")}
                               </p>
-                              <p className="text-xs text-slate-400">{request.users?.email}</p>
+                              <p className="text-xs text-slate-400">
+                                {request.users?.email}
+                              </p>
                             </div>
                           </td>
                           <td className="px-6 py-4">
                             <div className="space-y-2">
                               <span className="app-chip inline-flex px-3 py-1 text-xs font-semibold text-slate-700">
-                                {getPermissionLabel(request.permission_requested, locale)}
+                                {getPermissionLabel(
+                                  request.permission_requested,
+                                  locale,
+                                )}
                               </span>
                               <p className="max-w-sm text-xs leading-5 text-slate-500">
-                                {getPermissionDescription(request.permission_requested, locale)}
+                                {getPermissionDescription(
+                                  request.permission_requested,
+                                  locale,
+                                )}
                               </p>
                             </div>
                           </td>
-                          <td className="px-6 py-4 text-sm text-slate-600">{request.reason}</td>
+                          <td className="px-6 py-4 text-sm text-slate-600">
+                            {request.reason}
+                          </td>
                           <td className="px-6 py-4 text-sm text-slate-600">
                             {formatDate(request.created_at)}
                           </td>
@@ -456,13 +518,17 @@ export default function Users() {
                             {request.status === "pending" ? (
                               <div className="flex gap-2">
                                 <button
-                                  onClick={() => handleApproveRequest(request.id, "approved")}
+                                  onClick={() =>
+                                    handleApproveRequest(request.id, "approved")
+                                  }
                                   className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
                                 >
                                   {select("موافقة", "Approve")}
                                 </button>
                                 <button
-                                  onClick={() => handleApproveRequest(request.id, "rejected")}
+                                  onClick={() =>
+                                    handleApproveRequest(request.id, "rejected")
+                                  }
                                   className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50"
                                 >
                                   {select("رفض", "Reject")}
@@ -489,16 +555,25 @@ export default function Users() {
                 <table className="data-table w-full min-w-[920px]">
                   <thead className="bg-slate-50">
                     <tr>
-                      <th className="px-6 py-4">{select("المستخدم", "User")}</th>
-                      <th className="px-6 py-4">{select("العنوان", "Title")}</th>
-                      <th className="px-6 py-4">{select("المحتوى", "Content")}</th>
+                      <th className="px-6 py-4">
+                        {select("المستخدم", "User")}
+                      </th>
+                      <th className="px-6 py-4">
+                        {select("العنوان", "Title")}
+                      </th>
+                      <th className="px-6 py-4">
+                        {select("المحتوى", "Content")}
+                      </th>
                       <th className="px-6 py-4">{select("التاريخ", "Date")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {dailyReports.length === 0 ? (
                       <tr>
-                        <td colSpan="4" className="px-6 py-12 text-center text-slate-500">
+                        <td
+                          colSpan="4"
+                          className="px-6 py-12 text-center text-slate-500"
+                        >
                           {select("لا توجد تقارير يومية", "No daily reports")}
                         </td>
                       </tr>
@@ -508,12 +583,17 @@ export default function Users() {
                           <td className="px-6 py-4">
                             <div>
                               <p className="font-medium text-slate-900">
-                                {report.users?.name || select("غير معروف", "Unknown")}
+                                {report.users?.name ||
+                                  select("غير معروف", "Unknown")}
                               </p>
-                              <p className="text-xs text-slate-400">{report.users?.email}</p>
+                              <p className="text-xs text-slate-400">
+                                {report.users?.email}
+                              </p>
                             </div>
                           </td>
-                          <td className="px-6 py-4 font-medium text-slate-900">{report.title}</td>
+                          <td className="px-6 py-4 font-medium text-slate-900">
+                            {report.title}
+                          </td>
                           <td className="px-6 py-4 text-sm text-slate-600">
                             <div className="line-clamp-2">{report.content}</div>
                           </td>
@@ -544,13 +624,17 @@ export default function Users() {
             <Field
               label={select("الاسم", "Name")}
               value={newUser.name}
-              onChange={(value) => setNewUser((current) => ({ ...current, name: value }))}
+              onChange={(value) =>
+                setNewUser((current) => ({ ...current, name: value }))
+              }
             />
             <Field
               label={select("البريد الإلكتروني", "Email")}
               type="email"
               value={newUser.email}
-              onChange={(value) => setNewUser((current) => ({ ...current, email: value }))}
+              onChange={(value) =>
+                setNewUser((current) => ({ ...current, email: value }))
+              }
             />
             <Field
               label={select("كلمة المرور", "Password")}
@@ -563,7 +647,9 @@ export default function Users() {
             <SelectField
               label={select("الدور", "Role")}
               value={newUser.role}
-              onChange={(value) => setNewUser((current) => ({ ...current, role: value }))}
+              onChange={(value) =>
+                setNewUser((current) => ({ ...current, role: value }))
+              }
               options={[
                 { value: "user", label: select("مستخدم", "User") },
                 { value: "admin", label: select("مدير", "Admin") },

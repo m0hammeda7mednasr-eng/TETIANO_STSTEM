@@ -415,18 +415,17 @@ export default function BarcodeLabelModal({
     const targetKey = selectedTarget.key;
     const customLines = customFooterLines[targetKey];
 
-    // If this target doesn't have custom lines yet, auto-populate with SKU
-    if (!customLines?.hasCustomLine1 && selectedTarget.sku) {
+    // If this target doesn't have any custom lines saved yet, auto-populate with SKU
+    if (!customLines && selectedTarget.sku) {
       setCustomFooterLines((prev) => ({
         ...prev,
         [targetKey]: {
-          ...prev[targetKey],
           line1: selectedTarget.sku,
           hasCustomLine1: false, // Mark as auto-populated, not manually edited
         },
       }));
     }
-  }, [selectedTarget, customFooterLines]);
+  }, [selectedTarget?.key, customFooterLines]); // Only depend on target key, not the whole target object
 
   // Save custom footer lines when they change
   useEffect(() => {

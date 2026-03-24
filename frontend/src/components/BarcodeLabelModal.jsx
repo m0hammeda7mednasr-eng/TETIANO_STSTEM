@@ -318,10 +318,9 @@ export default function BarcodeLabelModal({
     const customLines = customFooterLines[targetKey];
 
     return {
-      line1:
-        customLines?.line1 !== undefined
-          ? customLines.line1
-          : selectedTarget.sku || savedSettings.footerLine1,
+      line1: customLines?.hasCustomLine1
+        ? customLines.line1
+        : selectedTarget.sku || savedSettings.footerLine1,
       line2:
         customLines?.line2 !== undefined
           ? customLines.line2
@@ -427,6 +426,7 @@ export default function BarcodeLabelModal({
       [selectedTarget.key]: {
         ...prev[selectedTarget.key],
         line1: value,
+        hasCustomLine1: true, // Mark that user has manually edited this line
       },
     }));
   };

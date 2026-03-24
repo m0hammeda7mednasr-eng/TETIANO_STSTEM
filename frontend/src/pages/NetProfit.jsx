@@ -31,6 +31,12 @@ const SUMMARY_DEFAULT = {
   profit_margin: 0,
 };
 
+const EMPTY_PRODUCT_COST_FORM = {
+  cost_price: "",
+  ads_cost: "0",
+  operation_cost: "0",
+  shipping_cost: "0",
+};
 const EMPTY_COST_FORM = {
   cost_name: "",
   cost_type: "operations",
@@ -64,6 +70,7 @@ const COST_TYPE_GROUPS = {
 };
 
 const toAmount = (value) => Number(value || 0);
+const roundAmount = (value) => parseFloat(toAmount(value).toFixed(2));
 const formatAmount = (value) => formatLocaleCurrency(value);
 const formatCount = (value) =>
   formatNumber(Math.round(toAmount(value)), { maximumFractionDigits: 0 });
@@ -72,8 +79,38 @@ const formatPercent = (value) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-const hasCostPrice = (value) =>
-  value !== null && value !== undefined && String(value).trim() !== "";
+const hasCostPrice = (value) => toAmount(value) > 0;
+const toDraftAmount = (value, { allowBlank = false } = {}) => {
+  const parsed = toAmount(value);
+
+  if (allowBlank && parsed <= 0) {
+    return "";
+  }
+
+  return String(parsed);
+};
+const createProductCostDraft = (product = null) => ({
+  cost_price: toDraftAmount(product?.cost_price, { allowBlank: true }),
+  ads_cost: toDraftAmount(product?.ads_cost),
+  operation_cost: toDraftAmount(product?.operation_cost),
+  shipping_cost: toDraftAmount(product?.shipping_cost),
+});
+const parseEditableAmount = (value, label) => {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) {
+    return 0;
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${label} must be a valid number`);
+  }
+  if (parsed < 0) {
+    throw new Error(`${label} cannot be negative`);
+  }
+
+  return parsed;
+};
 const getCostGroupKey = (costType) =>
   COST_TYPE_GROUPS[String(costType || "").toLowerCase()] || "other";
 const getAppliedCostTotal = (cost, soldQuantity, ordersCount) => {
@@ -127,10 +164,43 @@ const getMarginTone = (value) => {
 };
 const getProfitToneClass = (value) =>
   toAmount(value) >= 0 ? "text-emerald-700" : "text-rose-700";
-const buildProductCostBreakdown = (product, costs) => {
+const getSavedProductCostBreakdown = (product) => {
   const soldQuantity = toAmount(product?.sold_quantity);
+  const productUnit = toAmount(product?.cost_price);
+  const adsUnit = toAmount(product?.ads_cost);
+  const operationsUnit = toAmount(product?.operation_cost);
+  const shippingUnit = toAmount(product?.shipping_cost);
+
+  const productTotal = roundAmount(productUnit * soldQuantity);
+  const adsTotal = roundAmount(adsUnit * soldQuantity);
+  const operationsTotal = roundAmount(operationsUnit * soldQuantity);
+  const shippingTotal = roundAmount(shippingUnit * soldQuantity);
+  const totalPerUnit = roundAmount(
+    productUnit + adsUnit + operationsUnit + shippingUnit,
+  );
+  const total = roundAmount(
+    productTotal + adsTotal + operationsTotal + shippingTotal,
+  );
+
+  return {
+    soldQuantity,
+    productUnit,
+    adsUnit,
+    operationsUnit,
+    shippingUnit,
+    productTotal,
+    adsTotal,
+    operationsTotal,
+    shippingTotal,
+    totalPerUnit,
+    total,
+  };
+};
+const buildProductCostBreakdown = (product, costs) => {
+  const saved = getSavedProductCostBreakdown(product);
+  const soldQuantity = saved.soldQuantity;
   const ordersCount = toAmount(product?.orders_count);
-  const breakdown = {
+  const tracked = {
     ads: 0,
     shipping: 0,
     operations: 0,
@@ -139,20 +209,32 @@ const buildProductCostBreakdown = (product, costs) => {
 
   (costs || []).forEach((cost) => {
     const bucket = getCostGroupKey(cost?.cost_type);
-    breakdown[bucket] += getAppliedCostTotal(cost, soldQuantity, ordersCount);
+    tracked[bucket] += getAppliedCostTotal(cost, soldQuantity, ordersCount);
   });
 
-  const operationalTotal = Object.values(breakdown).reduce(
+  const trackedTotal = Object.values(tracked).reduce(
     (sum, amount) => sum + toAmount(amount),
     0,
   );
+  const combined = {
+    ads: roundAmount(saved.adsTotal + tracked.ads),
+    shipping: roundAmount(saved.shippingTotal + tracked.shipping),
+    operations: roundAmount(saved.operationsTotal + tracked.operations),
+    other: roundAmount(tracked.other),
+  };
 
   return {
-    ...breakdown,
-    operationalTotal: parseFloat(operationalTotal.toFixed(2)),
-    totalCosts: parseFloat(
-      (toAmount(product?.total_cost) + operationalTotal).toFixed(2),
-    ),
+    saved,
+    tracked: {
+      ...tracked,
+      ads: roundAmount(tracked.ads),
+      shipping: roundAmount(tracked.shipping),
+      operations: roundAmount(tracked.operations),
+      other: roundAmount(tracked.other),
+      total: roundAmount(trackedTotal),
+    },
+    combined,
+    totalCosts: roundAmount(saved.total + trackedTotal),
   };
 };
 
@@ -166,7 +248,9 @@ export default function NetProfit() {
 
   const [showCostModal, setShowCostModal] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState(null);
-  const [productCostDraft, setProductCostDraft] = useState("");
+  const [productCostDraft, setProductCostDraft] = useState(
+    EMPTY_PRODUCT_COST_FORM,
+  );
   const [editingOperationalCostId, setEditingOperationalCostId] =
     useState(null);
   const [newCost, setNewCost] = useState(EMPTY_COST_FORM);
@@ -256,33 +340,72 @@ export default function NetProfit() {
     [operationalCostsByProduct, selectedProductId],
   );
 
-  const saveProductCostPrice = async () => {
-    const normalizedCostPrice = String(productCostDraft || "").trim();
-    const parsedCostPrice = parseFloat(normalizedCostPrice);
+  const selectedProductBreakdown = useMemo(
+    () => buildProductCostBreakdown(selectedProduct, selectedProductCosts),
+    [selectedProduct, selectedProductCosts],
+  );
 
-    if (!normalizedCostPrice) {
-      setMessage({ type: "error", text: "Product cost is required" });
-      return;
-    }
+  const draftProductCostPreview = useMemo(() => {
+    const costPrice = toAmount(productCostDraft.cost_price);
+    const adsCost = toAmount(productCostDraft.ads_cost);
+    const operationCost = toAmount(productCostDraft.operation_cost);
+    const shippingCost = toAmount(productCostDraft.shipping_cost);
+    const avgSellingPrice = toAmount(selectedProduct?.avg_selling_price);
+    const totalPerUnit = roundAmount(
+      costPrice + adsCost + operationCost + shippingCost,
+    );
+    const unitProfit = roundAmount(avgSellingPrice - totalPerUnit);
+    const margin =
+      avgSellingPrice > 0 ? roundAmount((unitProfit / avgSellingPrice) * 100) : 0;
 
-    if (!Number.isFinite(parsedCostPrice) || parsedCostPrice < 0) {
+    return {
+      totalPerUnit,
+      unitProfit,
+      margin,
+      soldQuantity: toAmount(selectedProduct?.sold_quantity),
+      savedTotal: roundAmount(totalPerUnit * toAmount(selectedProduct?.sold_quantity)),
+    };
+  }, [productCostDraft, selectedProduct]);
+
+  const saveProductCosts = async () => {
+    let payload;
+
+    try {
+      payload = {
+        cost_price: parseEditableAmount(
+          productCostDraft.cost_price,
+          "Cost price",
+        ),
+        ads_cost: parseEditableAmount(productCostDraft.ads_cost, "Ads cost"),
+        operation_cost: parseEditableAmount(
+          productCostDraft.operation_cost,
+          "Operation cost",
+        ),
+        shipping_cost: parseEditableAmount(
+          productCostDraft.shipping_cost,
+          "Shipping cost",
+        ),
+      };
+    } catch (validationError) {
       setMessage({
         type: "error",
-        text: "Product cost must be a valid number",
+        text: validationError.message,
       });
       return;
     }
 
     try {
-      await api.put(`/dashboard/products/${selectedProductId}`, {
-        cost_price: parsedCostPrice,
+      await api.put(`/dashboard/products/${selectedProductId}`, payload);
+      setMessage({
+        type: "success",
+        text: "Product cost fields updated successfully",
       });
-      setMessage({ type: "success", text: "Cost price updated successfully" });
       await fetchProfitability();
     } catch (error) {
       setMessage({
         type: "error",
-        text: error.response?.data?.error || "Failed to update cost price",
+        text:
+          error.response?.data?.error || "Failed to update product cost fields",
       });
     }
   };
@@ -290,9 +413,7 @@ export default function NetProfit() {
   const openCostModal = (productId, cost = null) => {
     const product = products.find((item) => item.id === productId) || null;
     setSelectedProductId(productId);
-    setProductCostDraft(
-      hasCostPrice(product?.cost_price) ? String(product.cost_price) : "",
-    );
+    setProductCostDraft(createProductCostDraft(product));
     setEditingOperationalCostId(cost?.id || null);
     setNewCost(
       cost
@@ -311,7 +432,7 @@ export default function NetProfit() {
   const closeCostModal = () => {
     setShowCostModal(false);
     setSelectedProductId(null);
-    setProductCostDraft("");
+    setProductCostDraft(EMPTY_PRODUCT_COST_FORM);
     setEditingOperationalCostId(null);
     setNewCost(EMPTY_COST_FORM);
   };
@@ -395,12 +516,15 @@ export default function NetProfit() {
         toAmount(product.avg_selling_price),
         toAmount(product.total_revenue),
         hasCostPrice(product.cost_price) ? toAmount(product.cost_price) : "",
-        toAmount(product.total_cost),
-        breakdown.ads,
-        breakdown.shipping,
-        breakdown.operations,
-        breakdown.other,
-        breakdown.operationalTotal,
+        toAmount(product.ads_cost),
+        toAmount(product.operation_cost),
+        toAmount(product.shipping_cost),
+        breakdown.saved.total,
+        breakdown.tracked.ads,
+        breakdown.tracked.shipping,
+        breakdown.tracked.operations,
+        breakdown.tracked.other,
+        breakdown.tracked.total,
         breakdown.totalCosts,
         toAmount(product.net_profit),
         toAmount(product.profit_margin),
@@ -461,13 +585,16 @@ export default function NetProfit() {
             "Avg Sell",
             "Revenue",
             "Cost / Unit",
-            "Base Product Cost",
-            "Ads Cost",
-            "Shipping Cost",
-            "Operations Cost",
-            "Other Cost",
-            "Operational Total",
-            "Total Costs",
+            "Ads / Unit",
+            "Operations / Unit",
+            "Shipping / Unit",
+            "Saved Product Costs",
+            "Tracked Ads",
+            "Tracked Shipping",
+            "Tracked Operations",
+            "Tracked Other",
+            "Tracked Total",
+            "Grand Total Costs",
             "Net Profit",
             "Profit Margin %",
             "Tracked Cost Entries",
@@ -511,8 +638,8 @@ export default function NetProfit() {
           <div>
             <h1 className="text-3xl font-bold text-gray-800">Net Profit</h1>
             <p className="text-gray-600 mt-1">
-              Per-product profitability using product cost, ads, shipping and
-              operating expenses
+              Per-product profitability using saved unit costs plus tracked
+              extra expenses
             </p>
           </div>
 
@@ -536,13 +663,13 @@ export default function NetProfit() {
               color="bg-sky-100 text-sky-700"
             />
             <SummaryCard
-              label="Total Cost"
+              label="Saved Product Costs"
               value={formatAmount(summary.total_cost)}
               icon={Package}
               color="bg-amber-100 text-amber-700"
             />
             <SummaryCard
-              label="Operational Costs"
+              label="Tracked Extra Costs"
               value={formatAmount(summary.total_operational_costs)}
               icon={TrendingUp}
               color="bg-orange-100 text-orange-700"
@@ -588,8 +715,9 @@ export default function NetProfit() {
                   Export CSV
                 </button>
                 <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                  Costs are tracked per product. Use Edit to manage cost price,
-                  ads, shipping, workshop, packaging, and other expenses.
+                  Costs stay attached to each product. Use Manage to edit saved
+                  unit costs and track any extra ads, shipping, workshop, or
+                  packaging expenses.
                 </div>
                 <div className="text-xs font-medium text-slate-500">
                   Showing {formatCount(filteredProducts.length)} of{" "}
@@ -666,6 +794,34 @@ export default function NetProfit() {
                     const productCostMissing = !hasCostPrice(
                       product.cost_price,
                     );
+                    const adsNote =
+                      costGroupsCount.ads > 0
+                        ? `Saved ${formatAmount(
+                            breakdown.saved.adsUnit,
+                          )} / unit + ${formatEntryCount(costGroupsCount.ads)}`
+                        : `Saved ${formatAmount(
+                            breakdown.saved.adsUnit,
+                          )} / unit`;
+                    const shippingNote =
+                      costGroupsCount.shipping > 0
+                        ? `Saved ${formatAmount(
+                            breakdown.saved.shippingUnit,
+                          )} / unit + ${formatEntryCount(
+                            costGroupsCount.shipping,
+                          )}`
+                        : `Saved ${formatAmount(
+                            breakdown.saved.shippingUnit,
+                          )} / unit`;
+                    const operationsNote =
+                      costGroupsCount.operations > 0
+                        ? `Saved ${formatAmount(
+                            breakdown.saved.operationsUnit,
+                          )} / unit + ${formatEntryCount(
+                            costGroupsCount.operations,
+                          )}`
+                        : `Saved ${formatAmount(
+                            breakdown.saved.operationsUnit,
+                          )} / unit`;
 
                     const marginTone = getMarginTone(product.profit_margin);
 
@@ -749,12 +905,16 @@ export default function NetProfit() {
                                 value={
                                   productCostMissing
                                     ? "Missing"
-                                    : `${formatAmount(product.cost_price)} / unit`
+                                    : `${formatAmount(
+                                        breakdown.saved.productUnit,
+                                      )} / unit`
                                 }
                                 note={
                                   productCostMissing
                                     ? "Add from Manage to unlock exact profit"
-                                    : `Base total ${formatAmount(product.total_cost)}`
+                                    : `Saved total ${formatAmount(
+                                        breakdown.saved.productTotal,
+                                      )}`
                                 }
                                 valueClassName={
                                   productCostMissing
@@ -764,29 +924,27 @@ export default function NetProfit() {
                               />
                               <BreakdownMetric
                                 label="Ads"
-                                value={formatAmount(breakdown.ads)}
-                                note={formatEntryCount(costGroupsCount.ads)}
+                                value={formatAmount(breakdown.combined.ads)}
+                                note={adsNote}
                                 valueClassName="text-rose-700"
                               />
                               <BreakdownMetric
                                 label="Shipping"
-                                value={formatAmount(breakdown.shipping)}
-                                note={formatEntryCount(
-                                  costGroupsCount.shipping,
-                                )}
+                                value={formatAmount(breakdown.combined.shipping)}
+                                note={shippingNote}
                                 valueClassName="text-sky-700"
                               />
                               <BreakdownMetric
                                 label="Operations"
-                                value={formatAmount(breakdown.operations)}
-                                note={formatEntryCount(
-                                  costGroupsCount.operations,
+                                value={formatAmount(
+                                  breakdown.combined.operations,
                                 )}
+                                note={operationsNote}
                                 valueClassName="text-amber-700"
                               />
                               <BreakdownMetric
                                 label="Other"
-                                value={formatAmount(breakdown.other)}
+                                value={formatAmount(breakdown.combined.other)}
                                 note={formatEntryCount(costGroupsCount.other)}
                                 valueClassName="text-slate-700"
                               />
@@ -874,8 +1032,10 @@ export default function NetProfit() {
                         <td className="px-4 py-5">
                           <DataMetric
                             value={formatAmount(breakdown.totalCosts)}
-                            note={`Ops ${formatAmount(
-                              breakdown.operationalTotal,
+                            note={`Saved ${formatAmount(
+                              breakdown.saved.total,
+                            )} + tracked ${formatAmount(
+                              breakdown.tracked.total,
                             )}`}
                           />
                         </td>
@@ -987,11 +1147,11 @@ export default function NetProfit() {
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900">
-                        Product Cost Per Unit
+                        Saved Unit Costs
                       </h3>
                       <p className="mt-1 text-sm text-gray-500">
-                        Add the real product cost here if it is missing from the
-                        product data.
+                        These values live on the product itself and are applied
+                        to every sold unit.
                       </p>
                     </div>
                     <span
@@ -1002,56 +1162,113 @@ export default function NetProfit() {
                       }`}
                     >
                       {hasCostPrice(selectedProduct?.cost_price)
-                        ? `Saved ${formatAmount(selectedProduct?.cost_price)} / unit`
-                        : "Cost missing"}
+                        ? `Saved ${formatAmount(
+                            selectedProduct?.cost_price,
+                          )} / unit`
+                        : "Base cost missing"}
                     </span>
                   </div>
 
-                  <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={productCostDraft}
-                      onChange={(e) => setProductCostDraft(e.target.value)}
-                      placeholder="Product cost"
-                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-right"
+                  <div className="mt-5 grid gap-3 md:grid-cols-2">
+                    <CostField
+                      label="Cost Price / Unit"
+                      value={productCostDraft.cost_price}
+                      onChange={(value) =>
+                        setProductCostDraft((prev) => ({
+                          ...prev,
+                          cost_price: value,
+                        }))
+                      }
                     />
-                    <button
-                      onClick={saveProductCostPrice}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700"
-                    >
-                      <Save size={16} />
-                      Save Product Cost
-                    </button>
+                    <CostField
+                      label="Ads / Unit"
+                      value={productCostDraft.ads_cost}
+                      onChange={(value) =>
+                        setProductCostDraft((prev) => ({
+                          ...prev,
+                          ads_cost: value,
+                        }))
+                      }
+                    />
+                    <CostField
+                      label="Operations / Unit"
+                      value={productCostDraft.operation_cost}
+                      onChange={(value) =>
+                        setProductCostDraft((prev) => ({
+                          ...prev,
+                          operation_cost: value,
+                        }))
+                      }
+                    />
+                    <CostField
+                      label="Shipping / Unit"
+                      value={productCostDraft.shipping_cost}
+                      onChange={(value) =>
+                        setProductCostDraft((prev) => ({
+                          ...prev,
+                          shipping_cost: value,
+                        }))
+                      }
+                    />
                   </div>
 
                   {selectedProduct && (
-                    <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                       <InfoBadge
-                        label="Revenue"
-                        value={formatAmount(selectedProduct.total_revenue)}
+                        label="Avg Sell"
+                        value={formatAmount(selectedProduct.avg_selling_price)}
+                      />
+                      <InfoBadge
+                        label="Saved / Unit"
+                        value={formatAmount(draftProductCostPreview.totalPerUnit)}
+                      />
+                      <InfoBadge
+                        label="Saved Total"
+                        value={formatAmount(draftProductCostPreview.savedTotal)}
+                      />
+                      <InfoBadge
+                        label="Unit Margin"
+                        value={formatPercent(draftProductCostPreview.margin)}
+                      />
+                      <InfoBadge
+                        label="Unit Profit"
+                        value={formatAmount(draftProductCostPreview.unitProfit)}
                       />
                       <InfoBadge
                         label="Sold Qty"
-                        value={String(selectedProduct.sold_quantity || 0)}
+                        value={formatCount(selectedProduct.sold_quantity)}
+                      />
+                      <InfoBadge
+                        label="Tracked Extras"
+                        value={formatAmount(selectedProductBreakdown.tracked.total)}
                       />
                       <InfoBadge
                         label="Orders"
-                        value={String(selectedProduct.orders_count || 0)}
+                        value={formatCount(selectedProduct.orders_count)}
                       />
                     </div>
                   )}
+
+                  <div className="mt-5 flex flex-wrap justify-end gap-2">
+                    <button
+                      onClick={saveProductCosts}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700"
+                    >
+                      <Save size={16} />
+                      Save Product Costs
+                    </button>
+                  </div>
                 </section>
 
                 <section className="rounded-2xl border border-gray-200 bg-white p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900">
-                        Tracked Operational Costs
+                        Tracked Extra Costs
                       </h3>
                       <p className="mt-1 text-sm text-gray-500">
-                        Ads, workshop, shipping, packaging, and any extra
-                        product-level expenses.
+                        Add any extra product-level expenses that should sit on
+                        top of the saved unit costs.
                       </p>
                     </div>
                     <button
@@ -1282,6 +1499,24 @@ function BreakdownMetric({
       </div>
       <p className="mt-1 text-[11px] text-slate-500">{note}</p>
     </div>
+  );
+}
+
+function CostField({ label, value, onChange }) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-sm font-medium text-gray-700">
+        {label}
+      </span>
+      <input
+        type="number"
+        step="0.01"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="0.00"
+        className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3"
+      />
+    </label>
   );
 }
 

@@ -19,6 +19,7 @@ import {
 } from "../helpers/orderScope.js";
 import { calculateDashboardOrderStats } from "../helpers/dashboardStats.js";
 import { emitRealtimeEvent } from "../services/realtimeEventService.js";
+import { ProductUpdateService } from "../services/productUpdateService.js";
 
 const router = express.Router();
 const UUID_REGEX =
@@ -183,6 +184,22 @@ const toNumber = (value) => {
     .replace(/[^\d.-]/g, "");
   const parsed = parseFloat(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const parseEditableCostField = (value, label) => {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${label} is invalid`);
+  }
+  if (parsed < 0) {
+    throw new Error(`${label} cannot be negative`);
+  }
+  if (parsed > 1000000) {
+    throw new Error(`${label} exceeds maximum allowed value`);
+  }
+
+  return parsed;
 };
 
 const isSchemaCompatibilityError = (error) => {
@@ -1770,31 +1787,47 @@ router.put(
       const { id } = req.params;
       const { cost_price, ads_cost, operation_cost, shipping_cost } = req.body;
 
-      const updateData = {};
+      const updates = {};
 
       if (cost_price !== undefined) {
-        updateData.cost_price = toNumber(cost_price);
+        updates.cost_price = parseEditableCostField(cost_price, "Cost price");
       }
       if (ads_cost !== undefined) {
-        updateData.ads_cost = toNumber(ads_cost);
+        updates.ads_cost = parseEditableCostField(ads_cost, "Ads cost");
       }
       if (operation_cost !== undefined) {
-        updateData.operation_cost = toNumber(operation_cost);
+        updates.operation_cost = parseEditableCostField(
+          operation_cost,
+          "Operation cost",
+        );
       }
       if (shipping_cost !== undefined) {
-        updateData.shipping_cost = toNumber(shipping_cost);
+        updates.shipping_cost = parseEditableCostField(
+          shipping_cost,
+          "Shipping cost",
+        );
       }
 
-      const { data, error } = await Product.update(id, updateData);
-
-      if (error) {
-        return res.status(500).json({ error: error.message });
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No cost updates provided" });
       }
 
-      res.json(data);
+      const result = await ProductUpdateService.updateProduct(
+        req.user.id,
+        id,
+        updates,
+      );
+
+      res.json(result);
     } catch (error) {
       console.error("Update product cost fields error:", error);
-      res.status(500).json({ error: "Failed to update cost fields" });
+      res
+        .status(
+          /invalid|negative|maximum allowed|not found/i.test(error.message)
+            ? 400
+            : 500,
+        )
+        .json({ error: error.message || "Failed to update cost fields" });
     }
   },
 );

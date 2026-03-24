@@ -381,4 +381,102 @@ describe("ProductUpdateService", () => {
       }),
     );
   });
+
+  it("updates extra product cost fields locally while keeping Shopify sync scoped to Shopify fields", async () => {
+    const product = {
+      id: "product-4",
+      title: "Structured Blazer",
+      price: 320,
+      cost_price: 180,
+      ads_cost: 12,
+      operation_cost: 8,
+      shipping_cost: 15,
+      inventory_quantity: 9,
+      sku: "BLAZER-001",
+      data: {
+        variants: [
+          {
+            id: "variant-4",
+            price: "320",
+            sku: "BLAZER-001",
+            inventory_quantity: 9,
+          },
+        ],
+      },
+    };
+
+    const updateSpy = jest
+      .spyOn(Product, "update")
+      .mockResolvedValue({ error: null });
+
+    jest.spyOn(Product, "findByIdForUser").mockResolvedValue({
+      data: product,
+      error: null,
+    });
+    jest
+      .spyOn(ProductUpdateService, "syncToShopify")
+      .mockResolvedValue({ success: true });
+    jest
+      .spyOn(ProductUpdateService, "logSyncOperation")
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(ProductUpdateService, "logActivity")
+      .mockImplementation(() => {});
+
+    const result = await ProductUpdateService.updateProduct(
+      "user-1",
+      "product-4",
+      {
+        price: 335,
+        cost_price: 190,
+        ads_cost: 18,
+        operation_cost: 9.5,
+        shipping_cost: 17,
+      },
+    );
+
+    expect(updateSpy).toHaveBeenCalledWith(
+      "product-4",
+      expect.objectContaining({
+        price: 335,
+        cost_price: 190,
+        ads_cost: 18,
+        operation_cost: 9.5,
+        shipping_cost: 17,
+        pending_sync: true,
+      }),
+    );
+
+    expect(ProductUpdateService.syncToShopify).toHaveBeenCalledWith(
+      "user-1",
+      "product-4",
+      expect.objectContaining({
+        price: 335,
+      }),
+    );
+    expect(ProductUpdateService.syncToShopify.mock.calls[0][2]).not.toHaveProperty(
+      "cost_price",
+    );
+    expect(ProductUpdateService.syncToShopify.mock.calls[0][2]).not.toHaveProperty(
+      "ads_cost",
+    );
+    expect(ProductUpdateService.syncToShopify.mock.calls[0][2]).not.toHaveProperty(
+      "operation_cost",
+    );
+    expect(ProductUpdateService.syncToShopify.mock.calls[0][2]).not.toHaveProperty(
+      "shipping_cost",
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        shopifySync: "synced",
+        shopifyFields: expect.arrayContaining(["price"]),
+        localOnlyFields: expect.arrayContaining([
+          "cost_price",
+          "ads_cost",
+          "operation_cost",
+          "shipping_cost",
+        ]),
+      }),
+    );
+  });
 });

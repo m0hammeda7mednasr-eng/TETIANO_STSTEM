@@ -366,12 +366,15 @@ const applyShopifyUpdateFallback = (parsedProductData = {}, updates = {}) => {
 
 export class ProductUpdateService {
   /**
-   * Update product (price, cost_price, inventory, sku) locally and sync with Shopify
+   * Update product (price, costs, inventory, sku) locally and sync with Shopify
    */
   static async updateProduct(userId, productId, updates) {
     const {
       price,
       cost_price,
+      ads_cost,
+      operation_cost,
+      shipping_cost,
       inventory,
       sku,
       supplier_phone,
@@ -390,6 +393,15 @@ export class ProductUpdateService {
     const localOnlyFields = [];
     if (cost_price !== undefined) {
       localOnlyFields.push("cost_price");
+    }
+    if (ads_cost !== undefined) {
+      localOnlyFields.push("ads_cost");
+    }
+    if (operation_cost !== undefined) {
+      localOnlyFields.push("operation_cost");
+    }
+    if (shipping_cost !== undefined) {
+      localOnlyFields.push("shipping_cost");
     }
     if (hasOwn(localFieldUpdates, "supplier_phone")) {
       localOnlyFields.push("supplier_phone");
@@ -425,6 +437,28 @@ export class ProductUpdateService {
       if (cost_price < 0) throw new Error("Cost price cannot be negative");
       if (cost_price > 1000000)
         throw new Error("Cost price exceeds maximum allowed value");
+    }
+    if (ads_cost !== undefined) {
+      if (!Number.isFinite(ads_cost)) throw new Error("Ads cost is invalid");
+      if (ads_cost < 0) throw new Error("Ads cost cannot be negative");
+      if (ads_cost > 1000000)
+        throw new Error("Ads cost exceeds maximum allowed value");
+    }
+    if (operation_cost !== undefined) {
+      if (!Number.isFinite(operation_cost))
+        throw new Error("Operation cost is invalid");
+      if (operation_cost < 0)
+        throw new Error("Operation cost cannot be negative");
+      if (operation_cost > 1000000)
+        throw new Error("Operation cost exceeds maximum allowed value");
+    }
+    if (shipping_cost !== undefined) {
+      if (!Number.isFinite(shipping_cost))
+        throw new Error("Shipping cost is invalid");
+      if (shipping_cost < 0)
+        throw new Error("Shipping cost cannot be negative");
+      if (shipping_cost > 1000000)
+        throw new Error("Shipping cost exceeds maximum allowed value");
     }
     if (inventory !== undefined) {
       if (!Number.isFinite(inventory)) throw new Error("Inventory is invalid");
@@ -549,6 +583,18 @@ export class ProductUpdateService {
       if (cost_price !== undefined) {
         updateData.cost_price = cost_price;
         oldValues.cost_price = product.cost_price;
+      }
+      if (ads_cost !== undefined) {
+        updateData.ads_cost = ads_cost;
+        oldValues.ads_cost = product.ads_cost;
+      }
+      if (operation_cost !== undefined) {
+        updateData.operation_cost = operation_cost;
+        oldValues.operation_cost = product.operation_cost;
+      }
+      if (shipping_cost !== undefined) {
+        updateData.shipping_cost = shipping_cost;
+        oldValues.shipping_cost = product.shipping_cost;
       }
       if (inventory !== undefined || variantUpdates.length > 0) {
         oldValues.inventory_quantity = product.inventory_quantity;

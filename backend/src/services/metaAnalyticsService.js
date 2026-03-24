@@ -22,7 +22,8 @@ export const META_REFERENCE_LIBRARY = [
     id: "reels",
     title: "Reels-native creative",
     source_label: "Meta for Business",
-    source_url: "https://www.facebook.com/business/ads/facebook-instagram-reels-ads",
+    source_url:
+      "https://www.facebook.com/business/ads/facebook-instagram-reels-ads",
     insight:
       "Meta recommends Reels-native creative: vertical video, early brand or product proof, safe-zone layouts, and creative built for sound-on viewing.",
   },
@@ -71,11 +72,7 @@ const ACTION_TYPE_GROUPS = {
     "onsite_conversion.lead_grouped",
     "offsite_conversion.fb_pixel_lead",
   ],
-  linkClicks: [
-    "link_click",
-    "inline_link_click",
-    "landing_page_view",
-  ],
+  linkClicks: ["link_click", "inline_link_click", "landing_page_view"],
 };
 
 const toNumber = (value) => {
@@ -86,7 +83,8 @@ const toNumber = (value) => {
 const normalizeArray = (value) => (Array.isArray(value) ? value : []);
 
 const normalizeText = (value) => String(value || "").trim();
-const getMetaReference = (id) => META_REFERENCE_MAP.get(normalizeText(id)) || null;
+const getMetaReference = (id) =>
+  META_REFERENCE_MAP.get(normalizeText(id)) || null;
 
 const createServiceError = (status, publicMessage, details = "") => {
   const error = new Error(details || publicMessage);
@@ -125,7 +123,11 @@ const parseJsonObject = (value, fallback = {}) => {
   }
 };
 
-const getDateRange = ({ since, until, days = DEFAULT_META_LOOKBACK_DAYS } = {}) => {
+const getDateRange = ({
+  since,
+  until,
+  days = DEFAULT_META_LOOKBACK_DAYS,
+} = {}) => {
   const normalizedSince = normalizeText(since);
   const normalizedUntil = normalizeText(until);
 
@@ -138,7 +140,11 @@ const getDateRange = ({ since, until, days = DEFAULT_META_LOOKBACK_DAYS } = {}) 
 
   const endDate = new Date();
   const startDate = new Date(endDate);
-  startDate.setDate(endDate.getDate() - Math.max(1, toNumber(days) || DEFAULT_META_LOOKBACK_DAYS) + 1);
+  startDate.setDate(
+    endDate.getDate() -
+      Math.max(1, toNumber(days) || DEFAULT_META_LOOKBACK_DAYS) +
+      1,
+  );
 
   return {
     since: startDate.toISOString().slice(0, 10),
@@ -242,7 +248,8 @@ const normalizeMetaRequestError = (error) => {
 
   return createServiceError(
     400,
-    providerMessage || "Meta API request failed. Check the saved Meta configuration and try again.",
+    providerMessage ||
+      "Meta API request failed. Check the saved Meta configuration and try again.",
     providerMessage,
   );
 };
@@ -261,7 +268,9 @@ const requestMetaPage = async ({ url, params = {}, accessToken }) => {
 };
 
 const fetchMetaPaged = async ({ path, params = {}, accessToken }) => {
-  let nextUrl = path.startsWith("http") ? path : `${META_GRAPH_BASE_URL}${path}`;
+  let nextUrl = path.startsWith("http")
+    ? path
+    : `${META_GRAPH_BASE_URL}${path}`;
   let nextParams = { ...params };
   const rows = [];
   let pageCount = 0;
@@ -288,7 +297,9 @@ const fetchMetaPaged = async ({ path, params = {}, accessToken }) => {
 
 const extractActionMetric = (items, actionTypes = []) => {
   const normalizedActionTypes = new Set(
-    normalizeArray(actionTypes).map((value) => normalizeText(value).toLowerCase()),
+    normalizeArray(actionTypes).map((value) =>
+      normalizeText(value).toLowerCase(),
+    ),
   );
 
   return normalizeArray(items).reduce((sum, item) => {
@@ -327,14 +338,17 @@ const deriveMetricsFromInsight = (row) => {
   const inlineLinkClicks =
     toNumber(row?.inline_link_clicks) ||
     extractActionMetric(row?.actions, ACTION_TYPE_GROUPS.linkClicks);
-  const purchases = extractActionMetric(row?.actions, ACTION_TYPE_GROUPS.purchases);
+  const purchases = extractActionMetric(
+    row?.actions,
+    ACTION_TYPE_GROUPS.purchases,
+  );
   const purchaseValue = extractActionMetric(
     row?.action_values,
     ACTION_TYPE_GROUPS.purchases,
   );
   const leads = extractActionMetric(row?.actions, ACTION_TYPE_GROUPS.leads);
   const videoPlays = extractMetricValue(row?.video_play_actions);
-  const thruplays = extractMetricValue(row?.thruplays);
+  const thruplays = extractMetricValue(row?.video_30_sec_watched_actions); // Use 30-second video watches instead of thruplays
   const videoP25Watched = extractMetricValue(row?.video_p25_watched_actions);
   const videoP50Watched = extractMetricValue(row?.video_p50_watched_actions);
   const videoP75Watched = extractMetricValue(row?.video_p75_watched_actions);
@@ -348,7 +362,8 @@ const deriveMetricsFromInsight = (row) => {
   const ctr =
     toNumber(row?.ctr) || (impressions > 0 ? (clicks / impressions) * 100 : 0);
   const cpc = toNumber(row?.cpc) || (clicks > 0 ? spend / clicks : 0);
-  const cpm = toNumber(row?.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0);
+  const cpm =
+    toNumber(row?.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0);
   const frequency =
     toNumber(row?.frequency) || (reach > 0 ? impressions / reach : 0);
   const linkCtr = impressions > 0 ? (inlineLinkClicks / impressions) * 100 : 0;
@@ -691,14 +706,17 @@ const normalizeCampaignRow = (row) => {
 };
 
 const normalizeAdSetRow = (row) => {
-  const adsetId = normalizeText(row?.adset_id || row?.id || row?.object_id) || null;
+  const adsetId =
+    normalizeText(row?.adset_id || row?.id || row?.object_id) || null;
 
   return {
     id: adsetId,
     adset_id: adsetId,
     account_id: normalizeText(row?.account_id) || null,
     campaign_id: normalizeText(row?.campaign_id) || null,
-    name: normalizeText(row?.name || row?.adset_name || row?.object_name) || adsetId,
+    name:
+      normalizeText(row?.name || row?.adset_name || row?.object_name) ||
+      adsetId,
     status: normalizeText(row?.status) || null,
     effective_status: normalizeText(row?.effective_status) || null,
     is_active: isMetaEntityActive(row?.effective_status, row?.status),
@@ -821,7 +839,10 @@ export const buildMetaEntityCatalogRows = ({
       account_name: normalizedAccount.name,
       status: normalizeText(account?.account_status),
       effective_status: normalizeText(account?.account_status),
-      is_active: isMetaEntityActive(account?.account_status, account?.account_status),
+      is_active: isMetaEntityActive(
+        account?.account_status,
+        account?.account_status,
+      ),
       currency: normalizeText(account?.currency),
       timezone_name: normalizeText(account?.timezone_name),
       raw_payload: account || {},
@@ -1067,7 +1088,7 @@ export const fetchMetaInsightsForAccount = async ({
     "video_p75_watched_actions",
     "video_p95_watched_actions",
     "video_p100_watched_actions",
-    "thruplays",
+    "video_30_sec_watched_actions",
     "date_start",
     "date_stop",
   ].join(",");
@@ -1182,8 +1203,10 @@ export const buildMetaOverview = ({
     campaigns_count: mergedCampaigns.length,
     adsets_count: mergedAdsets.length,
     ads_count: mergedAds.length,
-    active_accounts_count: mergedAccounts.filter((item) => item?.is_active).length,
-    active_campaigns_count: mergedCampaigns.filter((item) => item?.is_active).length,
+    active_accounts_count: mergedAccounts.filter((item) => item?.is_active)
+      .length,
+    active_campaigns_count: mergedCampaigns.filter((item) => item?.is_active)
+      .length,
     active_adsets_count: mergedAdsets.filter((item) => item?.is_active).length,
     active_ads_count: mergedAds.filter((item) => item?.is_active).length,
   };
@@ -1247,10 +1270,7 @@ const buildMetaBenchmarks = ({ overview = {}, storeSnapshot = {} }) => {
     high_frequency: 3.5,
     min_link_ctr: Math.max(0.9, toNumber(summary?.link_ctr) * 0.8),
     strong_link_ctr: Math.max(1.2, toNumber(summary?.link_ctr) * 1.1),
-    min_conversion_rate: Math.max(
-      1,
-      toNumber(summary?.conversion_rate) * 0.8,
-    ),
+    min_conversion_rate: Math.max(1, toNumber(summary?.conversion_rate) * 0.8),
     strong_conversion_rate: Math.max(
       2,
       toNumber(summary?.conversion_rate) * 1.1,
@@ -1433,7 +1453,14 @@ const buildDecisionRow = ({ row, level, benchmarks }) => {
   const negativeKeys = new Set(
     drivers
       .map((driver) => driver.key)
-      .filter((key) => key.startsWith("low_") || key.startsWith("high_") || key === "no_conversion" || key === "weak_video_hold" || key === "expensive_traffic"),
+      .filter(
+        (key) =>
+          key.startsWith("low_") ||
+          key.startsWith("high_") ||
+          key === "no_conversion" ||
+          key === "weak_video_hold" ||
+          key === "expensive_traffic",
+      ),
   );
   const scalePurchaseFloor =
     level === "campaign" ? 3 : level === "adset" ? 2 : 1;
@@ -1488,7 +1515,8 @@ const buildDecisionRow = ({ row, level, benchmarks }) => {
     ? "fatigue"
     : negativeKeys.has("weak_video_hold") || negativeKeys.has("low_link_ctr")
       ? "creative"
-      : negativeKeys.has("low_conversion_rate") || negativeKeys.has("no_conversion")
+      : negativeKeys.has("low_conversion_rate") ||
+          negativeKeys.has("no_conversion")
         ? "conversion"
         : negativeKeys.has("expensive_traffic")
           ? "cost"
@@ -1526,8 +1554,12 @@ const rankDecisionRows = (rows = [], level, benchmarks) =>
         keep: 3,
       };
 
-      if (decisionPriority[left.decision] !== decisionPriority[right.decision]) {
-        return decisionPriority[left.decision] - decisionPriority[right.decision];
+      if (
+        decisionPriority[left.decision] !== decisionPriority[right.decision]
+      ) {
+        return (
+          decisionPriority[left.decision] - decisionPriority[right.decision]
+        );
       }
 
       return toNumber(right.spend) - toNumber(left.spend);
@@ -1563,7 +1595,10 @@ const buildCreativeDiagnostics = (ads = [], benchmarks) =>
         headline = "Weak first impression";
         action =
           "Test a sharper opening frame, faster branding, and clearer product demonstration in the first seconds.";
-      } else if (videoHoldRate > 0 && videoHoldRate < benchmarks.low_video_hold_rate) {
+      } else if (
+        videoHoldRate > 0 &&
+        videoHoldRate < benchmarks.low_video_hold_rate
+      ) {
         diagnosis = "weak_hold";
         headline = "Viewers drop early";
         action =
@@ -1607,13 +1642,15 @@ export const buildMetaDecisionBoard = ({
     "campaign",
     benchmarks,
   ).slice(0, 12);
-  const adsets = rankDecisionRows(
-    overview?.adsets,
-    "adset",
-    benchmarks,
-  ).slice(0, 12);
+  const adsets = rankDecisionRows(overview?.adsets, "adset", benchmarks).slice(
+    0,
+    12,
+  );
   const ads = rankDecisionRows(overview?.ads, "ad", benchmarks).slice(0, 16);
-  const creativeDiagnostics = buildCreativeDiagnostics(overview?.ads, benchmarks);
+  const creativeDiagnostics = buildCreativeDiagnostics(
+    overview?.ads,
+    benchmarks,
+  );
 
   const decisionSummary = campaigns.reduce(
     (summary, row) => {
@@ -1653,7 +1690,9 @@ export const buildMetaDecisionBoard = ({
     adsets,
     ads,
     scale_now: campaigns.filter((row) => row.decision === "scale").slice(0, 4),
-    keep_running: campaigns.filter((row) => row.decision === "keep").slice(0, 4),
+    keep_running: campaigns
+      .filter((row) => row.decision === "keep")
+      .slice(0, 4),
     test_next: campaigns.filter((row) => row.decision === "test").slice(0, 4),
     pause_now: campaigns.filter((row) => row.decision === "pause").slice(0, 4),
     creative_diagnostics: creativeDiagnostics,
@@ -1700,7 +1739,11 @@ export const buildMetaQuestionSuggestions = ({
   const suggestions = [];
   const seenIds = new Set();
   const pushSuggestion = (suggestion) => {
-    if (!suggestion?.id || !suggestion?.question || seenIds.has(suggestion.id)) {
+    if (
+      !suggestion?.id ||
+      !suggestion?.question ||
+      seenIds.has(suggestion.id)
+    ) {
       return;
     }
 
@@ -1826,7 +1869,9 @@ export const buildMetaQuestionSuggestions = ({
             : `${conversionPressureCampaigns.length} campaigns are flagged with conversion-side pressure.`,
         sourceId: "measurement",
         dataPoints: buildQuestionDataPoints(
-          postClickDrops.length > 0 ? postClickDrops : conversionPressureCampaigns,
+          postClickDrops.length > 0
+            ? postClickDrops
+            : conversionPressureCampaigns,
           (row) =>
             `${normalizeText(row?.name) || normalizeText(row?.id)} | Link CTR ${toFixedMetric(row?.link_ctr)}% | CVR ${toFixedMetric(row?.conversion_rate)}%`,
         ),
@@ -1836,7 +1881,8 @@ export const buildMetaQuestionSuggestions = ({
 
   if (
     fatiguedCampaigns.length > 0 ||
-    toNumber(summary?.frequency) >= Math.max(3, toNumber(benchmarks?.high_frequency))
+    toNumber(summary?.frequency) >=
+      Math.max(3, toNumber(benchmarks?.high_frequency))
   ) {
     pushSuggestion(
       buildQuestionSuggestion({
@@ -1863,7 +1909,8 @@ export const buildMetaQuestionSuggestions = ({
     expensiveCampaigns.length > 0 ||
     (toNumber(summary?.cpm) > 0 &&
       toNumber(summary?.link_ctr) > 0 &&
-      toNumber(summary?.link_ctr) < Math.max(1.2, toNumber(benchmarks?.strong_link_ctr)))
+      toNumber(summary?.link_ctr) <
+        Math.max(1.2, toNumber(benchmarks?.strong_link_ctr)))
   ) {
     pushSuggestion(
       buildQuestionSuggestion({
@@ -1972,7 +2019,8 @@ export const buildMetaQuestionSuggestions = ({
   return suggestions
     .sort(
       (left, right) =>
-        (priorityRank[left.priority] ?? 99) - (priorityRank[right.priority] ?? 99),
+        (priorityRank[left.priority] ?? 99) -
+        (priorityRank[right.priority] ?? 99),
     )
     .slice(0, 8);
 };
@@ -2000,9 +2048,7 @@ const extractFirstJsonObject = (content) => {
   return null;
 };
 
-export const fetchOpenRouterModels = async ({
-  apiKey = "",
-} = {}) => {
+export const fetchOpenRouterModels = async ({ apiKey = "" } = {}) => {
   const headers = {
     "Content-Type": "application/json",
   };
@@ -2025,11 +2071,7 @@ export const fetchOpenRouterModels = async ({
   }));
 };
 
-const buildOpenRouterHeaders = ({
-  apiKey,
-  siteUrl = "",
-  siteName = "",
-}) => {
+const buildOpenRouterHeaders = ({ apiKey, siteUrl = "", siteName = "" }) => {
   const headers = {
     Authorization: `Bearer ${normalizeText(apiKey)}`,
     "Content-Type": "application/json",
@@ -2061,11 +2103,13 @@ const requestOpenRouterChatCompletion = async ({
       {
         model: normalizeText(model) || DEFAULT_OPENROUTER_MODEL,
         temperature,
-        max_completion_tokens: Math.max(128, toNumber(maxCompletionTokens) || 900),
+        max_completion_tokens: Math.max(
+          128,
+          toNumber(maxCompletionTokens) || 900,
+        ),
         messages: normalizeArray(messages).filter(
           (message) =>
-            normalizeText(message?.role) &&
-            normalizeText(message?.content),
+            normalizeText(message?.role) && normalizeText(message?.content),
         ),
       },
       {
@@ -2175,7 +2219,9 @@ const buildAiPrompt = ({
   ].join(" "),
   user: JSON.stringify(
     {
-      focus: normalizeText(focus) || "Improve performance, budget allocation, and creative testing decisions.",
+      focus:
+        normalizeText(focus) ||
+        "Improve performance, budget allocation, and creative testing decisions.",
       store_snapshot: {
         financial: storeSnapshot?.financial || {},
         orders: storeSnapshot?.orders || {},
@@ -2302,7 +2348,10 @@ export const buildAssistantContextSnapshot = ({
     orders: storeSnapshot?.orders || {},
     catalog: storeSnapshot?.catalog || {},
     top_products: normalizeArray(storeSnapshot?.top_products).slice(0, 5),
-    low_stock_products: normalizeArray(storeSnapshot?.low_stock_products).slice(0, 5),
+    low_stock_products: normalizeArray(storeSnapshot?.low_stock_products).slice(
+      0,
+      5,
+    ),
   },
   meta_summary: metaOverview?.summary || {},
   top_campaigns: buildAssistantCampaignRows(metaOverview?.campaigns, 6),
@@ -2351,11 +2400,7 @@ export const generateOpenRouterStoreAssistantReply = async ({
       "Explain ROAS in plain language using CTR, conversion rate, CPM, frequency, and video diagnostics when available.",
       "When data is missing, say that clearly instead of inventing numbers.",
     ].join(" "),
-    context: JSON.stringify(
-      compactContext,
-      null,
-      2,
-    ),
+    context: JSON.stringify(compactContext, null, 2),
   };
 
   const completion = await requestOpenRouterChatCompletion({

@@ -268,8 +268,6 @@ export default function BarcodeLabelModal({
   const [codePreference, setCodePreference] = useState(
     savedSettings.codePreference,
   );
-  const [footerLine1, setFooterLine1] = useState(savedSettings.footerLine1);
-  const [footerLine2, setFooterLine2] = useState(savedSettings.footerLine2);
   const [customFooterLines, setCustomFooterLines] = useState(
     savedCustomFooterLines,
   );
@@ -310,7 +308,11 @@ export default function BarcodeLabelModal({
 
   // Get custom footer lines for the current target, with SKU as default for line 1
   const currentFooterLines = useMemo(() => {
-    if (!selectedTarget) return { line1: footerLine1, line2: footerLine2 };
+    if (!selectedTarget)
+      return {
+        line1: savedSettings.footerLine1,
+        line2: savedSettings.footerLine2,
+      };
 
     const targetKey = selectedTarget.key;
     const customLines = customFooterLines[targetKey];
@@ -319,10 +321,18 @@ export default function BarcodeLabelModal({
       line1:
         customLines?.line1 !== undefined
           ? customLines.line1
-          : selectedTarget.sku || footerLine1,
-      line2: customLines?.line2 !== undefined ? customLines.line2 : footerLine2,
+          : selectedTarget.sku || savedSettings.footerLine1,
+      line2:
+        customLines?.line2 !== undefined
+          ? customLines.line2
+          : savedSettings.footerLine2,
     };
-  }, [selectedTarget, customFooterLines, footerLine1, footerLine2]);
+  }, [
+    selectedTarget,
+    customFooterLines,
+    savedSettings.footerLine1,
+    savedSettings.footerLine2,
+  ]);
 
   const previewLabel = useMemo(
     () => ({
@@ -392,10 +402,16 @@ export default function BarcodeLabelModal({
       presetId,
       copies,
       codePreference,
-      footerLine1,
-      footerLine2,
+      footerLine1: savedSettings.footerLine1,
+      footerLine2: savedSettings.footerLine2,
     });
-  }, [codePreference, copies, footerLine1, footerLine2, presetId]);
+  }, [
+    codePreference,
+    copies,
+    presetId,
+    savedSettings.footerLine1,
+    savedSettings.footerLine2,
+  ]);
 
   // Save custom footer lines when they change
   useEffect(() => {

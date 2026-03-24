@@ -1749,6 +1749,7 @@ router.get(
         (acc, item) => {
           acc.total_revenue += toNumber(item.total_revenue);
           acc.total_cost += toNumber(item.total_cost);
+          acc.total_gross_profit += toNumber(item.gross_profit);
           acc.total_operational_costs += toNumber(item.operational_costs_total);
           acc.total_net_profit += toNumber(item.net_profit);
           acc.total_sold_units += toNumber(item.sold_quantity);
@@ -1757,6 +1758,7 @@ router.get(
         {
           total_revenue: 0,
           total_cost: 0,
+          total_gross_profit: 0,
           total_operational_costs: 0,
           total_net_profit: 0,
           total_sold_units: 0,
@@ -1781,6 +1783,7 @@ router.get(
         summary: {
           total_revenue: parseFloat(summary.total_revenue.toFixed(2)),
           total_cost: parseFloat(summary.total_cost.toFixed(2)),
+          total_gross_profit: parseFloat(summary.total_gross_profit.toFixed(2)),
           total_operational_costs: parseFloat(
             summary.total_operational_costs.toFixed(2),
           ),

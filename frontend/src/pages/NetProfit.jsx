@@ -34,6 +34,7 @@ import {
 const SUMMARY_DEFAULT = {
   total_revenue: 0,
   total_cost: 0,
+  total_gross_profit: 0,
   total_operational_costs: 0,
   total_net_profit: 0,
   total_sold_units: 0,
@@ -419,6 +420,7 @@ export default function NetProfit() {
         toAmount(product.orders_count),
         toAmount(product.avg_selling_price),
         toAmount(product.total_revenue),
+        toAmount(product.gross_profit),
         hasCostPrice(product.cost_price) ? toAmount(product.cost_price) : "",
         toAmount(product.ads_cost),
         toAmount(product.operation_cost),
@@ -472,8 +474,9 @@ export default function NetProfit() {
           headers: ["Metric", "Value"],
           rows: [
             ["Total revenue", toAmount(summary.total_revenue)],
-            ["Total cost", toAmount(summary.total_cost)],
-            ["Operational costs", toAmount(summary.total_operational_costs)],
+            ["Saved product costs", toAmount(summary.total_cost)],
+            ["Gross profit", toAmount(summary.total_gross_profit)],
+            ["Tracked extra costs", toAmount(summary.total_operational_costs)],
             ["Total net profit", toAmount(summary.total_net_profit)],
             ["Sold units", toAmount(summary.total_sold_units)],
             ["Profit margin", toAmount(summary.profit_margin)],
@@ -487,7 +490,8 @@ export default function NetProfit() {
             "Sold Qty",
             "Orders",
             "Avg Sell",
-            "Revenue",
+            "Sales Revenue",
+            "Gross Profit",
             "Cost / Unit",
             "Ads / Unit",
             "Operations / Unit",
@@ -542,8 +546,8 @@ export default function NetProfit() {
           <div>
             <h1 className="text-3xl font-bold text-gray-800">Net Profit</h1>
             <p className="text-gray-600 mt-1">
-              Unified product profitability using the same saved unit costs and
-              tracked extras that feed product details and realized order profit
+              Sales revenue stays raw. Gross profit removes saved product costs,
+              and net profit removes both saved product costs and tracked extras.
             </p>
           </div>
 
@@ -559,9 +563,9 @@ export default function NetProfit() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-7">
             <SummaryCard
-              label="Total Revenue"
+              label="Sales Revenue"
               value={formatAmount(summary.total_revenue)}
               icon={DollarSign}
               color="bg-sky-100 text-sky-700"
@@ -571,6 +575,12 @@ export default function NetProfit() {
               value={formatAmount(summary.total_cost)}
               icon={Package}
               color="bg-amber-100 text-amber-700"
+            />
+            <SummaryCard
+              label="Gross Profit"
+              value={formatAmount(summary.total_gross_profit)}
+              icon={TrendingUp}
+              color="bg-teal-100 text-teal-700"
             />
             <SummaryCard
               label="Tracked Extra Costs"
@@ -633,12 +643,13 @@ export default function NetProfit() {
 
           <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
             <div className="overflow-x-auto" dir="ltr">
-              <table className="data-table table-fixed w-full min-w-[1880px]">
+              <table className="data-table table-fixed w-full min-w-[2060px]">
                 <colgroup>
                   <col className="w-[340px]" />
                   <col className="w-[110px]" />
                   <col className="w-[110px]" />
                   <col className="w-[160px]" />
+                  <col className="w-[170px]" />
                   <col className="w-[170px]" />
                   <col className="w-[620px]" />
                   <col className="w-[170px]" />
@@ -661,7 +672,10 @@ export default function NetProfit() {
                       Avg Sell
                     </th>
                     <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Revenue
+                      Sales Revenue
+                    </th>
+                    <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Gross Profit
                     </th>
                     <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Cost Breakdown
@@ -797,8 +811,19 @@ export default function NetProfit() {
                         <td className="px-4 py-5">
                           <DataMetric
                             value={formatAmount(product.total_revenue)}
-                            note="gross sales"
+                            note="sales before any costs"
                             valueClassName="text-sky-700"
+                          />
+                        </td>
+                        <td className="px-4 py-5">
+                          <DataMetric
+                            value={formatAmount(product.gross_profit)}
+                            note={`sales ${formatAmount(
+                              product.total_revenue,
+                            )} - saved costs ${formatAmount(
+                              breakdown.saved.total,
+                            )}`}
+                            valueClassName={getProfitToneClass(product.gross_profit)}
                           />
                         </td>
                         <td className="px-4 py-5">
@@ -946,11 +971,11 @@ export default function NetProfit() {
                         <td className="px-4 py-5">
                           <DataMetric
                             value={formatAmount(product.net_profit)}
-                            note={
-                              toAmount(product.net_profit) >= 0
-                                ? "profitable"
-                                : "loss making"
-                            }
+                            note={`gross profit ${formatAmount(
+                              product.gross_profit,
+                            )} - tracked extras ${formatAmount(
+                              breakdown.tracked.total,
+                            )}`}
                             valueClassName={getProfitToneClass(product.net_profit)}
                           />
                         </td>

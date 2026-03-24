@@ -39,10 +39,13 @@ const readSavedSettings = () => {
 
     const parsedValue = JSON.parse(rawValue);
     return {
-      presetId: String(parsedValue?.presetId || DEFAULT_BARCODE_LABEL_PRESET_ID),
+      presetId: String(
+        parsedValue?.presetId || DEFAULT_BARCODE_LABEL_PRESET_ID,
+      ),
       copies: normalizeLabelCopies(parsedValue?.copies),
       codePreference:
-        parsedValue?.codePreference === "barcode" || parsedValue?.codePreference === "sku"
+        parsedValue?.codePreference === "barcode" ||
+        parsedValue?.codePreference === "sku"
           ? parsedValue.codePreference
           : "auto",
       footerLine1: String(parsedValue?.footerLine1 || "Tetiano"),
@@ -76,8 +79,41 @@ const writeSavedSettings = (settings) => {
   );
 };
 
+const readCustomFooterLines = () => {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const stored = window.localStorage.getItem(
+      "barcode-label-custom-footer-lines",
+    );
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeCustomFooterLines = (customLines) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      "barcode-label-custom-footer-lines",
+      JSON.stringify(customLines),
+    );
+  } catch {
+    // Ignore storage errors
+  }
+};
+
 const createBarcodeSvgMarkup = (value) => {
-  const svgElement = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const svgElement = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "svg",
+  );
   JsBarcode(svgElement, value, getBarcodeRenderOptions(value));
   return svgElement.outerHTML;
 };
@@ -105,7 +141,10 @@ function BarcodeSvg({ value }) {
       setRenderError("");
     } catch (error) {
       setRenderError(
-        select("تعذر توليد الباركود لهذا الكود", "Unable to render this barcode value"),
+        select(
+          "تعذر توليد الباركود لهذا الكود",
+          "Unable to render this barcode value",
+        ),
       );
       while (svgRef.current.firstChild) {
         svgRef.current.removeChild(svgRef.current.firstChild);
@@ -121,15 +160,21 @@ function BarcodeSvg({ value }) {
     );
   }
 
-  return <svg ref={svgRef} className="h-full w-full max-w-full" aria-hidden="true" />;
+  return (
+    <svg ref={svgRef} className="h-full w-full max-w-full" aria-hidden="true" />
+  );
 }
 
 function Field({ label, hint, children }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-semibold text-slate-800">{label}</span>
+      <span className="mb-2 block text-sm font-semibold text-slate-800">
+        {label}
+      </span>
       {children}
-      {hint ? <span className="mt-2 block text-xs text-slate-500">{hint}</span> : null}
+      {hint ? (
+        <span className="mt-2 block text-xs text-slate-500">{hint}</span>
+      ) : null}
     </label>
   );
 }
@@ -145,7 +190,10 @@ function LabelPreviewCard({ label, preset, direction }) {
         height: `${preset.heightMm * scale}px`,
       }}
     >
-      <div className="grid h-full grid-rows-[auto_minmax(0,1fr)_auto_auto_auto] gap-[4px] p-[7px]" dir={direction}>
+      <div
+        className="grid h-full grid-rows-[auto_minmax(0,1fr)_auto_auto_auto] gap-[4px] p-[7px]"
+        dir={direction}
+      >
         <div className="overflow-hidden">
           <div
             className="overflow-hidden text-[11px] font-bold leading-[1.05] text-slate-950"
@@ -175,7 +223,10 @@ function LabelPreviewCard({ label, preset, direction }) {
           <BarcodeSvg value={label.code} />
         </div>
 
-        <div className="truncate text-center text-[13px] font-black tracking-[0.12em] text-slate-950" dir="ltr">
+        <div
+          className="truncate text-center text-[13px] font-black tracking-[0.12em] text-slate-950"
+          dir="ltr"
+        >
           {label.code}
         </div>
 
@@ -210,12 +261,18 @@ export default function BarcodeLabelModal({
 }) {
   const { isRTL, select } = useLocale();
   const savedSettings = useMemo(() => readSavedSettings(), []);
+  const savedCustomFooterLines = useMemo(() => readCustomFooterLines(), []);
   const [selectedTargetKey, setSelectedTargetKey] = useState(defaultTargetKey);
   const [presetId, setPresetId] = useState(savedSettings.presetId);
   const [copies, setCopies] = useState(savedSettings.copies);
-  const [codePreference, setCodePreference] = useState(savedSettings.codePreference);
+  const [codePreference, setCodePreference] = useState(
+    savedSettings.codePreference,
+  );
   const [footerLine1, setFooterLine1] = useState(savedSettings.footerLine1);
   const [footerLine2, setFooterLine2] = useState(savedSettings.footerLine2);
+  const [customFooterLines, setCustomFooterLines] = useState(
+    savedCustomFooterLines,
+  );
   const [printError, setPrintError] = useState("");
 
   const normalizedTargets = useMemo(
@@ -251,6 +308,22 @@ export default function BarcodeLabelModal({
     [codePreference, selectedTarget],
   );
 
+  // Get custom footer lines for the current target, with SKU as default for line 1
+  const currentFooterLines = useMemo(() => {
+    if (!selectedTarget) return { line1: footerLine1, line2: footerLine2 };
+
+    const targetKey = selectedTarget.key;
+    const customLines = customFooterLines[targetKey];
+
+    return {
+      line1:
+        customLines?.line1 !== undefined
+          ? customLines.line1
+          : selectedTarget.sku || footerLine1,
+      line2: customLines?.line2 !== undefined ? customLines.line2 : footerLine2,
+    };
+  }, [selectedTarget, customFooterLines, footerLine1, footerLine2]);
+
   const previewLabel = useMemo(
     () => ({
       title: selectedTarget?.title || "",
@@ -263,11 +336,18 @@ export default function BarcodeLabelModal({
           : resolvedCode.source === "sku"
             ? "SKU"
             : "",
-      footerLines: [footerLine1, footerLine2]
+      footerLines: [currentFooterLines.line1, currentFooterLines.line2]
         .map((line) => String(line || "").trim())
         .filter(Boolean),
     }),
-    [footerLine1, footerLine2, resolvedCode.source, resolvedCode.value, select, selectedTarget],
+    [
+      currentFooterLines.line1,
+      currentFooterLines.line2,
+      resolvedCode.source,
+      resolvedCode.value,
+      select,
+      selectedTarget,
+    ],
   );
 
   useEffect(() => {
@@ -317,11 +397,43 @@ export default function BarcodeLabelModal({
     });
   }, [codePreference, copies, footerLine1, footerLine2, presetId]);
 
+  // Save custom footer lines when they change
+  useEffect(() => {
+    writeCustomFooterLines(customFooterLines);
+  }, [customFooterLines]);
+
+  // Functions to update custom footer lines for current target
+  const updateCurrentFooterLine1 = (value) => {
+    if (!selectedTarget) return;
+
+    setCustomFooterLines((prev) => ({
+      ...prev,
+      [selectedTarget.key]: {
+        ...prev[selectedTarget.key],
+        line1: value,
+      },
+    }));
+  };
+
+  const updateCurrentFooterLine2 = (value) => {
+    if (!selectedTarget) return;
+
+    setCustomFooterLines((prev) => ({
+      ...prev,
+      [selectedTarget.key]: {
+        ...prev[selectedTarget.key],
+        line2: value,
+      },
+    }));
+  };
+
   if (!open) {
     return null;
   }
 
-  const canChooseCodeSource = Boolean(selectedTarget?.barcode && selectedTarget?.sku);
+  const canChooseCodeSource = Boolean(
+    selectedTarget?.barcode && selectedTarget?.sku,
+  );
   const hasPrintableValue = Boolean(previewLabel.code);
   const printableTargetsCount = normalizedTargets.filter(
     (target) => resolveBarcodeLabelValue(target, "auto").value,
@@ -369,7 +481,10 @@ export default function BarcodeLabelModal({
     } catch (error) {
       setPrintError(
         error?.message ||
-          select("حدث خطأ أثناء تجهيز ليبل الطباعة.", "Failed to prepare the print label."),
+          select(
+            "حدث خطأ أثناء تجهيز ليبل الطباعة.",
+            "Failed to prepare the print label.",
+          ),
       );
     }
   };
@@ -391,7 +506,10 @@ export default function BarcodeLabelModal({
               {select("طباعة ليبل", "Label printer")}
             </div>
             <h2 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-slate-950">
-              {select("طباعة باركود بمقاس ثابت", "Print barcode labels at an exact size")}
+              {select(
+                "طباعة باركود بمقاس ثابت",
+                "Print barcode labels at an exact size",
+              )}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
               {select(
@@ -430,14 +548,21 @@ export default function BarcodeLabelModal({
                     >
                       <select
                         value={selectedTarget?.key || ""}
-                        onChange={(event) => setSelectedTargetKey(event.target.value)}
+                        onChange={(event) =>
+                          setSelectedTargetKey(event.target.value)
+                        }
                         className="app-input px-4 py-3 text-sm"
                       >
                         {normalizedTargets.map((target) => {
-                          const targetCode = resolveBarcodeLabelValue(target, "auto").value;
+                          const targetCode = resolveBarcodeLabelValue(
+                            target,
+                            "auto",
+                          ).value;
                           return (
                             <option key={target.key} value={target.key}>
-                              {target.subtitle ? `${target.title} | ${target.subtitle}` : target.title}
+                              {target.subtitle
+                                ? `${target.title} | ${target.subtitle}`
+                                : target.title}
                               {targetCode ? ` | ${targetCode}` : ""}
                             </option>
                           );
@@ -453,9 +578,13 @@ export default function BarcodeLabelModal({
                       )}
                     >
                       <div className="app-note rounded-[22px] px-4 py-3 text-sm text-slate-700">
-                        <div className="font-semibold text-slate-900">{selectedTarget?.title}</div>
+                        <div className="font-semibold text-slate-900">
+                          {selectedTarget?.title}
+                        </div>
                         {selectedTarget?.subtitle ? (
-                          <div className="mt-1 text-xs text-slate-500">{selectedTarget.subtitle}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {selectedTarget.subtitle}
+                          </div>
                         ) : null}
                       </div>
                     </Field>
@@ -469,13 +598,21 @@ export default function BarcodeLabelModal({
                     )}
                   >
                     <select
-                      value={canChooseCodeSource ? codePreference : resolvedCode.source || "auto"}
-                      onChange={(event) => setCodePreference(event.target.value)}
+                      value={
+                        canChooseCodeSource
+                          ? codePreference
+                          : resolvedCode.source || "auto"
+                      }
+                      onChange={(event) =>
+                        setCodePreference(event.target.value)
+                      }
                       disabled={!canChooseCodeSource}
                       className="app-input px-4 py-3 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                     >
                       <option value="auto">{select("تلقائي", "Auto")}</option>
-                      <option value="barcode">{select("باركود", "Barcode")}</option>
+                      <option value="barcode">
+                        {select("باركود", "Barcode")}
+                      </option>
                       <option value="sku">SKU</option>
                     </select>
                   </Field>
@@ -515,7 +652,9 @@ export default function BarcodeLabelModal({
                       min="1"
                       max="200"
                       value={copies}
-                      onChange={(event) => setCopies(normalizeLabelCopies(event.target.value))}
+                      onChange={(event) =>
+                        setCopies(normalizeLabelCopies(event.target.value))
+                      }
                       className="app-input px-4 py-3 text-sm"
                     />
                   </Field>
@@ -531,10 +670,12 @@ export default function BarcodeLabelModal({
                   >
                     <input
                       type="text"
-                      value={footerLine1}
-                      onChange={(event) => setFooterLine1(event.target.value)}
+                      value={currentFooterLines.line1}
+                      onChange={(event) =>
+                        updateCurrentFooterLine1(event.target.value)
+                      }
                       className="app-input px-4 py-3 text-sm"
-                      placeholder="Tetiano"
+                      placeholder={selectedTarget?.sku || "Tetiano"}
                     />
                   </Field>
 
@@ -547,10 +688,15 @@ export default function BarcodeLabelModal({
                   >
                     <input
                       type="text"
-                      value={footerLine2}
-                      onChange={(event) => setFooterLine2(event.target.value)}
+                      value={currentFooterLines.line2}
+                      onChange={(event) =>
+                        updateCurrentFooterLine2(event.target.value)
+                      }
                       className="app-input px-4 py-3 text-sm"
-                      placeholder={select("الموقع أو الهاتف", "Website or phone")}
+                      placeholder={select(
+                        "الموقع أو الهاتف",
+                        "Website or phone",
+                      )}
                     />
                   </Field>
                 </div>
@@ -561,7 +707,10 @@ export default function BarcodeLabelModal({
                       <ScanLine size={14} />
                       {select("الكود الفعلي", "Active code")}
                     </div>
-                    <div className="mt-3 break-all text-lg font-semibold text-slate-950" dir="ltr">
+                    <div
+                      className="mt-3 break-all text-lg font-semibold text-slate-950"
+                      dir="ltr"
+                    >
                       {previewLabel.code || "-"}
                     </div>
                   </div>
@@ -581,7 +730,9 @@ export default function BarcodeLabelModal({
                       <Settings2 size={14} />
                       {select("عدد الليبلات", "Labels queued")}
                     </div>
-                    <div className="mt-3 text-lg font-semibold text-slate-950">{copies}</div>
+                    <div className="mt-3 text-lg font-semibold text-slate-950">
+                      {copies}
+                    </div>
                   </div>
                 </div>
 

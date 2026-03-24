@@ -869,6 +869,54 @@ const parseLineItems = (order) => {
   return [];
 };
 
+const parseProductData = (value) => {
+  if (!value) return {};
+
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+
+  return typeof value === "object" ? value : {};
+};
+
+const getOrderFulfillmentStatus = (order) => {
+  const data = parseOrderData(order);
+  return String(order?.fulfillment_status || data?.fulfillment_status || "")
+    .toLowerCase()
+    .trim();
+};
+
+const buildProductOrderMatchKeys = (product) => {
+  const keys = new Set();
+  const addKey = (value) => {
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      keys.add(normalized);
+    }
+  };
+
+  addKey(product?.id);
+  addKey(product?.shopify_id);
+  addKey(product?.sku);
+
+  const parsedProductData = parseProductData(product?.data);
+  const variants = Array.isArray(parsedProductData?.variants)
+    ? parsedProductData.variants
+    : [];
+
+  variants.forEach((variant) => {
+    addKey(variant?.id);
+    addKey(variant?.product_id);
+    addKey(variant?.sku);
+  });
+
+  return keys;
+};
+
 const getOrderCustomerKey = (order) => {
   const data = parseOrderData(order);
   const directCustomerId = String(
@@ -1744,6 +1792,127 @@ router.get(
     } catch (error) {
       console.error("Dashboard products error:", error);
       res.status(500).json({ error: "Failed to fetch products profitability" });
+    }
+  },
+);
+
+router.get(
+  "/products/:id/fulfilled-profit",
+  authenticateToken,
+  requireAdminRole,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const [products, orders] = await Promise.all([
+        getScopedRowsBatched(req, Product),
+        getScopedRowsBatched(req, Order),
+      ]);
+
+      const product =
+        products.find((item) => String(item?.id || "") === String(id || "")) ||
+        null;
+
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+
+      const productMatchKeys = buildProductOrderMatchKeys(product);
+      let fulfilledUnits = 0;
+      let successfulOrdersCount = 0;
+      let totalRevenue = 0;
+
+      orders
+        .filter(
+          (order) =>
+            !isCancelledOrder(order) &&
+            getOrderFulfillmentStatus(order) === "fulfilled" &&
+            getOrderBookedNetAmount(order) > 0,
+        )
+        .forEach((order) => {
+          const grossOrderAmount = getOrderBookedGrossAmount(order);
+          const netOrderAmount = getOrderBookedNetAmount(order);
+          const netRatio =
+            grossOrderAmount > 0
+              ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
+              : 0;
+
+          if (netRatio <= 0) {
+            return;
+          }
+
+          let orderMatched = false;
+
+          parseLineItems(order).forEach((item) => {
+            const itemKeys = [
+              String(item?.product_id || ""),
+              String(item?.variant_id || ""),
+              String(item?.id || ""),
+              String(item?.sku || ""),
+            ].filter(Boolean);
+
+            if (!itemKeys.some((key) => productMatchKeys.has(key))) {
+              return;
+            }
+
+            const quantity = toNumber(item?.quantity || 0) * netRatio;
+            const unitPrice = toNumber(item?.price || 0);
+
+            fulfilledUnits += quantity;
+            totalRevenue += quantity * unitPrice;
+            orderMatched = true;
+          });
+
+          if (orderMatched) {
+            successfulOrdersCount += 1;
+          }
+        });
+
+      const unitCost = toNumber(product.cost_price);
+      const adsCost = toNumber(product.ads_cost);
+      const operationCost = toNumber(product.operation_cost);
+      const shippingCost = toNumber(product.shipping_cost);
+      const totalUnitCost = unitCost + adsCost + operationCost + shippingCost;
+      const savedProductCostsTotal = totalUnitCost * fulfilledUnits;
+      const grossProfit = totalRevenue - savedProductCostsTotal;
+
+      const [productOperationalCosts] = await Promise.all([
+        getOperationalCostsByProduct([product.id], null),
+      ]);
+      const perUnitCosts = productOperationalCosts
+        .filter((cost) => String(cost?.apply_to || "") === "per_unit")
+        .reduce((sum, cost) => sum + toNumber(cost.amount), 0);
+      const perOrderCosts = productOperationalCosts
+        .filter((cost) => String(cost?.apply_to || "") === "per_order")
+        .reduce((sum, cost) => sum + toNumber(cost.amount), 0);
+      const fixedCosts = productOperationalCosts
+        .filter((cost) => String(cost?.apply_to || "") === "fixed")
+        .reduce((sum, cost) => sum + toNumber(cost.amount), 0);
+
+      const totalOperationalCosts =
+        perUnitCosts * fulfilledUnits +
+        perOrderCosts * successfulOrdersCount +
+        fixedCosts;
+      const netProfit = grossProfit - totalOperationalCosts;
+      const profitMargin =
+        totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+      res.json({
+        successful_orders_count: successfulOrdersCount,
+        fulfilled_units: parseFloat(fulfilledUnits.toFixed(2)),
+        total_revenue: parseFloat(totalRevenue.toFixed(2)),
+        total_unit_cost: parseFloat(totalUnitCost.toFixed(2)),
+        saved_product_costs_total: parseFloat(savedProductCostsTotal.toFixed(2)),
+        total_operational_costs: parseFloat(totalOperationalCosts.toFixed(2)),
+        gross_profit: parseFloat(grossProfit.toFixed(2)),
+        net_profit: parseFloat(netProfit.toFixed(2)),
+        profit_margin: parseFloat(profitMargin.toFixed(2)),
+      });
+    } catch (error) {
+      console.error("Dashboard product fulfilled profit error:", error);
+      res
+        .status(500)
+        .json({ error: "Failed to fetch product fulfilled profitability" });
     }
   },
 );

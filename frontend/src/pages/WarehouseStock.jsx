@@ -142,8 +142,11 @@ export default function WarehouseStock() {
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [setupNotice, setSetupNotice] = useState("");
+  const [syncingToShopify, setSyncingToShopify] = useState(false);
+  const [syncNotice, setSyncNotice] = useState(null);
 
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const canManageWarehouse = hasPermission("can_edit_products");
 
   const fetchStock = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -247,7 +250,7 @@ export default function WarehouseStock() {
   }, [filteredRows]);
 
   const openScanner = (row, mode = "") => {
-    if (!hasPermission("can_edit_products")) {
+    if (!canManageWarehouse) {
       return;
     }
 
@@ -262,10 +265,69 @@ export default function WarehouseStock() {
     }
     navigate(`/warehouse/scanner?${params.toString()}`);
   };
+
+  const handleSyncToShopify = useCallback(async () => {
+    if (!canManageWarehouse || syncingToShopify) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      select(
+        "سيتم استبدال مخزون Shopify ليطابق مخزون المخزن الفعلي لكل المنتجات في هذا المتجر. التنفيذ يدوي ولن يحدث إلا عند الضغط الآن. هل تريد المتابعة؟",
+        "This will overwrite Shopify inventory to match the actual warehouse stock for every product in this store. It only runs when you press this button. Continue?",
+      ),
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setSyncingToShopify(true);
+    setError("");
+    setSyncNotice(null);
+
+    try {
+      const response = await warehouseAPI.syncToShopify();
+      const payload = extractObject(response);
+      const syncedCount = toNumber(payload?.synced_count);
+      const unchangedCount = toNumber(payload?.unchanged_count);
+      const skippedCount = toNumber(payload?.skipped_count);
+      const failedCount = toNumber(payload?.failed_count);
+      const localUpdateError = String(payload?.local_update_error || "").trim();
+
+      setSyncNotice({
+        tone: failedCount > 0 || localUpdateError ? "warning" : "success",
+        title: select(
+          "انتهت مزامنة المخزن إلى Shopify",
+          "Warehouse to Shopify sync finished",
+        ),
+        message: select(
+          `تم تحديث ${formatCount(syncedCount)} صف على Shopify، و${formatCount(unchangedCount)} كان مطابقًا بالفعل، و${formatCount(skippedCount)} تم تخطيه، و${formatCount(failedCount)} فشل.`,
+          `Updated ${formatCount(syncedCount)} rows on Shopify, ${formatCount(unchangedCount)} were already matched, ${formatCount(skippedCount)} were skipped, and ${formatCount(failedCount)} failed.`,
+        ),
+        detail: localUpdateError
+          ? select(
+              `تم تحديث Shopify لكن تحديث النسخة المحلية تعثر: ${localUpdateError}`,
+              `Shopify was updated, but refreshing the local snapshot failed: ${localUpdateError}`,
+            )
+          : "",
+      });
+
+      await fetchStock({ silent: true });
+    } catch (requestError) {
+      console.error("Error syncing warehouse stock to Shopify:", requestError);
+      setError(
+        requestError?.response?.data?.error ||
+          "Failed to sync warehouse stock to Shopify",
+      );
+    } finally {
+      setSyncingToShopify(false);
+    }
+  }, [canManageWarehouse, fetchStock, select, syncingToShopify]);
+
   const tableAlignClass = isRTL ? "text-right" : "text-left";
   const searchIconPositionClass = isRTL ? "right-3" : "left-3";
   const searchInputPaddingClass = isRTL ? "pr-8 pl-3" : "pl-8 pr-3";
-  const canManageWarehouse = hasPermission("can_edit_products");
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -294,16 +356,62 @@ export default function WarehouseStock() {
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => fetchStock()}
-                  className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-800"
-                >
-                  <RefreshCw size={18} />
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                      type="button"
+                      onClick={handleSyncToShopify}
+                      disabled={!canManageWarehouse || syncingToShopify}
+                      title={select(
+                        canManageWarehouse
+                          ? "ÙŠØ¯ÙØ¹ Ù…Ø®Ø²ÙˆÙ† Ø§Ù„Ù…Ø®Ø²Ù† Ø§Ù„ÙØ¹Ù„ÙŠ Ø¥Ù„Ù‰ Shopify Ø¹Ù†Ø¯ Ø§Ù„Ø¶ØºØ· ÙÙ‚Ø·"
+                          : "ØªØ­ØªØ§Ø¬ ØµÙ„Ø§Ø­ÙŠØ© Ø¥Ø¯Ø§Ø±Ø© Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª Ù„ØªØ´ØºÙŠÙ„ Ù…Ø²Ø§Ù…Ù†Ø© Shopify",
+                        canManageWarehouse
+                          ? "Push the actual warehouse balance to Shopify when pressed"
+                          : "You need product edit permission to run the Shopify sync",
+                      )}
+                      className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {syncingToShopify ? (
+                        <RefreshCw size={18} className="animate-spin" />
+                      ) : (
+                        <ArrowUp size={18} />
+                      )}
+                      {select(
+                        syncingToShopify
+                          ? "جاري دفع المخزون إلى Shopify"
+                          : "مزامنة المخزن إلى Shopify",
+                        syncingToShopify
+                          ? "Syncing warehouse to Shopify"
+                          : "Sync Warehouse To Shopify",
+                      )}
+                    </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fetchStock()}
+                    disabled={syncingToShopify}
+                    className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
                   {select("تحديث", "Refresh")}
                 </button>
+                  <p
+                    className={`basis-full text-xs ${
+                      canManageWarehouse ? "text-slate-500" : "text-amber-700"
+                    }`}
+                  >
+                    {select(
+                      canManageWarehouse
+                        ? "Ù…Ø²Ø§Ù…Ù†Ø© Shopify ÙŠØ¯ÙˆÙŠØ© ÙÙ‚Ø·ØŒ ÙˆÙ„Ù† ØªØ¹Ù…Ù„ Ø¥Ù„Ø§ Ø¹Ù†Ø¯ Ø§Ù„Ø¶ØºØ· Ø¹Ù„Ù‰ Ø²Ø± Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø© ÙÙŠ Ø£Ø¹Ù„Ù‰ Ø§Ù„ØµÙØ­Ø©."
+                        : "Ø²Ø± Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø© Ø¸Ø§Ù‡Ø± Ù‡Ù†Ø§ØŒ Ù„ÙƒÙ†Ùƒ ØªØ­ØªØ§Ø¬ ØµÙ„Ø§Ø­ÙŠØ© Ø¥Ø¯Ø§Ø±Ø© Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª Ù„ØªÙ†ÙÙŠØ°Ù‡.",
+                      canManageWarehouse
+                        ? "Shopify sync is manual only and runs only when you press the sync button at the top of the page."
+                        : "The sync button is visible here, but you need product edit permission to run it.",
+                    )}
+                  </p>
               </div>
             </div>
+          </div>
 
             <div className="grid gap-3 border-t border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600 sm:grid-cols-3">
               <InsightBanner
@@ -334,6 +442,25 @@ export default function WarehouseStock() {
             <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
               <AlertCircle size={18} />
               {error}
+            </div>
+          )}
+
+          {syncNotice && (
+            <div
+              className={`flex items-start gap-2 rounded-xl border p-4 ${
+                syncNotice.tone === "warning"
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-800"
+              }`}
+            >
+              <RefreshCw size={18} className="mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold">{syncNotice.title}</p>
+                <p className="mt-1 text-sm">{syncNotice.message}</p>
+                {syncNotice.detail ? (
+                  <p className="mt-1 text-xs">{syncNotice.detail}</p>
+                ) : null}
+              </div>
             </div>
           )}
 

@@ -1,3 +1,4 @@
+import axios from "axios";
 import express from "express";
 import { supabase as db } from "../supabaseClient.js";
 import { authenticateToken } from "../middleware/auth.js";
@@ -11,6 +12,7 @@ import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 import {
   buildWarehouseVariantCatalog,
   normalizeWarehouseCode,
+  parseWarehouseJsonField,
 } from "../helpers/warehouseCatalog.js";
 import {
   applyProductWarehouseInventorySnapshot,
@@ -24,6 +26,8 @@ const UUID_REGEX =
 const CATALOG_CACHE_TTL_MS = 15 * 1000;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 200;
+const SHOPIFY_API_VERSION = "2024-01";
+const SHOPIFY_SYNC_CONCURRENCY = 5;
 const MOVEMENT_TYPES = new Set(["in", "out"]);
 const STOCK_SORT_FIELDS = new Set([
   "title",
@@ -353,6 +357,92 @@ const getInventoryRowsForStore = async (storeId) => {
   return data || [];
 };
 
+const cloneJsonValue = (value) =>
+  JSON.parse(JSON.stringify(parseWarehouseJsonField(value) || {}));
+
+const getProductVariants = (productData = {}) =>
+  Array.isArray(productData?.variants) ? productData.variants : [];
+
+const getTotalInventory = (variants = [], fallbackInventory = 0) => {
+  if (!Array.isArray(variants) || variants.length === 0) {
+    return toNumber(fallbackInventory);
+  }
+
+  return variants.reduce(
+    (sum, variant) => sum + toNumber(variant?.inventory_quantity),
+    0,
+  );
+};
+
+const getShopifyTokenForStore = async (storeId, fallbackUserId) => {
+  if (storeId) {
+    const { data: tokenByStore, error: tokenByStoreError } = await db
+      .from("shopify_tokens")
+      .select("*")
+      .eq("store_id", storeId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (tokenByStoreError) {
+      throw tokenByStoreError;
+    }
+
+    if (tokenByStore) {
+      return tokenByStore;
+    }
+  }
+
+  const fallbackUserIdValue = String(fallbackUserId || "").trim();
+  if (!fallbackUserIdValue) {
+    return null;
+  }
+
+  const { data: tokenByUser, error: tokenByUserError } = await db
+    .from("shopify_tokens")
+    .select("*")
+    .eq("user_id", fallbackUserIdValue)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (tokenByUserError) {
+    throw tokenByUserError;
+  }
+
+  return tokenByUser || null;
+};
+
+const buildShopifyHeaders = (accessToken) => ({
+  "X-Shopify-Access-Token": accessToken,
+  "Content-Type": "application/json",
+});
+
+const fetchPrimaryShopifyLocationId = async (tokenData) => {
+  const response = await axios.get(
+    `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/locations.json`,
+    {
+      headers: buildShopifyHeaders(tokenData.access_token),
+      params: { limit: 20 },
+    },
+  );
+
+  const locations = Array.isArray(response?.data?.locations)
+    ? response.data.locations
+    : [];
+  const activeLocation =
+    locations.find((location) => location?.active !== false) || locations[0];
+
+  if (!activeLocation?.id) {
+    throw createHttpError(
+      503,
+      "No active Shopify location was found for inventory updates",
+    );
+  }
+
+  return activeLocation.id;
+};
+
 const mapInventoryRowsByCode = (rows = []) =>
   new Map(
     (rows || [])
@@ -370,6 +460,7 @@ const serializeWarehouseVariantRow = (variantRow, inventoryRow) => {
     product_id: variantRow?.product_id || inventoryRow?.product_id || null,
     variant_id: variantRow?.variant_id || null,
     shopify_id: variantRow?.shopify_id || null,
+    inventory_item_id: variantRow?.inventory_item_id || null,
     store_id: variantRow?.store_id || inventoryRow?.store_id || null,
     title: variantRow?.title || "Archived product",
     product_title: variantRow?.product_title || variantRow?.title || "Archived product",
@@ -457,6 +548,200 @@ const buildOrphanWarehouseRow = (inventoryRow) =>
     },
     inventoryRow,
   );
+
+const loadWarehouseInventoryState = async (storeId) => {
+  const catalog = await getWarehouseProductCatalog(storeId);
+  let inventoryRows = [];
+  let warehouseTablesReady = true;
+
+  try {
+    inventoryRows = await getInventoryRowsForStore(storeId);
+  } catch (inventoryError) {
+    if (!isSchemaCompatibilityError(inventoryError)) {
+      throw inventoryError;
+    }
+
+    warehouseTablesReady = false;
+  }
+
+  const inventoryByCode = mapInventoryRowsByCode(inventoryRows);
+  const catalogRows = catalog.rows.map((variantRow) =>
+    serializeWarehouseVariantRow(
+      variantRow,
+      warehouseTablesReady
+        ? inventoryByCode.get(variantRow.warehouse_code)
+        : buildMirroredInventoryRow({
+            product: variantRow,
+            quantity: variantRow.local_warehouse_quantity,
+            scannedAt: variantRow.local_last_scanned_at,
+            movementType: variantRow.local_last_movement_type,
+            movementQuantity: variantRow.local_last_movement_quantity,
+            createdAt: variantRow.local_created_at,
+            updatedAt: variantRow.local_updated_at,
+          }),
+    ),
+  );
+  const orphanRows = warehouseTablesReady
+    ? inventoryRows
+        .filter(
+          (inventoryRow) =>
+            !catalog.rowsByPrimaryCode.has(normalizeSku(inventoryRow?.sku)),
+        )
+        .map((inventoryRow) => buildOrphanWarehouseRow(inventoryRow))
+    : [];
+
+  return {
+    catalog,
+    warehouseTablesReady,
+    trackingMode: warehouseTablesReady
+      ? "warehouse_tables"
+      : "local_product_data",
+    rows: [...catalogRows, ...orphanRows],
+  };
+};
+
+const mapWithConcurrency = async (items, concurrency, worker) => {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  if (normalizedItems.length === 0) {
+    return [];
+  }
+
+  const results = new Array(normalizedItems.length);
+  const workerCount = Math.max(
+    1,
+    Math.min(concurrency, normalizedItems.length),
+  );
+  let currentIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = currentIndex;
+        currentIndex += 1;
+
+        if (index >= normalizedItems.length) {
+          return;
+        }
+
+        results[index] = await worker(normalizedItems[index], index);
+      }
+    }),
+  );
+
+  return results;
+};
+
+const updateLocalProductsAfterShopifySync = async ({
+  products,
+  syncedRows,
+  nowIso,
+}) => {
+  const syncedRowsByProductId = new Map();
+
+  (syncedRows || []).forEach((row) => {
+    const productId = String(row?.product_id || "").trim();
+    if (!productId) {
+      return;
+    }
+
+    const existingRows = syncedRowsByProductId.get(productId) || [];
+    existingRows.push(row);
+    syncedRowsByProductId.set(productId, existingRows);
+  });
+
+  let updatedProductsCount = 0;
+
+  for (const product of products || []) {
+    const productId = String(product?.id || "").trim();
+    const productRows = syncedRowsByProductId.get(productId);
+    if (!productRows || productRows.length === 0) {
+      continue;
+    }
+
+    const parsedData = parseWarehouseJsonField(product?.data);
+    const nextData = cloneJsonValue(parsedData);
+    const variants = getProductVariants(parsedData);
+    let dataChanged = false;
+    let inventoryQuantityChanged = false;
+    let nextInventoryQuantity = toNumber(product?.inventory_quantity);
+
+    if (variants.length > 0) {
+      const nextVariants = variants.map((variant) => {
+        const variantId = String(variant?.id || "").trim();
+        const inventoryItemId = String(variant?.inventory_item_id || "").trim();
+        const normalizedVariantSku = normalizeSku(variant?.sku);
+        const matchedRow = productRows.find(
+          (row) =>
+            (variantId && String(row?.variant_id || "").trim() === variantId) ||
+            (inventoryItemId &&
+              String(row?.inventory_item_id || "").trim() === inventoryItemId) ||
+            (normalizedVariantSku &&
+              normalizeSku(row?.sku) === normalizedVariantSku),
+        );
+
+        if (!matchedRow) {
+          return variant;
+        }
+
+        const nextAvailable = toNumber(matchedRow.available);
+        if (toNumber(variant?.inventory_quantity) !== nextAvailable) {
+          dataChanged = true;
+        }
+
+        return {
+          ...variant,
+          inventory_quantity: nextAvailable,
+          updated_at: nowIso,
+        };
+      });
+
+      nextData.variants = nextVariants;
+      nextInventoryQuantity = getTotalInventory(
+        nextVariants,
+        product?.inventory_quantity,
+      );
+    } else {
+      const matchedRow = productRows[0] || null;
+      if (matchedRow) {
+        nextInventoryQuantity = toNumber(matchedRow.available);
+        if (toNumber(parsedData?.inventory_quantity) !== nextInventoryQuantity) {
+          dataChanged = true;
+        }
+
+        nextData.inventory_quantity = nextInventoryQuantity;
+        nextData.updated_at = nowIso;
+      }
+    }
+
+    inventoryQuantityChanged =
+      nextInventoryQuantity !== toNumber(product?.inventory_quantity);
+
+    if (!dataChanged && !inventoryQuantityChanged) {
+      continue;
+    }
+
+    const { error: updateError } = await db
+      .from("products")
+      .update({
+        data: nextData,
+        inventory_quantity: nextInventoryQuantity,
+        pending_sync: false,
+        sync_error: null,
+        last_synced_at: nowIso,
+        shopify_updated_at: nowIso,
+        local_updated_at: nowIso,
+      })
+      .eq("id", product.id);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    updatedProductsCount += 1;
+  }
+
+  return updatedProductsCount;
+};
 
 const sortWarehouseRows = (rows, { sortBy, ascending }) => {
   const direction = ascending ? 1 : -1;
@@ -922,50 +1207,8 @@ router.get("/stock", requirePermission("can_view_products"), async (req, res) =>
     const { storeId } = await resolveStoreContext(req);
     const pagination = getPagination(req.query);
     const sortOptions = getSortOptions(req.query);
-
-    const catalog = await getWarehouseProductCatalog(storeId);
-    let inventoryRows = [];
-    let warehouseTablesReady = true;
-
-    try {
-      inventoryRows = await getInventoryRowsForStore(storeId);
-    } catch (inventoryError) {
-      if (!isSchemaCompatibilityError(inventoryError)) {
-        throw inventoryError;
-      }
-
-      warehouseTablesReady = false;
-    }
-
-    const inventoryByCode = mapInventoryRowsByCode(inventoryRows);
-    const catalogRows = catalog.rows.map((variantRow) =>
-      serializeWarehouseVariantRow(
-        variantRow,
-        warehouseTablesReady
-          ? inventoryByCode.get(variantRow.warehouse_code)
-          : buildMirroredInventoryRow({
-              product: variantRow,
-              quantity: variantRow.local_warehouse_quantity,
-              scannedAt: variantRow.local_last_scanned_at,
-              movementType: variantRow.local_last_movement_type,
-              movementQuantity: variantRow.local_last_movement_quantity,
-              createdAt: variantRow.local_created_at,
-              updatedAt: variantRow.local_updated_at,
-            }),
-      ),
-    );
-    const orphanRows = warehouseTablesReady
-      ? inventoryRows
-          .filter(
-            (inventoryRow) =>
-              !catalog.rowsByPrimaryCode.has(normalizeSku(inventoryRow?.sku)),
-          )
-          .map((inventoryRow) => buildOrphanWarehouseRow(inventoryRow))
-      : [];
-    const sortedRows = sortWarehouseRows(
-      [...catalogRows, ...orphanRows],
-      sortOptions,
-    );
+    const inventoryState = await loadWarehouseInventoryState(storeId);
+    const sortedRows = sortWarehouseRows(inventoryState.rows, sortOptions);
     const rows = sortedRows.slice(
       pagination.offset,
       pagination.offset + pagination.limit,
@@ -975,12 +1218,10 @@ router.get("/stock", requirePermission("can_view_products"), async (req, res) =>
       ...buildPaginatedCollection(rows, pagination),
       store_id: storeId,
       generated_at: new Date().toISOString(),
-      schema_ready: warehouseTablesReady,
-      setup_required: !warehouseTablesReady,
-      tracking_mode: warehouseTablesReady
-        ? "warehouse_tables"
-        : "local_product_data",
-      message: warehouseTablesReady
+      schema_ready: inventoryState.warehouseTablesReady,
+      setup_required: !inventoryState.warehouseTablesReady,
+      tracking_mode: inventoryState.trackingMode,
+      message: inventoryState.warehouseTablesReady
         ? null
         : "Warehouse tables are not deployed yet. Showing local warehouse stock saved on the product record.",
     });
@@ -1003,6 +1244,184 @@ router.get("/stock", requirePermission("can_view_products"), async (req, res) =>
     });
   }
 });
+
+router.post(
+  "/sync-to-shopify",
+  requirePermission("can_edit_products"),
+  async (req, res) => {
+    try {
+      const { storeId } = await resolveStoreContext(req);
+      const inventoryState = await loadWarehouseInventoryState(storeId);
+      const tokenData = await getShopifyTokenForStore(storeId, req.user?.id);
+
+      if (!tokenData?.access_token || !tokenData?.shop) {
+        throw createHttpError(
+          400,
+          "Shopify is not connected for the selected store",
+        );
+      }
+
+      const locationId = await fetchPrimaryShopifyLocationId(tokenData);
+      const warehouseRows = inventoryState.rows.filter(
+        (row) => !Boolean(row?.is_archived),
+      );
+
+      const unchangedRows = [];
+      const skippedRows = [];
+      const syncCandidates = [];
+
+      warehouseRows.forEach((row) => {
+        const normalizedWarehouseQuantity = toNumber(row?.warehouse_quantity);
+        const normalizedShopifyQuantity = toNumber(
+          row?.shopify_inventory_quantity,
+        );
+
+        if (!row?.product_id) {
+          skippedRows.push({
+            warehouse_code: row?.warehouse_code || "",
+            reason: "missing_local_product",
+          });
+          return;
+        }
+
+        if (!row?.inventory_item_id) {
+          skippedRows.push({
+            warehouse_code: row?.warehouse_code || "",
+            product_id: row?.product_id || null,
+            variant_id: row?.variant_id || null,
+            reason: "missing_inventory_item_id",
+          });
+          return;
+        }
+
+        if (normalizedWarehouseQuantity === normalizedShopifyQuantity) {
+          unchangedRows.push({
+            warehouse_code: row?.warehouse_code || "",
+            product_id: row?.product_id || null,
+            variant_id: row?.variant_id || null,
+            available: normalizedWarehouseQuantity,
+          });
+          return;
+        }
+
+        syncCandidates.push({
+          product_id: row?.product_id || null,
+          variant_id: row?.variant_id || null,
+          inventory_item_id: String(row.inventory_item_id),
+          warehouse_code: row?.warehouse_code || "",
+          sku: row?.sku || "",
+          available: normalizedWarehouseQuantity,
+          previous_shopify_quantity: normalizedShopifyQuantity,
+        });
+      });
+
+      const syncResults = await mapWithConcurrency(
+        syncCandidates,
+        SHOPIFY_SYNC_CONCURRENCY,
+        async (candidate) => {
+          try {
+            await axios.post(
+              `https://${tokenData.shop}/admin/api/${SHOPIFY_API_VERSION}/inventory_levels/set.json`,
+              {
+                location_id: locationId,
+                inventory_item_id: candidate.inventory_item_id,
+                available: candidate.available,
+              },
+              {
+                headers: buildShopifyHeaders(tokenData.access_token),
+              },
+            );
+
+            return {
+              ...candidate,
+              success: true,
+            };
+          } catch (error) {
+            return {
+              ...candidate,
+              success: false,
+              error:
+                error?.response?.data?.errors ||
+                error?.response?.data?.error ||
+                error?.message ||
+                "Shopify inventory sync failed",
+            };
+          }
+        },
+      );
+
+      const successfulSyncs = syncResults.filter((row) => row?.success);
+      const failedSyncs = syncResults.filter((row) => !row?.success);
+      const nowIso = new Date().toISOString();
+      let localProductsUpdated = 0;
+      let localUpdateError = "";
+
+      if (successfulSyncs.length > 0) {
+        try {
+          const storeProducts = await loadAllStoreProducts(storeId);
+          localProductsUpdated = await updateLocalProductsAfterShopifySync({
+            products: storeProducts,
+            syncedRows: successfulSyncs,
+            nowIso,
+          });
+        } catch (error) {
+          localUpdateError =
+            error?.message || "Local product state could not be refreshed";
+          console.error(
+            "Failed to refresh local product inventory after warehouse sync:",
+            error,
+          );
+        } finally {
+          clearProductCatalog(storeId);
+        }
+      }
+
+      emitRealtimeEvent({
+        type: "warehouse.updated",
+        source: "/api/warehouse/sync-to-shopify",
+        userIds: [String(req.user?.id || "").trim()].filter(Boolean),
+        storeIds: [storeId],
+        payload: {
+          resource: "warehouse",
+          context: "shopify_inventory_sync",
+          synced_count: successfulSyncs.length,
+          failed_count: failedSyncs.length,
+        },
+      });
+
+      res.json({
+        message:
+          successfulSyncs.length > 0
+            ? `Synced ${successfulSyncs.length} warehouse rows to Shopify inventory.`
+            : "No Shopify inventory changes were needed.",
+        store_id: storeId,
+        generated_at: nowIso,
+        tracking_mode: inventoryState.trackingMode,
+        shopify_location_id: locationId,
+        total_rows: warehouseRows.length,
+        sync_attempted_count: syncCandidates.length,
+        synced_count: successfulSyncs.length,
+        unchanged_count: unchangedRows.length,
+        skipped_count: skippedRows.length,
+        failed_count: failedSyncs.length,
+        local_products_updated: localProductsUpdated,
+        local_state_updated: !localUpdateError,
+        local_update_error: localUpdateError || null,
+        skipped_rows: skippedRows.slice(0, 25),
+        failed_rows: failedSyncs.slice(0, 25),
+      });
+    } catch (error) {
+      console.error("Error syncing warehouse stock to Shopify:", error);
+
+      res.status(error.status || 500).json({
+        error:
+          error.status
+            ? error.message
+            : "Failed to sync warehouse stock to Shopify",
+      });
+    }
+  },
+);
 
 router.get("/scans", requirePermission("can_view_products"), async (req, res) => {
   try {

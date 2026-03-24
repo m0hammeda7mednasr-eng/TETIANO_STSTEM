@@ -113,8 +113,9 @@ export const getVariantDisplayTitle = (product, variant, index) => {
 };
 
 export const buildFallbackVariant = (product) => {
+  const parsedData = parseWarehouseJsonField(product?.data);
   const localWarehouseSnapshot = extractWarehouseInventorySnapshot(
-    parseWarehouseJsonField(product?.data),
+    parsedData,
   );
 
   return {
@@ -123,6 +124,7 @@ export const buildFallbackVariant = (product) => {
     sku: product?.sku || "",
     barcode: "",
     price: product?.price ?? null,
+    inventory_item_id: parsedData?.inventory_item_id || null,
     inventory_quantity: product?.inventory_quantity ?? 0,
     created_at: product?.created_at || null,
     updated_at: product?.updated_at || null,
@@ -209,6 +211,7 @@ export const buildWarehouseVariantCatalogEntry = (
     normalized_sku: normalizeWarehouseCode(rawSku),
     barcode: rawBarcode || "",
     normalized_barcode: normalizeWarehouseCode(rawBarcode),
+    inventory_item_id: variant?.inventory_item_id || null,
     barcode_or_sku: rawSku || rawBarcode || primaryCode.code,
     barcode_or_sku_label:
       primaryCode.source === "sku"

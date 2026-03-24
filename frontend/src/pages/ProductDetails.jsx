@@ -24,6 +24,10 @@ import {
   formatDateTime,
   formatNumber,
 } from "../utils/localeFormat";
+import {
+  buildRealizedOrdersProfitability,
+  buildSavedUnitCostSnapshot,
+} from "../utils/productProfitability";
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -98,37 +102,6 @@ const cloneVariantDrafts = (variants = []) =>
     inventory_quantity: String(toNumber(variant.inventory_quantity)),
   }));
 
-const buildProfitabilitySnapshot = (productLike, inventoryQuantity = 0) => {
-  const price = toNumber(productLike?.price);
-  const costPrice = toNumber(productLike?.cost_price);
-  const adsCost = toNumber(productLike?.ads_cost);
-  const operationCost = toNumber(productLike?.operation_cost);
-  const shippingCost = toNumber(productLike?.shipping_cost);
-  const totalUnitCost = costPrice + adsCost + operationCost + shippingCost;
-  const unitProfit = price - totalUnitCost;
-  const profitMargin = price > 0 ? (unitProfit / price) * 100 : 0;
-  const potentialProfit = unitProfit * toNumber(inventoryQuantity);
-  const hasValues =
-    price > 0 ||
-    costPrice > 0 ||
-    adsCost > 0 ||
-    operationCost > 0 ||
-    shippingCost > 0;
-
-  return {
-    price,
-    costPrice,
-    adsCost,
-    operationCost,
-    shippingCost,
-    totalUnitCost,
-    unitProfit,
-    profitMargin,
-    potentialProfit,
-    hasValues,
-  };
-};
-
 export default function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -147,6 +120,8 @@ export default function ProductDetails() {
   // Editable fields
   const [editedProduct, setEditedProduct] = useState({});
   const [editedVariants, setEditedVariants] = useState([]);
+  const [fulfilledProfitSummary, setFulfilledProfitSummary] = useState(null);
+  const [fulfilledProfitError, setFulfilledProfitError] = useState("");
 
   const hasMultipleVariants = (product?.variants?.length || 0) > 1;
   const editedVariantsById = useMemo(
@@ -180,10 +155,9 @@ export default function ProductDetails() {
 
   const profitabilitySnapshot = useMemo(
     () =>
-      buildProfitabilitySnapshot(
-        editing ? editedProduct : product,
-        displayedInventoryQuantity,
-      ),
+      buildSavedUnitCostSnapshot(editing ? editedProduct : product, {
+        quantity: displayedInventoryQuantity,
+      }),
     [displayedInventoryQuantity, editedProduct, editing, product],
   );
   const profitabilityTone =
@@ -199,6 +173,12 @@ export default function ProductDetails() {
           badge: "bg-rose-100 text-rose-700",
           subtle: "text-rose-700",
         };
+  const realizedOrdersProfitability = useMemo(() => {
+    return buildRealizedOrdersProfitability(
+      fulfilledProfitSummary,
+      profitabilitySnapshot.totalUnitCost,
+    );
+  }, [fulfilledProfitSummary, profitabilitySnapshot.totalUnitCost]);
 
   const barcodeTargets = useMemo(() => {
     if (!product) {
@@ -282,17 +262,46 @@ export default function ProductDetails() {
   const fetchProductDetails = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await api.get(`/shopify/products/${id}/details`);
-      setProduct(response.data);
-      setEditedProduct(response.data);
-      setEditedVariants(cloneVariantDrafts(response.data?.variants || []));
+      const requests = [api.get(`/shopify/products/${id}/details`)];
+      if (isAdmin) {
+        requests.push(api.get(`/dashboard/products/${id}/fulfilled-profit`));
+      }
+
+      const results = await Promise.allSettled(requests);
+      const productResult = results[0];
+
+      if (productResult?.status !== "fulfilled") {
+        throw productResult?.reason || new Error("Failed to load product");
+      }
+
+      const nextProduct = productResult.value.data;
+      setProduct(nextProduct);
+      setEditedProduct(nextProduct);
+      setEditedVariants(cloneVariantDrafts(nextProduct?.variants || []));
+
+      if (isAdmin) {
+        const fulfilledProfitResult = results[1];
+        if (fulfilledProfitResult?.status === "fulfilled") {
+          setFulfilledProfitSummary(fulfilledProfitResult.value.data || null);
+          setFulfilledProfitError("");
+        } else {
+          setFulfilledProfitSummary(null);
+          setFulfilledProfitError(
+            fulfilledProfitResult?.reason?.response?.data?.error ||
+              "تعذر تحميل الربح المحقق من الأوردرات الناجحة",
+          );
+        }
+      } else {
+        setFulfilledProfitSummary(null);
+        setFulfilledProfitError("");
+      }
     } catch (error) {
       console.error("Error fetching product details:", error);
       showNotification("فشل تحميل تفاصيل المنتج", "error");
     } finally {
       setLoading(false);
     }
-  }, [id, showNotification]);
+  }, [id, isAdmin, showNotification]);
 
   useEffect(() => {
     fetchProductDetails();
@@ -1296,7 +1305,7 @@ export default function ProductDetails() {
                           </span>
                         </div>
 
-                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                           <ProfitMetric
                             label="إجمالي التكلفة لكل وحدة"
                             value={formatMoney(
@@ -1315,12 +1324,68 @@ export default function ProductDetails() {
                             tone={profitabilityTone.subtle}
                           />
                           <ProfitMetric
-                            label="الربح المحتمل (المخزون الكلي)"
-                            value={formatMoney(
-                              profitabilitySnapshot.potentialProfit,
-                            )}
+                            label="Saved Cost Mix / Unit"
+                            value={`${formatMoney(
+                              profitabilitySnapshot.costPrice,
+                            )} + ${formatMoney(
+                              profitabilitySnapshot.adsCost,
+                            )} + ${formatMoney(
+                              profitabilitySnapshot.operationCost,
+                            )} + ${formatMoney(
+                              profitabilitySnapshot.shippingCost,
+                            )}`}
                             tone={profitabilityTone.subtle}
                           />
+                          {realizedOrdersProfitability.hasData ? (
+                            <>
+                              <ProfitMetric
+                                label="Saved Costs On Fulfilled Units"
+                                value={formatMoney(
+                                  realizedOrdersProfitability.savedProductCostsTotal,
+                                )}
+                                tone={profitabilityTone.subtle}
+                              />
+                              <ProfitMetric
+                                label="Tracked Extra Costs"
+                                value={formatMoney(
+                                  realizedOrdersProfitability.totalOperationalCosts,
+                                )}
+                                tone={profitabilityTone.subtle}
+                              />
+                              <ProfitMetric
+                                label="إيراد الأوردرات الناجحة"
+                                value={formatMoney(
+                                  realizedOrdersProfitability.totalRevenue,
+                                )}
+                                tone={profitabilityTone.subtle}
+                              />
+                              <ProfitMetric
+                                label="صافي ربح الأوردرات الناجحة"
+                                value={formatMoney(
+                                  realizedOrdersProfitability.netProfit,
+                                )}
+                                tone={
+                                  realizedOrdersProfitability.netProfit >= 0
+                                    ? "text-emerald-700"
+                                    : "text-rose-700"
+                                }
+                              />
+                              <ProfitMetric
+                                label="الوحدات المتسلمة / عدد الأوردرات"
+                                value={`${formatCount(
+                                  realizedOrdersProfitability.fulfilledUnits,
+                                )} / ${formatCount(
+                                  realizedOrdersProfitability.successfulOrdersCount,
+                                )}`}
+                                tone={profitabilityTone.subtle}
+                              />
+                            </>
+                          ) : (
+                            <div className="sm:col-span-2 xl:col-span-3 rounded-xl border border-dashed border-white/70 bg-white/70 px-4 py-4 text-sm text-slate-600">
+                              {fulfilledProfitError ||
+                                "هنا هيظهر الربح المحقق من الأوردرات اللي اتعملت واتسلمت بنجاح، مش الربح المحتمل من الستوك."}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

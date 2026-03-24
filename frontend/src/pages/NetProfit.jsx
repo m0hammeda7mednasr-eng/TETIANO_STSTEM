@@ -21,6 +21,15 @@ import {
   formatNumber,
   formatPercent as formatLocalePercent,
 } from "../utils/helpers";
+import {
+  buildProductCostBreakdown,
+  buildSavedUnitCostSnapshot,
+  getAppliedCostTotal,
+  getCostGroupKey,
+  hasCostPrice,
+  toAmount,
+  toDraftAmount,
+} from "../utils/productProfitability";
 
 const SUMMARY_DEFAULT = {
   total_revenue: 0,
@@ -60,17 +69,6 @@ const COST_TYPE_DEFAULT_NAMES = {
   packaging: "Packaging Cost",
   other: "Other Cost",
 };
-const COST_TYPE_GROUPS = {
-  ads: "ads",
-  shipping: "shipping",
-  workshop: "operations",
-  operations: "operations",
-  packaging: "other",
-  other: "other",
-};
-
-const toAmount = (value) => Number(value || 0);
-const roundAmount = (value) => parseFloat(toAmount(value).toFixed(2));
 const formatAmount = (value) => formatLocaleCurrency(value);
 const formatCount = (value) =>
   formatNumber(Math.round(toAmount(value)), { maximumFractionDigits: 0 });
@@ -79,16 +77,6 @@ const formatPercent = (value) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-const hasCostPrice = (value) => toAmount(value) > 0;
-const toDraftAmount = (value, { allowBlank = false } = {}) => {
-  const parsed = toAmount(value);
-
-  if (allowBlank && parsed <= 0) {
-    return "";
-  }
-
-  return String(parsed);
-};
 const createProductCostDraft = (product = null) => ({
   cost_price: toDraftAmount(product?.cost_price, { allowBlank: true }),
   ads_cost: toDraftAmount(product?.ads_cost),
@@ -110,18 +98,6 @@ const parseEditableAmount = (value, label) => {
   }
 
   return parsed;
-};
-const getCostGroupKey = (costType) =>
-  COST_TYPE_GROUPS[String(costType || "").toLowerCase()] || "other";
-const getAppliedCostTotal = (cost, soldQuantity, ordersCount) => {
-  const amount = toAmount(cost?.amount);
-  if (String(cost?.apply_to || "") === "per_order") {
-    return amount * toAmount(ordersCount);
-  }
-  if (String(cost?.apply_to || "") === "fixed") {
-    return amount;
-  }
-  return amount * toAmount(soldQuantity);
 };
 const getApplyToLabel = (applyTo) => {
   switch (String(applyTo || "")) {
@@ -164,79 +140,6 @@ const getMarginTone = (value) => {
 };
 const getProfitToneClass = (value) =>
   toAmount(value) >= 0 ? "text-emerald-700" : "text-rose-700";
-const getSavedProductCostBreakdown = (product) => {
-  const soldQuantity = toAmount(product?.sold_quantity);
-  const productUnit = toAmount(product?.cost_price);
-  const adsUnit = toAmount(product?.ads_cost);
-  const operationsUnit = toAmount(product?.operation_cost);
-  const shippingUnit = toAmount(product?.shipping_cost);
-
-  const productTotal = roundAmount(productUnit * soldQuantity);
-  const adsTotal = roundAmount(adsUnit * soldQuantity);
-  const operationsTotal = roundAmount(operationsUnit * soldQuantity);
-  const shippingTotal = roundAmount(shippingUnit * soldQuantity);
-  const totalPerUnit = roundAmount(
-    productUnit + adsUnit + operationsUnit + shippingUnit,
-  );
-  const total = roundAmount(
-    productTotal + adsTotal + operationsTotal + shippingTotal,
-  );
-
-  return {
-    soldQuantity,
-    productUnit,
-    adsUnit,
-    operationsUnit,
-    shippingUnit,
-    productTotal,
-    adsTotal,
-    operationsTotal,
-    shippingTotal,
-    totalPerUnit,
-    total,
-  };
-};
-const buildProductCostBreakdown = (product, costs) => {
-  const saved = getSavedProductCostBreakdown(product);
-  const soldQuantity = saved.soldQuantity;
-  const ordersCount = toAmount(product?.orders_count);
-  const tracked = {
-    ads: 0,
-    shipping: 0,
-    operations: 0,
-    other: 0,
-  };
-
-  (costs || []).forEach((cost) => {
-    const bucket = getCostGroupKey(cost?.cost_type);
-    tracked[bucket] += getAppliedCostTotal(cost, soldQuantity, ordersCount);
-  });
-
-  const trackedTotal = Object.values(tracked).reduce(
-    (sum, amount) => sum + toAmount(amount),
-    0,
-  );
-  const combined = {
-    ads: roundAmount(saved.adsTotal + tracked.ads),
-    shipping: roundAmount(saved.shippingTotal + tracked.shipping),
-    operations: roundAmount(saved.operationsTotal + tracked.operations),
-    other: roundAmount(tracked.other),
-  };
-
-  return {
-    saved,
-    tracked: {
-      ...tracked,
-      ads: roundAmount(tracked.ads),
-      shipping: roundAmount(tracked.shipping),
-      operations: roundAmount(tracked.operations),
-      other: roundAmount(tracked.other),
-      total: roundAmount(trackedTotal),
-    },
-    combined,
-    totalCosts: roundAmount(saved.total + trackedTotal),
-  };
-};
 
 export default function NetProfit() {
   const [products, setProducts] = useState([]);
@@ -346,24 +249,25 @@ export default function NetProfit() {
   );
 
   const draftProductCostPreview = useMemo(() => {
-    const costPrice = toAmount(productCostDraft.cost_price);
-    const adsCost = toAmount(productCostDraft.ads_cost);
-    const operationCost = toAmount(productCostDraft.operation_cost);
-    const shippingCost = toAmount(productCostDraft.shipping_cost);
-    const avgSellingPrice = toAmount(selectedProduct?.avg_selling_price);
-    const totalPerUnit = roundAmount(
-      costPrice + adsCost + operationCost + shippingCost,
+    const snapshot = buildSavedUnitCostSnapshot(
+      {
+        price: selectedProduct?.avg_selling_price,
+        cost_price: productCostDraft.cost_price,
+        ads_cost: productCostDraft.ads_cost,
+        operation_cost: productCostDraft.operation_cost,
+        shipping_cost: productCostDraft.shipping_cost,
+      },
+      {
+        quantity: selectedProduct?.sold_quantity,
+      },
     );
-    const unitProfit = roundAmount(avgSellingPrice - totalPerUnit);
-    const margin =
-      avgSellingPrice > 0 ? roundAmount((unitProfit / avgSellingPrice) * 100) : 0;
 
     return {
-      totalPerUnit,
-      unitProfit,
-      margin,
-      soldQuantity: toAmount(selectedProduct?.sold_quantity),
-      savedTotal: roundAmount(totalPerUnit * toAmount(selectedProduct?.sold_quantity)),
+      totalPerUnit: snapshot.totalUnitCost,
+      unitProfit: snapshot.unitProfit,
+      margin: snapshot.profitMargin,
+      soldQuantity: snapshot.soldQuantity,
+      savedTotal: snapshot.savedTotal,
     };
   }, [productCostDraft, selectedProduct]);
 
@@ -638,8 +542,8 @@ export default function NetProfit() {
           <div>
             <h1 className="text-3xl font-bold text-gray-800">Net Profit</h1>
             <p className="text-gray-600 mt-1">
-              Per-product profitability using saved unit costs plus tracked
-              extra expenses
+              Unified product profitability using the same saved unit costs and
+              tracked extras that feed product details and realized order profit
             </p>
           </div>
 
@@ -1032,9 +936,9 @@ export default function NetProfit() {
                         <td className="px-4 py-5">
                           <DataMetric
                             value={formatAmount(breakdown.totalCosts)}
-                            note={`Saved ${formatAmount(
+                            note={`Saved on product ${formatAmount(
                               breakdown.saved.total,
-                            )} + tracked ${formatAmount(
+                            )} + tracked extras ${formatAmount(
                               breakdown.tracked.total,
                             )}`}
                           />

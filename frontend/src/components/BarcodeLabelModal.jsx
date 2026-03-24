@@ -272,6 +272,7 @@ export default function BarcodeLabelModal({
     savedCustomFooterLines,
   );
   const [printError, setPrintError] = useState("");
+  const processedTargets = useRef(new Set());
 
   const normalizedTargets = useMemo(
     () =>
@@ -415,8 +416,13 @@ export default function BarcodeLabelModal({
     const targetKey = selectedTarget.key;
     const customLines = customFooterLines[targetKey];
 
-    // If this target doesn't have any custom lines saved yet, auto-populate with SKU
-    if (!customLines && selectedTarget.sku) {
+    // If this target doesn't have any custom lines saved yet AND we haven't processed it before, auto-populate with SKU
+    if (
+      !customLines &&
+      selectedTarget.sku &&
+      !processedTargets.current.has(targetKey)
+    ) {
+      processedTargets.current.add(targetKey);
       setCustomFooterLines((prev) => ({
         ...prev,
         [targetKey]: {
@@ -425,7 +431,7 @@ export default function BarcodeLabelModal({
         },
       }));
     }
-  }, [selectedTarget?.key, customFooterLines]); // Only depend on target key, not the whole target object
+  }, [selectedTarget?.key, customFooterLines]); // Only depend on target key and custom lines
 
   // Save custom footer lines when they change
   useEffect(() => {

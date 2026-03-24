@@ -162,7 +162,9 @@ export default function ProductDetails() {
           variant?.sku || (!hasMultipleVariants ? product?.sku : "") || "",
         ).trim();
         const resolvedBarcode = String(
-          variant?.barcode || (!hasMultipleVariants ? product?.barcode : "") || "",
+          variant?.barcode ||
+            (!hasMultipleVariants ? product?.barcode : "") ||
+            "",
         ).trim();
 
         return {
@@ -257,6 +259,30 @@ export default function ProductDetails() {
           nextCostPrice !== toNumber(product.cost_price)
         ) {
           payload.cost_price = nextCostPrice;
+        }
+
+        const nextAdsCost = parseFloat(editedProduct.ads_cost || 0);
+        if (
+          Number.isFinite(nextAdsCost) &&
+          nextAdsCost !== toNumber(product.ads_cost)
+        ) {
+          payload.ads_cost = nextAdsCost;
+        }
+
+        const nextOperationCost = parseFloat(editedProduct.operation_cost || 0);
+        if (
+          Number.isFinite(nextOperationCost) &&
+          nextOperationCost !== toNumber(product.operation_cost)
+        ) {
+          payload.operation_cost = nextOperationCost;
+        }
+
+        const nextShippingCost = parseFloat(editedProduct.shipping_cost || 0);
+        if (
+          Number.isFinite(nextShippingCost) &&
+          nextShippingCost !== toNumber(product.shipping_cost)
+        ) {
+          payload.shipping_cost = nextShippingCost;
         }
       }
 
@@ -403,7 +429,10 @@ export default function ProductDetails() {
         "success",
       );
     } catch {
-      showNotification(select("فشل نسخ معرف المنتج", "Failed to copy product ID"), "error");
+      showNotification(
+        select("فشل نسخ معرف المنتج", "Failed to copy product ID"),
+        "error",
+      );
     }
   };
 
@@ -760,7 +789,11 @@ export default function ProductDetails() {
                                   type="button"
                                   onClick={() =>
                                     openBarcodeModal(
-                                      String(variant.id || barcodeTargets[0]?.key || ""),
+                                      String(
+                                        variant.id ||
+                                          barcodeTargets[0]?.key ||
+                                          "",
+                                      ),
                                     )
                                   }
                                   className="mt-3 app-button-secondary inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700"
@@ -1001,30 +1034,107 @@ export default function ProductDetails() {
                   </div>
 
                   {isAdmin && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        سعر التكلفة ({currencyLabel})
-                      </label>
-                      {editing ? (
-                        <input
-                          type="number"
-                          value={editedProduct.cost_price || 0}
-                          onChange={(e) =>
-                            setEditedProduct({
-                              ...editedProduct,
-                              cost_price: e.target.value,
-                            })
-                          }
-                          min="0"
-                          step="0.01"
-                          className="app-input w-full px-3 py-2.5 text-sm"
-                        />
-                      ) : (
-                        <p className="text-2xl font-bold text-gray-800">
-                          {formatMoney(product.cost_price || 0)}
-                        </p>
-                      )}
-                    </div>
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          سعر التكلفة ({currencyLabel})
+                        </label>
+                        {editing ? (
+                          <input
+                            type="number"
+                            value={editedProduct.cost_price || 0}
+                            onChange={(e) =>
+                              setEditedProduct({
+                                ...editedProduct,
+                                cost_price: e.target.value,
+                              })
+                            }
+                            min="0"
+                            step="0.01"
+                            className="app-input w-full px-3 py-2.5 text-sm"
+                          />
+                        ) : (
+                          <p className="text-2xl font-bold text-gray-800">
+                            {formatMoney(product.cost_price || 0)}
+                          </p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          تكلفة الإعلانات ({currencyLabel})
+                        </label>
+                        {editing ? (
+                          <input
+                            type="number"
+                            value={editedProduct.ads_cost || 0}
+                            onChange={(e) =>
+                              setEditedProduct({
+                                ...editedProduct,
+                                ads_cost: e.target.value,
+                              })
+                            }
+                            min="0"
+                            step="0.01"
+                            className="app-input w-full px-3 py-2.5 text-sm"
+                          />
+                        ) : (
+                          <p className="text-2xl font-bold text-gray-800">
+                            {formatMoney(product.ads_cost || 0)}
+                          </p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          تكلفة التشغيل ({currencyLabel})
+                        </label>
+                        {editing ? (
+                          <input
+                            type="number"
+                            value={editedProduct.operation_cost || 0}
+                            onChange={(e) =>
+                              setEditedProduct({
+                                ...editedProduct,
+                                operation_cost: e.target.value,
+                              })
+                            }
+                            min="0"
+                            step="0.01"
+                            className="app-input w-full px-3 py-2.5 text-sm"
+                          />
+                        ) : (
+                          <p className="text-2xl font-bold text-gray-800">
+                            {formatMoney(product.operation_cost || 0)}
+                          </p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          تكلفة الشحن ({currencyLabel})
+                        </label>
+                        {editing ? (
+                          <input
+                            type="number"
+                            value={editedProduct.shipping_cost || 0}
+                            onChange={(e) =>
+                              setEditedProduct({
+                                ...editedProduct,
+                                shipping_cost: e.target.value,
+                              })
+                            }
+                            min="0"
+                            step="0.01"
+                            className="app-input w-full px-3 py-2.5 text-sm"
+                          />
+                        ) : (
+                          <p className="text-2xl font-bold text-gray-800">
+                            {formatMoney(product.shipping_cost || 0)}
+                          </p>
+                        )}
+                      </div>
+                    </>
                   )}
 
                   {/* Profit Calculation */}
@@ -1038,7 +1148,10 @@ export default function ProductDetails() {
                           <span className="text-lg font-bold text-green-900">
                             {(
                               parseFloat(product.price) -
-                              parseFloat(product.cost_price)
+                              (parseFloat(product.cost_price || 0) +
+                                parseFloat(product.ads_cost || 0) +
+                                parseFloat(product.operation_cost || 0) +
+                                parseFloat(product.shipping_cost || 0))
                             ).toFixed(2)}{" "}
                             {currencyLabel}
                           </span>
@@ -1050,7 +1163,10 @@ export default function ProductDetails() {
                           <span className="text-lg font-bold text-green-900">
                             {(
                               ((parseFloat(product.price) -
-                                parseFloat(product.cost_price)) /
+                                (parseFloat(product.cost_price || 0) +
+                                  parseFloat(product.ads_cost || 0) +
+                                  parseFloat(product.operation_cost || 0) +
+                                  parseFloat(product.shipping_cost || 0))) /
                                 parseFloat(product.price)) *
                               100
                             ).toFixed(2)}
@@ -1065,7 +1181,10 @@ export default function ProductDetails() {
                             <span className="text-lg font-bold text-green-900">
                               {(
                                 (parseFloat(product.price) -
-                                  parseFloat(product.cost_price)) *
+                                  (parseFloat(product.cost_price || 0) +
+                                    parseFloat(product.ads_cost || 0) +
+                                    parseFloat(product.operation_cost || 0) +
+                                    parseFloat(product.shipping_cost || 0))) *
                                 displayedInventoryQuantity
                               ).toFixed(2)}{" "}
                               {currencyLabel}
@@ -1512,7 +1631,9 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
     return null;
   }
 
-  const factorySuppliers = toArray(sourcing.factory_suppliers || sourcing.suppliers);
+  const factorySuppliers = toArray(
+    sourcing.factory_suppliers || sourcing.suppliers,
+  );
   const fabricSuppliers = toArray(sourcing.fabric_suppliers);
   const fabrics = toArray(sourcing.fabrics);
   const variants = toArray(sourcing.variants);
@@ -1551,7 +1672,9 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
             />
             <SupplyMetric
               label={select("عدد مورّدي القماش", "Fabric Suppliers")}
-              value={formatCount(sourcing.fabric_supplier_count || fabricSuppliers.length)}
+              value={formatCount(
+                sourcing.fabric_supplier_count || fabricSuppliers.length,
+              )}
             />
             <SupplyMetric
               label={select("عدد الواردات", "Deliveries")}
@@ -1565,7 +1688,9 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
 
           <div className="mt-6 grid gap-6 xl:grid-cols-2">
             <div className="space-y-3">
-              <h3 className={`text-base font-semibold text-gray-800 ${textAlignClass}`}>
+              <h3
+                className={`text-base font-semibold text-gray-800 ${textAlignClass}`}
+              >
                 {select("المصانع", "Factories")}
               </h3>
               {factorySuppliers.map((supplier) => (
@@ -1587,7 +1712,9 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
                     </div>
                     {supplier.supplier_id ? (
                       <button
-                        onClick={() => onOpenSupplier(supplier.supplier_id, "factory")}
+                        onClick={() =>
+                          onOpenSupplier(supplier.supplier_id, "factory")
+                        }
                         className="app-button-secondary rounded-xl px-3 py-2 text-sm font-semibold text-slate-700"
                       >
                         {select("فتح المورد", "Open supplier")}
@@ -1618,7 +1745,9 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
 
             <div className="space-y-4">
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <div className={`text-sm font-semibold text-gray-900 ${textAlignClass}`}>
+                <div
+                  className={`text-sm font-semibold text-gray-900 ${textAlignClass}`}
+                >
                   {select("مورّدو القماش", "Fabric Suppliers")}
                 </div>
                 {fabricSuppliers.length > 0 ? (
@@ -1674,7 +1803,9 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
               </div>
 
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <div className={`text-sm font-semibold text-gray-900 ${textAlignClass}`}>
+                <div
+                  className={`text-sm font-semibold text-gray-900 ${textAlignClass}`}
+                >
                   {select("الأقمشة المرتبطة", "Linked Fabrics")}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -1698,7 +1829,9 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
               </div>
 
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <div className={`text-sm font-semibold text-gray-900 ${textAlignClass}`}>
+                <div
+                  className={`text-sm font-semibold text-gray-900 ${textAlignClass}`}
+                >
                   {select("تفاصيل المتغيرات", "Variant Details")}
                 </div>
                 {variants.length > 0 ? (
@@ -1749,7 +1882,9 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
           </div>
 
           <div className="mt-6 space-y-3">
-            <h3 className={`text-base font-semibold text-gray-800 ${textAlignClass}`}>
+            <h3
+              className={`text-base font-semibold text-gray-800 ${textAlignClass}`}
+            >
               {select("آخر الواردات", "Recent Deliveries")}
             </h3>
             {deliveries.map((delivery) => (
@@ -1766,11 +1901,15 @@ function ProductSupplyChainSection({ sourcing, onOpenSupplier }) {
                       </div>
                       <div className="mt-1 text-xs text-gray-500">
                         {delivery.entry_date
-                          ? formatDateTime(delivery.entry_date, {
-                              year: "numeric",
-                              month: "2-digit",
-                              day: "2-digit",
-                            }, languageTag)
+                          ? formatDateTime(
+                              delivery.entry_date,
+                              {
+                                year: "numeric",
+                                month: "2-digit",
+                                day: "2-digit",
+                              },
+                              languageTag,
+                            )
                           : select("بدون تاريخ", "No date")}
                         {delivery.reference_code
                           ? ` | ${select("مرجع", "Ref")}: ${delivery.reference_code}`

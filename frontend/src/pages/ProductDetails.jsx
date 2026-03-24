@@ -185,8 +185,41 @@ export default function ProductDetails() {
 
   const showNotification = useCallback((message, type = "info") => {
     setNotification({ message, type });
-    // Increase timeout for better visibility, especially for success messages
-    const timeout = type === "success" ? 8000 : 5000;
+
+    // Play notification sound for success
+    if (type === "success") {
+      try {
+        // Create a simple success sound
+        const audioContext = new (
+          window.AudioContext || window.webkitAudioContext
+        )();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+        oscillator.frequency.setValueAtTime(
+          1000,
+          audioContext.currentTime + 0.1,
+        );
+
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(
+          0.01,
+          audioContext.currentTime + 0.3,
+        );
+
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.3);
+      } catch (error) {
+        // Ignore audio errors
+      }
+    }
+
+    // Much longer timeout for success messages to ensure visibility
+    const timeout = type === "success" ? 12000 : 7000;
     setTimeout(() => setNotification(null), timeout);
   }, []);
 
@@ -385,6 +418,12 @@ export default function ProductDetails() {
       }
 
       showNotification(detailedMessage, "success");
+
+      // Add a brief flash effect to indicate success
+      document.body.style.backgroundColor = "#10b981";
+      setTimeout(() => {
+        document.body.style.backgroundColor = "";
+      }, 200);
       setEditing(false);
 
       if (saveResult.shopifySync === "synced") {
@@ -538,20 +577,39 @@ export default function ProductDetails() {
           {/* Notification */}
           {notification && (
             <div
-              className={`fixed top-4 right-4 z-50 px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 border-2 animate-in slide-in-from-right-5 duration-300 ${
+              className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-50 px-8 py-6 rounded-2xl shadow-2xl flex items-center gap-4 border-2 animate-in slide-in-from-top-5 duration-500 ${
                 notification.type === "success"
                   ? "bg-emerald-500 text-white border-emerald-400"
                   : notification.type === "error"
                     ? "bg-red-500 text-white border-red-400"
                     : "bg-blue-500 text-white border-blue-400"
               }`}
-              style={{ minWidth: "320px", maxWidth: "500px" }}
+              style={{ minWidth: "400px", maxWidth: "600px" }}
             >
-              {notification.type === "success" && <CheckCircle size={24} />}
-              {notification.type === "error" && <AlertCircle size={24} />}
-              <span className="text-sm font-medium leading-relaxed">
-                {notification.message}
-              </span>
+              {notification.type === "success" && (
+                <div className="flex-shrink-0">
+                  <CheckCircle size={32} className="animate-pulse" />
+                </div>
+              )}
+              {notification.type === "error" && (
+                <div className="flex-shrink-0">
+                  <AlertCircle size={32} />
+                </div>
+              )}
+              <div className="flex-1">
+                <div className="text-lg font-bold mb-1">
+                  {notification.type === "success" ? "تم بنجاح!" : "خطأ!"}
+                </div>
+                <div className="text-sm leading-relaxed opacity-95">
+                  {notification.message}
+                </div>
+              </div>
+              <button
+                onClick={() => setNotification(null)}
+                className="flex-shrink-0 text-white/80 hover:text-white transition-colors"
+              >
+                <X size={24} />
+              </button>
             </div>
           )}
 

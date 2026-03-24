@@ -438,6 +438,37 @@ export default function BarcodeLabelModal({
     }));
   };
 
+  // Function to copy all current SKUs to Extra line 1 for all targets
+  const copyAllSKUsToExtraLine = () => {
+    let updatedCount = 0;
+    const updates = {};
+
+    normalizedTargets.forEach((target) => {
+      if (target.sku && target.key) {
+        // Only update if there's no existing custom line 1
+        if (!customFooterLines[target.key]?.line1) {
+          updates[target.key] = {
+            ...customFooterLines[target.key],
+            line1: target.sku,
+          };
+          updatedCount++;
+        }
+      }
+    });
+
+    if (updatedCount > 0) {
+      setCustomFooterLines((prev) => ({
+        ...prev,
+        ...updates,
+      }));
+      alert(
+        `✅ تم نسخ ${updatedCount} SKU إلى Extra line 1\nدلوقتي تقدر تغير الـ SKUs والـ Extra line 1 مش هيتأثر`,
+      );
+    } else {
+      alert("ℹ️ كل المنتجات عندها Extra line 1 محفوظ بالفعل");
+    }
+  };
+
   if (!open) {
     return null;
   }
@@ -795,13 +826,23 @@ export default function BarcodeLabelModal({
           )}
         </div>
 
-        <div className="flex flex-col-reverse gap-3 border-t border-slate-200/80 bg-slate-50/70 px-6 py-5 sm:flex-row sm:justify-end sm:px-7">
-          <button
-            onClick={onClose}
-            className="app-button-secondary rounded-2xl px-4 py-3 text-sm font-semibold text-slate-700"
-          >
-            {select("إغلاق", "Close")}
-          </button>
+        <div className="flex flex-col-reverse gap-3 border-t border-slate-200/80 bg-slate-50/70 px-6 py-5 sm:flex-row sm:justify-between sm:px-7">
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="app-button-secondary rounded-2xl px-4 py-3 text-sm font-semibold text-slate-700"
+            >
+              {select("إغلاق", "Close")}
+            </button>
+            {normalizedTargets.length > 1 && (
+              <button
+                onClick={copyAllSKUsToExtraLine}
+                className="app-button-secondary rounded-2xl px-4 py-3 text-sm font-semibold text-orange-700 border-orange-200 bg-orange-50 hover:bg-orange-100"
+              >
+                {select("نسخ كل الـ SKUs", "Copy all SKUs")}
+              </button>
+            )}
+          </div>
           <button
             onClick={handlePrint}
             disabled={!hasPrintableValue || printableTargetsCount === 0}

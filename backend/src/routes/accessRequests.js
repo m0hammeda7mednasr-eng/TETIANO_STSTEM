@@ -1,7 +1,7 @@
 import express from "express";
 import { authenticateToken } from "../middleware/auth.js";
 import { applyUserFilter } from "../helpers/dataFilter.js";
-import { isAdmin } from "../middleware/permissions.js";
+import { isAdmin, PERMISSION_KEYS } from "../middleware/permissions.js";
 import { supabase } from "../supabaseClient.js";
 
 const router = express.Router();
@@ -122,6 +122,10 @@ router.post("/", authenticateToken, async (req, res) => {
         .json({ error: "Permission and reason are required" });
     }
 
+    if (!PERMISSION_KEYS.includes(permission_requested)) {
+      return res.status(400).json({ error: "Invalid permission requested" });
+    }
+
     // Check if there's already a pending request for this permission
     let checkQuery = supabase
       .from("access_requests")
@@ -196,6 +200,15 @@ router.put("/:id", authenticateToken, isAdmin, async (req, res) => {
 
     if (fetchError || !request) {
       return res.status(404).json({ error: "Request not found" });
+    }
+
+    if (
+      status === "approved" &&
+      !PERMISSION_KEYS.includes(request.permission_requested)
+    ) {
+      return res.status(400).json({
+        error: "Requested permission is no longer supported",
+      });
     }
 
     // Update request status

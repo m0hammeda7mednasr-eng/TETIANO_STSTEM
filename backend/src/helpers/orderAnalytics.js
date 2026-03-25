@@ -14,6 +14,25 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const getMoneyAmount = (value) => {
+  if (value === null || value === undefined) {
+    return 0;
+  }
+
+  if (typeof value === "object") {
+    return Math.max(
+      toNumber(value?.amount),
+      toNumber(value?.shop_money?.amount),
+      toNumber(value?.presentment_money?.amount),
+    );
+  }
+
+  return toNumber(value);
+};
+
+const getMaxMoneyAmount = (...values) =>
+  values.reduce((max, value) => Math.max(max, getMoneyAmount(value)), 0);
+
 export const parseOrderData = (order) => {
   if (!order) {
     return {};
@@ -139,12 +158,22 @@ export const getOrderFulfillmentStatus = (order) => {
 
 export const getOrderGrossAmount = (order) => {
   const data = parseOrderData(order);
-  return toNumber(order?.total_price ?? data?.total_price);
+  return getMaxMoneyAmount(
+    order?.total_price,
+    order?.total_price_set,
+    data?.total_price,
+    data?.total_price_set,
+  );
 };
 
 export const getOrderCurrentAmount = (order) => {
   const data = parseOrderData(order);
-  return toNumber(order?.current_total_price ?? data?.current_total_price);
+  return getMaxMoneyAmount(
+    order?.current_total_price,
+    order?.current_total_price_set,
+    data?.current_total_price,
+    data?.current_total_price_set,
+  );
 };
 
 export const getRefundedAmountFromTransactions = (order) => {
@@ -160,7 +189,8 @@ export const getRefundedAmountFromTransactions = (order) => {
       sum +
       transactions.reduce(
         (transactionSum, transaction) =>
-          transactionSum + toNumber(transaction?.amount),
+          transactionSum +
+          getMaxMoneyAmount(transaction?.amount, transaction?.amount_set),
         0,
       )
     );
@@ -171,7 +201,13 @@ export const getOrderRefundedAmount = (order) => {
   const financialStatus = getOrderFinancialStatus(order);
   const grossAmount = getOrderGrossAmount(order);
   const currentAmount = getOrderCurrentAmount(order);
-  const refundedFromColumn = toNumber(order?.total_refunded);
+  const data = parseOrderData(order);
+  const refundedFromColumn = getMaxMoneyAmount(
+    order?.total_refunded,
+    order?.total_refunded_set,
+    data?.total_refunded,
+    data?.total_refunded_set,
+  );
   const refundedFromTransactions = getRefundedAmountFromTransactions(order);
   const refundedFromCurrentAmount =
     grossAmount > 0 && currentAmount > 0 && currentAmount <= grossAmount
@@ -208,7 +244,14 @@ const getDiscountAllocationsAmount = (item) => {
     : [];
 
   return allocations.reduce(
-    (sum, allocation) => sum + toNumber(allocation?.amount),
+    (sum, allocation) =>
+      sum +
+      getMaxMoneyAmount(
+        allocation?.amount,
+        allocation?.amount_set,
+        allocation?.discounted_amount,
+        allocation?.discounted_amount_set,
+      ),
     0,
   );
 };
@@ -217,20 +260,23 @@ const getLineItemOrderedQuantity = (item) => Math.max(0, toNumber(item?.quantity
 
 const getLineItemGrossTotal = (item) => {
   const quantity = getLineItemOrderedQuantity(item);
-  const explicitGrossTotal = Math.max(
-    toNumber(item?.original_total_price),
-    toNumber(item?.original_line_price),
-    toNumber(item?.line_price),
+  const explicitGrossTotal = getMaxMoneyAmount(
+    item?.original_total_price,
+    item?.original_total_price_set,
+    item?.original_line_price,
+    item?.original_line_price_set,
+    item?.line_price,
+    item?.line_price_set,
   );
   if (explicitGrossTotal > 0) {
     return explicitGrossTotal;
   }
 
-  const unitPrice = Math.max(
-    toNumber(item?.original_price),
-    toNumber(item?.price),
-    toNumber(item?.price_set?.shop_money?.amount),
-    toNumber(item?.price_set?.presentment_money?.amount),
+  const unitPrice = getMaxMoneyAmount(
+    item?.original_price,
+    item?.original_price_set,
+    item?.price,
+    item?.price_set,
   );
 
   return quantity > 0 ? unitPrice * quantity : 0;
@@ -242,18 +288,23 @@ export const getLineItemBookedAmount = (item) => {
     return 0;
   }
 
-  const explicitBookedAmount = Math.max(
-    toNumber(item?.discounted_total),
-    toNumber(item?.discounted_total_price),
-    toNumber(item?.final_line_price),
+  const explicitBookedAmount = getMaxMoneyAmount(
+    item?.discounted_total,
+    item?.discounted_total_set,
+    item?.discounted_total_price,
+    item?.discounted_total_price_set,
+    item?.final_line_price,
+    item?.final_line_price_set,
   );
   if (explicitBookedAmount > 0) {
     return explicitBookedAmount;
   }
 
-  const discountedUnitPrice = Math.max(
-    toNumber(item?.discounted_price),
-    toNumber(item?.final_price),
+  const discountedUnitPrice = getMaxMoneyAmount(
+    item?.discounted_price,
+    item?.discounted_price_set,
+    item?.final_price,
+    item?.final_price_set,
   );
   if (discountedUnitPrice > 0) {
     return discountedUnitPrice * quantity;
@@ -265,7 +316,7 @@ export const getLineItemBookedAmount = (item) => {
   }
 
   const discountAmount = Math.max(
-    toNumber(item?.total_discount),
+    getMaxMoneyAmount(item?.total_discount, item?.total_discount_set),
     getDiscountAllocationsAmount(item),
   );
 

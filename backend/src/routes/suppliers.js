@@ -332,7 +332,7 @@ const requireSupplierFabricForStore = async (storeId, supplierId, fabricId) => {
   return fabric;
 };
 
-router.use(authenticateToken, requirePermission("can_view_products"));
+router.use(authenticateToken, requirePermission("can_view_suppliers"));
 
 router.get("/", async (req, res) => {
   try {
@@ -409,7 +409,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-router.post("/", requirePermission("can_edit_products"), async (req, res) => {
+router.post("/", requirePermission("can_edit_suppliers"), async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     const payload = sanitizeSupplierPayload(req.body);
@@ -446,7 +446,7 @@ router.post("/", requirePermission("can_edit_products"), async (req, res) => {
   }
 });
 
-router.put("/:id", requirePermission("can_edit_products"), async (req, res) => {
+router.put("/:id", requirePermission("can_edit_suppliers"), async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     await requireSupplierForStore(storeId, req.params.id);
@@ -487,7 +487,7 @@ router.put("/:id", requirePermission("can_edit_products"), async (req, res) => {
 
 router.post(
   "/:id/fabrics",
-  requirePermission("can_edit_products"),
+  requirePermission("can_edit_suppliers"),
   async (req, res) => {
     try {
       const { storeId } = await resolveStoreContext(req);
@@ -545,7 +545,7 @@ router.post(
 
 router.put(
   "/:id/fabrics/:fabricId",
-  requirePermission("can_edit_products"),
+  requirePermission("can_edit_suppliers"),
   async (req, res) => {
     try {
       const { storeId } = await resolveStoreContext(req);
@@ -605,7 +605,7 @@ router.put(
 
 router.post(
   "/:id/deliveries",
-  requirePermission("can_edit_products"),
+  requirePermission("can_edit_suppliers"),
   async (req, res) => {
     try {
       const { storeId } = await resolveStoreContext(req);
@@ -666,7 +666,7 @@ router.post(
 
 router.post(
   "/:id/payments",
-  requirePermission("can_edit_products"),
+  requirePermission("can_edit_suppliers"),
   async (req, res) => {
     try {
       const { storeId } = await resolveStoreContext(req);

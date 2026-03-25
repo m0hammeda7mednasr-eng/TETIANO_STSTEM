@@ -9,7 +9,9 @@ const sortByCreatedAtDesc = { ascending: false };
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 const SHOPIFY_UPSERT_BATCH_SIZE = 200;
 const ACCESSIBLE_STORE_IDS_CACHE_TTL_MS = 60 * 1000;
+const UPSERT_FALLBACK_WARNING_TTL_MS = 5 * 60 * 1000;
 const accessibleStoreIdsCache = new Map();
+const upsertFallbackWarningCache = new Map();
 
 const isSchemaCompatibilityError = (error) => {
   if (!error) return false;
@@ -29,12 +31,136 @@ const isSchemaCompatibilityError = (error) => {
   );
 };
 
+const getSchemaErrorText = (error) =>
+  String(
+    error?.message || error?.details || error?.hint || "",
+  ).trim();
+
+const extractMissingColumn = (error) => {
+  const text = getSchemaErrorText(error);
+  const patterns = [
+    /column ['"]?([a-zA-Z0-9_]+)['"]? does not exist/i,
+    /Could not find the ['"]([a-zA-Z0-9_]+)['"] column/i,
+    /"([a-zA-Z0-9_]+)" of relation/i,
+    /has no field ['"]?([a-zA-Z0-9_]+)['"]?/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return null;
+};
+
+const cloneMutationPayload = (payload) => {
+  if (Array.isArray(payload)) {
+    return payload.map((item) =>
+      item && typeof item === "object" && !Array.isArray(item)
+        ? { ...item }
+        : item,
+    );
+  }
+
+  if (payload && typeof payload === "object") {
+    return { ...payload };
+  }
+
+  return payload;
+};
+
+const stripMissingColumnFromPayload = (payload, missingColumn) => {
+  if (!missingColumn) {
+    return { payload, removed: false };
+  }
+
+  if (Array.isArray(payload)) {
+    let removed = false;
+    const nextPayload = payload.map((item) => {
+      if (
+        !item ||
+        typeof item !== "object" ||
+        Array.isArray(item) ||
+        !Object.prototype.hasOwnProperty.call(item, missingColumn)
+      ) {
+        return item;
+      }
+
+      removed = true;
+      const nextItem = { ...item };
+      delete nextItem[missingColumn];
+      return nextItem;
+    });
+
+    return { payload: nextPayload, removed };
+  }
+
+  if (
+    payload &&
+    typeof payload === "object" &&
+    Object.prototype.hasOwnProperty.call(payload, missingColumn)
+  ) {
+    const nextPayload = { ...payload };
+    delete nextPayload[missingColumn];
+    return { payload: nextPayload, removed: true };
+  }
+
+  return { payload, removed: false };
+};
+
+const executeMutationWithMissingColumnFallback = async (
+  payload,
+  runner,
+  maxAttempts = 8,
+) => {
+  let currentPayload = cloneMutationPayload(payload);
+  let lastResult = { data: null, error: null };
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const result = await runner(currentPayload);
+
+    if (!result?.error) {
+      return { ...result, payload: currentPayload };
+    }
+
+    lastResult = result;
+    const missingColumn = extractMissingColumn(result.error);
+    const nextPayload = stripMissingColumnFromPayload(
+      currentPayload,
+      missingColumn,
+    );
+
+    if (!missingColumn || !nextPayload.removed) {
+      return { ...result, payload: currentPayload };
+    }
+
+    currentPayload = nextPayload.payload;
+  }
+
+  return { ...lastResult, payload: currentPayload };
+};
+
+const hasScopedStoreId = (row = {}) => String(row?.store_id || "").trim().length > 0;
+
 const hasMeaningfulData = (data) => {
   if (Array.isArray(data)) {
     return data.length > 0;
   }
 
   return data !== null && data !== undefined;
+};
+
+const logThrottledUpsertFallbackWarning = (cacheKey, message) => {
+  const now = Date.now();
+  const lastLoggedAt = upsertFallbackWarningCache.get(cacheKey) || 0;
+  if (now - lastLoggedAt < UPSERT_FALLBACK_WARNING_TTL_MS) {
+    return;
+  }
+
+  upsertFallbackWarningCache.set(cacheKey, now);
+  console.warn(message);
 };
 
 const executeWithSchemaFallback = async (builders) => {
@@ -331,7 +457,8 @@ const buildShopifyRowLookupQuery = (tableName, row) => {
   let query = supabase
     .from(tableName)
     .select("id")
-    .eq("shopify_id", row.shopify_id);
+    .eq("shopify_id", row.shopify_id)
+    .limit(1);
 
   if (row.store_id) {
     query = query.eq("store_id", row.store_id);
@@ -359,12 +486,17 @@ const syncRowsIndividually = async (tableName, rows, itemLabel) => {
       }
 
       if (existing?.id) {
-        const { data: updated, error: updateError } = await supabase
-          .from(tableName)
-          .update(row)
-          .eq("id", existing.id)
-          .select()
-          .single();
+        const {
+          data: updated,
+          error: updateError,
+        } = await executeMutationWithMissingColumnFallback(row, (currentRow) =>
+          supabase
+            .from(tableName)
+            .update(currentRow)
+            .eq("id", existing.id)
+            .select()
+            .single(),
+        );
 
         if (updateError) {
           failures.push(
@@ -377,11 +509,14 @@ const syncRowsIndividually = async (tableName, rows, itemLabel) => {
         continue;
       }
 
-      const { data: inserted, error: insertError } = await supabase
-        .from(tableName)
-        .insert([row])
-        .select()
-        .single();
+      const {
+        data: inserted,
+        error: insertError,
+      } = await executeMutationWithMissingColumnFallback(
+        [row],
+        (currentRows) =>
+          supabase.from(tableName).insert(currentRows).select().single(),
+      );
 
       if (insertError) {
         failures.push(
@@ -408,24 +543,42 @@ const syncRowsIndividually = async (tableName, rows, itemLabel) => {
   };
 };
 
-const upsertRowsChunkWithFallback = async (tableName, rows, itemLabel) => {
-  const upsertResult = await supabase
-    .from(tableName)
-    .upsert(rows, {
-      onConflict: "shopify_id",
-      ignoreDuplicates: false,
-    })
-    .select();
-
-  if (!upsertResult.error) {
-    return upsertResult;
+const upsertRowsChunkWithFallback = async (
+  tableName,
+  rows,
+  itemLabel,
+  conflictTarget = null,
+) => {
+  if (!conflictTarget) {
+    return await syncRowsIndividually(tableName, rows, itemLabel);
   }
 
-  console.warn(
+  const upsertResult = await executeMutationWithMissingColumnFallback(
+    rows,
+    (currentRows) =>
+      supabase
+        .from(tableName)
+        .upsert(currentRows, {
+          onConflict: conflictTarget,
+          ignoreDuplicates: false,
+        })
+        .select(),
+  );
+
+  if (!upsertResult.error) {
+    return { data: upsertResult.data || [], error: null };
+  }
+
+  logThrottledUpsertFallbackWarning(
+    `${tableName}:${conflictTarget || "legacy"}`,
     `Upsert failed for ${tableName}, falling back to per-row sync: ${upsertResult.error.message}`,
   );
 
-  return await syncRowsIndividually(tableName, rows, itemLabel);
+  return await syncRowsIndividually(
+    tableName,
+    upsertResult.payload || rows,
+    itemLabel,
+  );
 };
 
 const upsertRowsWithManualFallback = async (tableName, rows, itemLabel) => {
@@ -433,35 +586,50 @@ const upsertRowsWithManualFallback = async (tableName, rows, itemLabel) => {
     return { data: [], error: null };
   }
 
-  if (rows.length <= SHOPIFY_UPSERT_BATCH_SIZE) {
-    return await upsertRowsChunkWithFallback(tableName, rows, itemLabel);
-  }
-
   const persistedRows = [];
+  const storeScopedRows = rows.filter(hasScopedStoreId);
+  const legacyRows = rows.filter((row) => !hasScopedStoreId(row));
+  const rowGroups = [
+    {
+      rows: storeScopedRows,
+      conflictTarget: "shopify_id,store_id",
+    },
+    {
+      rows: legacyRows,
+      conflictTarget: null,
+    },
+  ];
 
-  for (
-    let startIndex = 0;
-    startIndex < rows.length;
-    startIndex += SHOPIFY_UPSERT_BATCH_SIZE
-  ) {
-    const chunk = rows.slice(
-      startIndex,
-      startIndex + SHOPIFY_UPSERT_BATCH_SIZE,
-    );
-    const chunkResult = await upsertRowsChunkWithFallback(
-      tableName,
-      chunk,
-      itemLabel,
-    );
-
-    if (chunkResult?.error) {
-      return {
-        data: persistedRows,
-        error: chunkResult.error,
-      };
+  for (const group of rowGroups) {
+    if (!Array.isArray(group.rows) || group.rows.length === 0) {
+      continue;
     }
 
-    persistedRows.push(...(chunkResult?.data || []));
+    for (
+      let startIndex = 0;
+      startIndex < group.rows.length;
+      startIndex += SHOPIFY_UPSERT_BATCH_SIZE
+    ) {
+      const chunk = group.rows.slice(
+        startIndex,
+        startIndex + SHOPIFY_UPSERT_BATCH_SIZE,
+      );
+      const chunkResult = await upsertRowsChunkWithFallback(
+        tableName,
+        chunk,
+        itemLabel,
+        group.conflictTarget,
+      );
+
+      if (chunkResult?.error) {
+        return {
+          data: persistedRows,
+          error: chunkResult.error,
+        };
+      }
+
+      persistedRows.push(...(chunkResult?.data || []));
+    }
   }
 
   return {
@@ -925,6 +1093,14 @@ export const Customer = {
 
   async findByUser(userId) {
     return await findRowsByUserWithFallback("customers", userId);
+  },
+
+  async findById(id) {
+    return await supabase.from("customers").select().eq("id", id).single();
+  },
+
+  async findByIdForUser(userId, id) {
+    return await findRowByIdForUserWithFallback("customers", userId, id);
   },
 
   async updateMultiple(customers) {

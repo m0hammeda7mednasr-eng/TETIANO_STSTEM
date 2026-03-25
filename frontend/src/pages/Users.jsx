@@ -22,6 +22,8 @@ const DEFAULT_PERMISSION_STATE = {
   can_view_dashboard: true,
   can_view_products: true,
   can_edit_products: false,
+  can_view_suppliers: true,
+  can_edit_suppliers: false,
   can_view_orders: true,
   can_edit_orders: false,
   can_view_customers: true,

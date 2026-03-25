@@ -56,6 +56,47 @@ const VALID_ORDER_STATUSES = new Set([
   "partially_refunded",
 ]);
 const VALID_FULFILLMENT_ACTIONS = new Set(["fulfilled", "unfulfilled"]);
+const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
+
+const isSchemaCompatibilityError = (error) => {
+  if (!error) {
+    return false;
+  }
+
+  if (SCHEMA_ERROR_CODES.has(String(error.code || ""))) {
+    return true;
+  }
+
+  const text =
+    `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+  return (
+    text.includes("does not exist") ||
+    text.includes("could not find the") ||
+    text.includes("relation") ||
+    text.includes("column")
+  );
+};
+
+const extractMissingColumn = (error) => {
+  const text = String(
+    error?.message || error?.details || error?.hint || "",
+  ).trim();
+  const patterns = [
+    /column ['"]?([a-zA-Z0-9_]+)['"]? does not exist/i,
+    /Could not find the ['"]([a-zA-Z0-9_]+)['"] column/i,
+    /"([a-zA-Z0-9_]+)" of relation/i,
+    /has no field ['"]?([a-zA-Z0-9_]+)['"]?/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return null;
+};
 
 const parseOrderData = (order) => {
   const value = order?.data;
@@ -1223,14 +1264,30 @@ export class OrderManagementService {
           "",
       ).trim();
 
-      const { error: updateError } = await supabase
+      const updatePayload = {
+        customer_phone: persistedCustomerPhone || null,
+        data: nextOrderData,
+        local_updated_at: new Date().toISOString(),
+      };
+      let { error: updateError } = await supabase
         .from("orders")
-        .update({
-          customer_phone: persistedCustomerPhone || null,
-          data: nextOrderData,
-          local_updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq("id", order.id);
+
+      if (updateError && isSchemaCompatibilityError(updateError)) {
+        const missingColumn = extractMissingColumn(updateError);
+        if (
+          missingColumn &&
+          Object.prototype.hasOwnProperty.call(updatePayload, missingColumn)
+        ) {
+          const retryPayload = { ...updatePayload };
+          delete retryPayload[missingColumn];
+          ({ error: updateError } = await supabase
+            .from("orders")
+            .update(retryPayload)
+            .eq("id", order.id));
+        }
+      }
 
       if (updateError) {
         throw updateError;

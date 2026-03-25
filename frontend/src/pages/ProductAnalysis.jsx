@@ -33,6 +33,11 @@ const EMPTY_SUMMARY = {
   related_tasks_count: 0,
 };
 
+const PRODUCT_ANALYSIS_DEFAULT_SCOPE_FILTERS = {
+  ...INITIAL_ORDER_SCOPE_FILTERS,
+  ordersLimit: "4000",
+};
+
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -282,7 +287,9 @@ export default function ProductAnalysis() {
   const [meta, setMeta] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState("all");
-  const [scopeFilters, setScopeFilters] = useState(INITIAL_ORDER_SCOPE_FILTERS);
+  const [scopeFilters, setScopeFilters] = useState(
+    PRODUCT_ANALYSIS_DEFAULT_SCOPE_FILTERS,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -464,7 +471,8 @@ export default function ProductAnalysis() {
           <OrderInsightsFilterBar
             filters={scopeFilters}
             onChange={setScopeFilters}
-            onReset={() => setScopeFilters(INITIAL_ORDER_SCOPE_FILTERS)}
+            onReset={() => setScopeFilters(PRODUCT_ANALYSIS_DEFAULT_SCOPE_FILTERS)}
+            baseFilters={PRODUCT_ANALYSIS_DEFAULT_SCOPE_FILTERS}
             title={select("فلترة نطاق الطلبات", "Order Scope Filters")}
             description={select(
               "هذا النطاق يحدد الطلبات التي تدخل في حساب أرقام تحليل المنتجات.",

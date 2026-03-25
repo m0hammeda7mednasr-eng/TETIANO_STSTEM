@@ -121,6 +121,13 @@ export const getErrorMessage = (error) => {
     return error.userMessage;
   }
 
+  if (
+    String(error?.code || "").toUpperCase() === "ECONNABORTED" ||
+    String(error?.message || "").toLowerCase().includes("timeout")
+  ) {
+    return "The server took too long to respond. Please try again.";
+  }
+
   // Check for specific error messages from the backend
   if (error.response?.data?.error) {
     return error.response.data.error;

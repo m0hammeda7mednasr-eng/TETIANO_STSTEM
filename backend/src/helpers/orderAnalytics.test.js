@@ -65,4 +65,39 @@ describe("helpers/orderAnalytics", () => {
 
     expect(getLineItemBookedAmount(lineItem)).toBe(180);
   });
+
+  it("uses Shopify money-set totals when flat discounted fields are absent", () => {
+    const lineItem = {
+      quantity: 2,
+      discounted_total_set: {
+        shop_money: {
+          amount: "175.50",
+        },
+      },
+    };
+
+    expect(getLineItemBookedAmount(lineItem)).toBe(175.5);
+  });
+
+  it("falls back to discount allocation money sets when total_discount is missing", () => {
+    const lineItem = {
+      quantity: 2,
+      original_total_price_set: {
+        shop_money: {
+          amount: "200.00",
+        },
+      },
+      discount_allocations: [
+        {
+          amount_set: {
+            shop_money: {
+              amount: "25.00",
+            },
+          },
+        },
+      ],
+    };
+
+    expect(getLineItemBookedAmount(lineItem)).toBe(175);
+  });
 });

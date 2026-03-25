@@ -67,6 +67,15 @@ const INITIAL_FILTERS = {
   sortBy: "newest",
 };
 
+const ORDER_DATE_PRESET_IDS = [
+  "all",
+  "today",
+  "yesterday",
+  "weekly",
+  "half_monthly",
+  "monthly",
+];
+
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -372,6 +381,91 @@ const endOfDay = (dateString) => {
   return date;
 };
 
+const formatDateInputValue = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const shiftDateByDays = (date, days) => {
+  const nextDate = new Date(date.getTime());
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+};
+
+const getOrderDatePresetRange = (presetId, now = new Date()) => {
+  const today = new Date(now.getTime());
+  today.setHours(0, 0, 0, 0);
+
+  switch (presetId) {
+    case "today":
+      return {
+        dateFrom: formatDateInputValue(today),
+        dateTo: formatDateInputValue(today),
+      };
+    case "yesterday": {
+      const yesterday = shiftDateByDays(today, -1);
+      return {
+        dateFrom: formatDateInputValue(yesterday),
+        dateTo: formatDateInputValue(yesterday),
+      };
+    }
+    case "weekly": {
+      const fromDate = shiftDateByDays(today, -6);
+      return {
+        dateFrom: formatDateInputValue(fromDate),
+        dateTo: formatDateInputValue(today),
+      };
+    }
+    case "half_monthly": {
+      const fromDate = shiftDateByDays(today, -14);
+      return {
+        dateFrom: formatDateInputValue(fromDate),
+        dateTo: formatDateInputValue(today),
+      };
+    }
+    case "monthly": {
+      const fromDate = shiftDateByDays(today, -29);
+      return {
+        dateFrom: formatDateInputValue(fromDate),
+        dateTo: formatDateInputValue(today),
+      };
+    }
+    case "all":
+    default:
+      return {
+        dateFrom: "",
+        dateTo: "",
+      };
+  }
+};
+
+const resolveOrderDatePreset = (dateFrom, dateTo, now = new Date()) => {
+  const normalizedDateFrom = String(dateFrom || "").trim();
+  const normalizedDateTo = String(dateTo || "").trim();
+
+  if (!normalizedDateFrom && !normalizedDateTo) {
+    return "all";
+  }
+
+  for (const presetId of ORDER_DATE_PRESET_IDS.filter((value) => value !== "all")) {
+    const presetRange = getOrderDatePresetRange(presetId, now);
+    if (
+      presetRange.dateFrom === normalizedDateFrom &&
+      presetRange.dateTo === normalizedDateTo
+    ) {
+      return presetId;
+    }
+  }
+
+  return "custom";
+};
+
 export default function Orders() {
   const navigate = useNavigate();
   const {
@@ -627,8 +721,18 @@ export default function Orders() {
       setLoadStatus({
         active: true,
         message: forceSync
-          ? `Refreshing Shopify orders and loading the latest ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} orders...`
-          : `Loading the latest ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} orders...`,
+          ? select(
+              `\u062c\u0627\u0631\u064d \u062a\u062d\u062f\u064a\u062b \u0637\u0644\u0628\u0627\u062a Shopify \u0648\u062a\u062d\u0645\u064a\u0644 \u0622\u062e\u0631 ${formatNumber(ORDERS_VISIBLE_LIMIT, {
+                maximumFractionDigits: 0,
+              })} \u0637\u0644\u0628...`,
+              `Refreshing Shopify orders and loading the latest ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} orders...`,
+            )
+          : select(
+              `\u062c\u0627\u0631\u064d \u062a\u062d\u0645\u064a\u0644 \u0622\u062e\u0631 ${formatNumber(ORDERS_VISIBLE_LIMIT, {
+                maximumFractionDigits: 0,
+              })} \u0637\u0644\u0628...`,
+              `Loading the latest ${formatNumber(ORDERS_VISIBLE_LIMIT, { maximumFractionDigits: 0 })} orders...`,
+            ),
       });
 
       try {
@@ -690,7 +794,7 @@ export default function Orders() {
     } finally {
       fetchPromiseRef.current = null;
     }
-  }, [cacheKey, fetchMissingOrderIds, formatNumber]);
+  }, [cacheKey, fetchMissingOrderIds, formatNumber, select]);
 
   const scheduleSilentRefresh = useCallback(() => {
     if (refreshTimeoutRef.current) {
@@ -1077,8 +1181,60 @@ export default function Orders() {
     setCurrentPage((page) => Math.min(Math.max(page, 1), totalPages));
   }, [totalPages]);
 
+  const datePresetValue = useMemo(
+    () => resolveOrderDatePreset(filters.dateFrom, filters.dateTo),
+    [filters.dateFrom, filters.dateTo],
+  );
+
+  const datePresetOptions = useMemo(
+    () => [
+      {
+        value: "all",
+        label: select("كل الفترات", "All Periods"),
+      },
+      {
+        value: "today",
+        label: select("يومي: اليوم", "Daily: Today"),
+      },
+      {
+        value: "yesterday",
+        label: select("أمس", "Yesterday"),
+      },
+      {
+        value: "weekly",
+        label: select("أسبوعي: آخر 7 أيام", "Weekly: Last 7 Days"),
+      },
+      {
+        value: "half_monthly",
+        label: select("نصف شهري: آخر 15 يوم", "Half-Monthly: Last 15 Days"),
+      },
+      {
+        value: "monthly",
+        label: select("شهري: آخر 30 يوم", "Monthly: Last 30 Days"),
+      },
+      {
+        value: "custom",
+        label: select("تخصيص يدوي", "Custom Range"),
+      },
+    ],
+    [select],
+  );
+
   const handleFilterChange = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleDatePresetChange = (presetId) => {
+    if (presetId === "custom") {
+      return;
+    }
+
+    const range = getOrderDatePresetRange(presetId);
+    setFilters((prev) => ({
+      ...prev,
+      dateFrom: range.dateFrom,
+      dateTo: range.dateTo,
+    }));
   };
 
   const resetFilters = () => {
@@ -1298,7 +1454,7 @@ export default function Orders() {
                   className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
                 >
                   <RefreshCw size={18} />
-                  Refresh
+                  {select("\u062a\u062d\u062f\u064a\u062b", "Refresh")}
                 </button>
                 <button
                   onClick={() => setIsExportPanelOpen((current) => !current)}
@@ -1452,6 +1608,38 @@ export default function Orders() {
                     )}
                   </p>
                 )}
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">
+                  {select("الفترة", "Period")}
+                </label>
+                <select
+                  value={datePresetValue}
+                  onChange={(event) => handleDatePresetChange(event.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                >
+                  {datePresetOptions.map((option) => (
+                    <option
+                      key={option.value}
+                      value={option.value}
+                      disabled={option.value === "custom" && datePresetValue !== "custom"}
+                    >
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  {datePresetValue === "custom"
+                    ? select(
+                        "المدى الحالي مخصص يدويًا من حقلي البداية والنهاية.",
+                        "The current range is manually set from the start and end dates.",
+                      )
+                    : select(
+                        "اختيار الفترة يضبط التاريخين تلقائيًا ويعرض كل الأوردرات داخلها.",
+                        "Choosing a period fills the date range automatically and shows all orders within it.",
+                      )}
+                </p>
               </div>
 
               <div>

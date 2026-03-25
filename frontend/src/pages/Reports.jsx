@@ -17,6 +17,7 @@ import {
   YAxis,
 } from "recharts";
 import Sidebar from "../components/Sidebar";
+import { useLocale } from "../context/LocaleContext";
 import api, { getErrorMessage } from "../utils/api";
 import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
@@ -61,6 +62,7 @@ const normalizeAttachments = (attachments) =>
     : [];
 
 export default function Reports() {
+  const { select } = useLocale();
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(30);
   const [reports, setReports] = useState([]);
@@ -190,7 +192,9 @@ export default function Reports() {
     return (
       <div className="flex h-screen bg-slate-100">
         <Sidebar />
-        <main className="flex-1 p-8">Loading reports...</main>
+        <main className="flex-1 p-8">
+          {select("\u062c\u0627\u0631\u064d \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u062a\u0642\u0627\u0631\u064a\u0631...", "Loading reports...")}
+        </main>
       </div>
     );
   }
@@ -201,13 +205,20 @@ export default function Reports() {
       <main className="flex-1 overflow-auto p-8 space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">Employee Reports</h1>
+            <h1 className="text-3xl font-bold text-slate-900">
+              {select("\u062a\u0642\u0627\u0631\u064a\u0631 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646", "Employee Reports")}
+            </h1>
             <p className="text-slate-600 mt-1">
-              Daily submissions, discipline tracking, and attachment review
+              {select(
+                "\u0627\u0644\u062a\u0633\u0644\u064a\u0645\u0627\u062a \u0627\u0644\u064a\u0648\u0645\u064a\u0629\u060c \u0645\u062a\u0627\u0628\u0639\u0629 \u0627\u0644\u0627\u0646\u0636\u0628\u0627\u0637\u060c \u0648\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0645\u0631\u0641\u0642\u0627\u062a",
+                "Daily submissions, discipline tracking, and attachment review",
+              )}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-600">Range</span>
+            <span className="text-sm text-slate-600">
+              {select("\u0627\u0644\u0645\u062f\u0649", "Range")}
+            </span>
             <select
               value={days}
               onChange={(e) => setDays(parseInt(e.target.value, 10))}

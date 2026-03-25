@@ -25,6 +25,7 @@ import Sidebar from "../components/Sidebar";
 import { SkeletonBlock } from "../components/Common";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
+import { useLocale } from "../context/LocaleContext";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
@@ -51,8 +52,9 @@ import {
   toNumber,
 } from "../utils/productsView";
 
-const PRODUCTS_PAGE_SIZE = 200;
+const PRODUCTS_PAGE_SIZE = 100;
 const PRODUCTS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
+const PRODUCTS_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
 
 const INITIAL_FILTERS = {
   searchTerm: "",
@@ -146,6 +148,7 @@ const isProductsRelatedSharedUpdate = (event) => {
 export default function Products() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { isAdmin, hasPermission } = useAuth();
+  const { select } = useLocale();
   const canEditProducts = hasPermission("can_edit_products");
   const cacheKey = useMemo(() => buildStoreScopedCacheKey("products:list"), []);
   const initialCachedSnapshot = useMemo(() => {
@@ -243,7 +246,10 @@ export default function Products() {
 
         setLoadStatus({
           active: true,
-          message: "Loading products in batches...",
+          message: select(
+            "\u062c\u0627\u0631\u064d \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0645\u0646\u062a\u062c\u0627\u062a \u0639\u0644\u0649 \u062f\u0641\u0639\u0627\u062a...",
+            "Loading products in batches...",
+          ),
         });
 
         try {
@@ -256,6 +262,7 @@ export default function Products() {
                   sort_by: "updated_at",
                   sort_dir: "desc",
                 },
+                timeout: PRODUCTS_REQUEST_TIMEOUT_MS,
               }),
             {
               limit: PRODUCTS_PAGE_SIZE,
@@ -311,7 +318,7 @@ export default function Products() {
         fetchPromiseRef.current = null;
       }
     },
-    [cacheKey, showNotification],
+    [cacheKey, select, showNotification],
   );
 
   useEffect(() => {
@@ -741,14 +748,18 @@ export default function Products() {
 
           <div className="flex flex-wrap justify-between items-center gap-3">
             <div>
-              <h1 className="text-3xl font-bold text-slate-900">Products</h1>
+              <h1 className="text-3xl font-bold text-slate-900">
+                {select("\u0627\u0644\u0645\u0646\u062a\u062c\u0627\u062a", "Products")}
+              </h1>
               <p className="text-slate-600">
-                Products and variants are separated clearly so filters and
-                totals stay easy to read.
+                {select(
+                  "\u062a\u0645 \u0641\u0635\u0644 \u0627\u0644\u0645\u0646\u062a\u062c\u0627\u062a \u0639\u0646 \u0627\u0644\u0641\u0627\u0631\u064a\u0627\u0646\u062a\u0627\u062a \u0628\u0634\u0643\u0644 \u0648\u0627\u0636\u062d \u0644\u062a\u0628\u0642\u0649 \u0627\u0644\u0641\u0644\u0627\u062a\u0631 \u0648\u0627\u0644\u0625\u062c\u0645\u0627\u0644\u064a\u0627\u062a \u0633\u0647\u0644\u0629 \u0627\u0644\u0642\u0631\u0627\u0621\u0629.",
+                  "Products and variants are separated clearly so filters and totals stay easy to read.",
+                )}
               </p>
               {lastUpdatedAt && (
                 <p className="mt-2 text-xs text-slate-500">
-                  Last refresh: {formatDateTime(lastUpdatedAt)}
+                  {select("\u0622\u062e\u0631 \u062a\u062d\u062f\u064a\u062b", "Last refresh")}: {formatDateTime(lastUpdatedAt)}
                 </p>
               )}
             </div>
@@ -757,7 +768,7 @@ export default function Products() {
               className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
             >
               <RefreshCw size={18} />
-              Refresh
+              {select("\u062a\u062d\u062f\u064a\u062b", "Refresh")}
             </button>
           </div>
 
@@ -788,11 +799,16 @@ export default function Products() {
                     {formatNumber(summary.lowStock, {
                       maximumFractionDigits: 0,
                     })}{" "}
-                    low-stock variants need follow-up
+                    {select(
+                      "\u0641\u0627\u0631\u064a\u0627\u0646\u062a\u0627\u062a \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0645\u0646\u062e\u0641\u0636 \u062a\u062d\u062a\u0627\u062c \u0645\u062a\u0627\u0628\u0639\u0629",
+                      "low-stock variants need follow-up",
+                    )}
                   </p>
                   <p className="mt-1 text-xs text-amber-800/90">
-                    Focus this view on products below the stock threshold to
-                    restock faster.
+                    {select(
+                      "\u0631\u0643\u0632 \u0647\u0630\u0627 \u0627\u0644\u0639\u0631\u0636 \u0639\u0644\u0649 \u0627\u0644\u0645\u0646\u062a\u062c\u0627\u062a \u0627\u0644\u0623\u0642\u0644 \u0645\u0646 \u062d\u062f \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0644\u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u062a\u0648\u0631\u064a\u062f \u0623\u0633\u0631\u0639.",
+                      "Focus this view on products below the stock threshold to restock faster.",
+                    )}
                   </p>
                 </div>
               </div>
@@ -801,14 +817,14 @@ export default function Products() {
                 onClick={() => handleFilterChange("stockStatus", "low_stock")}
                 className="inline-flex items-center rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
               >
-                Focus low stock
+                {select("\u0631\u0643\u0632 \u0639\u0644\u0649 \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0645\u0646\u062e\u0641\u0636", "Focus low stock")}
               </button>
             </div>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <SummaryCard
-              label="Products"
+              label={select("\u0627\u0644\u0645\u0646\u062a\u062c\u0627\u062a", "Products")}
               value={formatNumber(summary.uniqueProducts, {
                 maximumFractionDigits: 0,
               })}
@@ -816,7 +832,7 @@ export default function Products() {
               color="from-sky-500 to-sky-700"
             />
             <SummaryCard
-              label="Variants"
+              label={select("\u0627\u0644\u0641\u0627\u0631\u064a\u0627\u0646\u062a\u0627\u062a", "Variants")}
               value={formatNumber(summary.totalVariants, {
                 maximumFractionDigits: 0,
               })}
@@ -824,7 +840,7 @@ export default function Products() {
               color="from-indigo-500 to-indigo-700"
             />
             <SummaryCard
-              label="Total Stock"
+              label={select("\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0645\u062e\u0632\u0648\u0646", "Total Stock")}
               value={formatNumber(summary.totalInventory, {
                 maximumFractionDigits: 0,
               })}
@@ -832,7 +848,7 @@ export default function Products() {
               color="from-emerald-500 to-emerald-700"
             />
             <SummaryCard
-              label="Low Stock"
+              label={select("\u0645\u062e\u0632\u0648\u0646 \u0645\u0646\u062e\u0641\u0636", "Low Stock")}
               value={formatNumber(summary.lowStock, {
                 maximumFractionDigits: 0,
               })}
@@ -1351,7 +1367,7 @@ export default function Products() {
                           className="flex-1 bg-sky-600 hover:bg-sky-700 text-white py-2 rounded-lg flex items-center justify-center gap-2 text-sm"
                         >
                           <Edit2 size={14} />
-                          Edit
+                          {select("\u062a\u0639\u062f\u064a\u0644", "Edit")}
                         </button>
                       )}
                     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import OrderComments from "../components/OrderComments";
@@ -73,6 +73,10 @@ const toPositiveNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 };
+const toAmount = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 const normalizeText = (value) => String(value || "").trim();
 
@@ -130,27 +134,20 @@ export default function OrderDetails() {
   const [updatingPaymentMethod, setUpdatingPaymentMethod] = useState(false);
   const [updatingFulfillment, setUpdatingFulfillment] = useState(false);
   const [profitData, setProfitData] = useState(null);
+  const [profitLoading, setProfitLoading] = useState(false);
+  const [profitError, setProfitError] = useState("");
   const [selectedLineItemIds, setSelectedLineItemIds] = useState([]);
   const [editingContact, setEditingContact] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
   const [contactForm, setContactForm] = useState(createOrderContactForm(null));
   const canEditOrders = hasPermission("can_edit_orders");
 
-  useEffect(() => {
-    fetchOrderDetails();
-    if (isAdmin) {
-      fetchOrderProfit();
-    } else {
-      setProfitData(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, isAdmin]);
+  const showNotification = useCallback((message, type = "info") => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 5000);
+  }, []);
 
-  useEffect(() => {
-    setContactForm(createOrderContactForm(order));
-  }, [order]);
-
-  const fetchOrderDetails = async () => {
+  const fetchOrderDetails = useCallback(async () => {
     setLoading(true);
     try {
       const response = await api.get(`/shopify/orders/${id}/details`);
@@ -162,17 +159,50 @@ export default function OrderDetails() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id, showNotification]);
 
-  const fetchOrderProfit = async () => {
+  const fetchOrderProfit = useCallback(async () => {
+    if (!isAdmin) {
+      setProfitData(null);
+      setProfitError("");
+      setProfitLoading(false);
+      return;
+    }
+
     try {
+      setProfitLoading(true);
+      setProfitError("");
       const response = await api.get(`/shopify/orders/${id}/profit`);
       setProfitData(response.data);
     } catch (error) {
       console.error("Error fetching order profit:", error);
-      // Don't show error notification for profit calculation failure
+      setProfitData(null);
+      setProfitError(
+        error?.response?.data?.error || "تعذر حساب صافي الربح لهذا الطلب حالياً",
+      );
+    } finally {
+      setProfitLoading(false);
     }
-  };
+  }, [id, isAdmin]);
+
+  const refreshOrderView = useCallback(async () => {
+    await fetchOrderDetails();
+    if (isAdmin) {
+      await fetchOrderProfit();
+    } else {
+      setProfitData(null);
+      setProfitError("");
+      setProfitLoading(false);
+    }
+  }, [fetchOrderDetails, fetchOrderProfit, isAdmin]);
+
+  useEffect(() => {
+    refreshOrderView();
+  }, [refreshOrderView]);
+
+  useEffect(() => {
+    setContactForm(createOrderContactForm(order));
+  }, [order]);
 
 
   const handleStatusChange = async (newStatus) => {
@@ -202,7 +232,7 @@ export default function OrderDetails() {
           : "Order status updated successfully",
         "success",
       );
-      fetchOrderDetails();
+      await refreshOrderView();
     } catch (error) {
       console.error("Error updating status:", error);
       showNotification(
@@ -473,7 +503,7 @@ export default function OrderDetails() {
       markSharedDataUpdated();
       showNotification("Fulfillment updated successfully", "success");
       clearSelectedLineItems();
-      await fetchOrderDetails();
+      await refreshOrderView();
     } catch (error) {
       console.error("Error updating fulfillment:", error);
       showNotification(
@@ -519,8 +549,11 @@ export default function OrderDetails() {
 
       if (response?.data?.order) {
         setOrder(response.data.order);
+        if (isAdmin) {
+          await fetchOrderProfit();
+        }
       } else {
-        await fetchOrderDetails();
+        await refreshOrderView();
       }
 
       setEditingContact(false);
@@ -535,11 +568,6 @@ export default function OrderDetails() {
     } finally {
       setSavingContact(false);
     }
-  };
-
-  const showNotification = (message, type = "info") => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 5000);
   };
 
   const handleCopyOrderReference = async () => {
@@ -632,6 +660,48 @@ export default function OrderDetails() {
     shippingAddressEditAudit?.original,
   );
   const hasContactEdits = Boolean(phoneEditAudit || shippingAddressEditAudit);
+  const orderProfitSummary = useMemo(() => {
+    const revenue = toAmount(profitData?.total_revenue);
+    const productCost = toAmount(profitData?.total_cost);
+    const operationalCosts = toAmount(profitData?.total_operational_costs);
+    const grossProfit = toAmount(profitData?.gross_profit);
+    const netProfit = toAmount(profitData?.net_profit);
+    const margin = toAmount(profitData?.profit_margin);
+
+    return {
+      revenue,
+      productCost,
+      operationalCosts,
+      grossProfit,
+      netProfit,
+      margin,
+      totalCosts: productCost + operationalCosts,
+      statusTone:
+        netProfit > 0
+          ? {
+              wrapper: "border-emerald-200 bg-emerald-50/90",
+              text: "text-emerald-900",
+              subtle: "text-emerald-700",
+              badge: "bg-emerald-600 text-white",
+              label: "طلب مربح",
+            }
+          : netProfit < 0
+            ? {
+                wrapper: "border-rose-200 bg-rose-50/90",
+                text: "text-rose-900",
+                subtle: "text-rose-700",
+                badge: "bg-rose-600 text-white",
+                label: "طلب خاسر",
+              }
+            : {
+                wrapper: "border-slate-200 bg-slate-50/90",
+                text: "text-slate-900",
+                subtle: "text-slate-700",
+                badge: "bg-slate-700 text-white",
+                label: "بدون ربح",
+              },
+    };
+  }, [profitData]);
 
   if (loading) {
     return (
@@ -1059,91 +1129,99 @@ export default function OrderDetails() {
                     </div>
                   )}
 
-                  {/* Profit Information */}
-                  {profitData && (
-                    <div className="mt-4 pt-4 border-t border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 space-y-3">
-                      <h3 className="font-bold text-green-800 mb-2 flex items-center gap-2">
-                        <TrendingUp size={18} />
-                        تحليل الربحية
-                      </h3>
-
-                      {/* Revenue */}
-                      <div className="flex justify-between text-gray-700">
-                        <span className="font-medium">إجمالي الإيرادات:</span>
-                        <span className="font-semibold">
-                          {parseFloat(profitData.total_revenue || 0).toFixed(2)}{" "}
-                          {currencyLabel}
-                        </span>
-                      </div>
-
-                      {/* Cost */}
-                      <div className="flex justify-between text-orange-700">
-                        <span className="font-medium">تكلفة المنتجات:</span>
-                        <span className="font-semibold">
-                          -{parseFloat(profitData.total_cost || 0).toFixed(2)}{" "}
-                          {currencyLabel}
-                        </span>
-                      </div>
-
-                      {/* Gross Profit */}
-                      <div className="flex justify-between text-blue-700 pb-2 border-b border-green-200">
-                        <span className="font-medium">الربح الإجمالي:</span>
-                        <span className="font-semibold">
-                          {parseFloat(profitData.gross_profit || 0).toFixed(2)}{" "}
-                          {currencyLabel}
-                        </span>
-                      </div>
-
-                      {/* Operational Costs */}
-                      {profitData.total_operational_costs > 0 && (
-                        <div className="flex justify-between text-red-700">
-                          <span className="font-medium">
-                            التكاليف التشغيلية:
-                          </span>
-                          <span className="font-semibold">
-                            -
-                            {parseFloat(
-                              profitData.total_operational_costs || 0,
-                            ).toFixed(2)}{" "}
-                            {currencyLabel}
-                          </span>
+                  {isAdmin && (
+                    <div className="mt-4 pt-4 border-t border-slate-200">
+                      <div
+                        className={`rounded-2xl border p-4 shadow-sm ${orderProfitSummary.statusTone.wrapper}`}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <h3
+                              className={`font-bold flex items-center gap-2 ${orderProfitSummary.statusTone.text}`}
+                            >
+                              <TrendingUp size={18} />
+                              صافي ربح الطلب
+                            </h3>
+                            <p className={`mt-1 text-xs ${orderProfitSummary.statusTone.subtle}`}>
+                              يظهر للأدمن فقط ويعتمد على إيراد الطلب وتكلفة المنتجات والتكاليف التشغيلية
+                            </p>
+                          </div>
+                          {profitData ? (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-semibold ${orderProfitSummary.statusTone.badge}`}
+                            >
+                              {orderProfitSummary.netProfit > 0 ? (
+                                <CheckCircle size={14} />
+                              ) : orderProfitSummary.netProfit < 0 ? (
+                                <AlertCircle size={14} />
+                              ) : null}
+                              {orderProfitSummary.statusTone.label}
+                            </span>
+                          ) : null}
                         </div>
-                      )}
 
-                      {/* Net Profit */}
-                      <div className="flex justify-between text-green-900 pt-2 border-t-2 border-green-300">
-                        <span className="font-bold text-lg">صافي الربح:</span>
-                        <span className="font-bold text-xl">
-                          {parseFloat(profitData.net_profit || 0).toFixed(2)}{" "}
-                          {currencyLabel}
-                        </span>
-                      </div>
+                        {profitLoading ? (
+                          <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white/70 px-4 py-5 text-sm text-slate-600">
+                            جاري حساب صافي الربح...
+                          </div>
+                        ) : profitError ? (
+                          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+                            {profitError}
+                          </div>
+                        ) : profitData ? (
+                          <div className="mt-4 space-y-4">
+                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                              <ProfitSummaryMetric
+                                label="الإيراد"
+                                value={formatCurrency(orderProfitSummary.revenue)}
+                                tone="text-sky-700"
+                              />
+                              <ProfitSummaryMetric
+                                label="إجمالي التكاليف"
+                                value={formatCurrency(orderProfitSummary.totalCosts)}
+                                tone="text-amber-700"
+                              />
+                              <ProfitSummaryMetric
+                                label="الربح الإجمالي"
+                                value={formatCurrency(orderProfitSummary.grossProfit)}
+                                tone="text-indigo-700"
+                              />
+                              <ProfitSummaryMetric
+                                label="صافي الربح"
+                                value={formatCurrency(orderProfitSummary.netProfit)}
+                                tone={orderProfitSummary.statusTone.text}
+                              />
+                            </div>
 
-                      {/* Profit Margin */}
-                      <div className="flex justify-between text-green-800">
-                        <span className="font-medium">هامش الربح الصافي:</span>
-                        <span className="font-bold text-lg">
-                          {parseFloat(profitData.profit_margin || 0).toFixed(2)}
-                          %
-                        </span>
-                      </div>
-
-                      {/* Profit Status Badge */}
-                      <div className="mt-2 pt-2 border-t border-green-200">
-                        {profitData.net_profit > 0 ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded-full text-sm font-semibold">
-                            <CheckCircle size={14} />
-                            طلب مربح
-                          </span>
-                        ) : profitData.net_profit < 0 ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-red-600 text-white rounded-full text-sm font-semibold">
-                            <AlertCircle size={14} />
-                            طلب خاسر
-                          </span>
+                            <div className="rounded-2xl border border-white/80 bg-white/75 p-4">
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <ProfitDetailRow
+                                  label="تكلفة المنتجات"
+                                  value={formatCurrency(orderProfitSummary.productCost)}
+                                  tone="text-amber-700"
+                                />
+                                <ProfitDetailRow
+                                  label="التكاليف التشغيلية"
+                                  value={formatCurrency(orderProfitSummary.operationalCosts)}
+                                  tone="text-rose-700"
+                                />
+                                <ProfitDetailRow
+                                  label="هامش الربح"
+                                  value={`${orderProfitSummary.margin.toFixed(2)}%`}
+                                  tone={orderProfitSummary.statusTone.text}
+                                />
+                                <ProfitDetailRow
+                                  label="النتيجة"
+                                  value={orderProfitSummary.statusTone.label}
+                                  tone={orderProfitSummary.statusTone.text}
+                                />
+                              </div>
+                            </div>
+                          </div>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-gray-600 text-white rounded-full text-sm font-semibold">
-                            بدون ربح
-                          </span>
+                          <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white/70 px-4 py-5 text-sm text-slate-600">
+                            لا توجد بيانات ربحية متاحة لهذا الطلب بعد.
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1807,6 +1885,24 @@ export default function OrderDetails() {
           </div>
         </div>
       </main>
+    </div>
+  );
+}
+
+function ProfitSummaryMetric({ label, value, tone = "text-slate-900" }) {
+  return (
+    <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3 shadow-sm shadow-black/5">
+      <p className="text-xs font-semibold text-slate-500">{label}</p>
+      <p className={`mt-2 text-lg font-bold ${tone}`}>{value}</p>
+    </div>
+  );
+}
+
+function ProfitDetailRow({ label, value, tone = "text-slate-900" }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+      <span className="text-sm font-medium text-slate-600">{label}</span>
+      <span className={`text-sm font-bold ${tone}`}>{value}</span>
     </div>
   );
 }

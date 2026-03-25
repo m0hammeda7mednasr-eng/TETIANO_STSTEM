@@ -81,7 +81,7 @@ const buildSharedNav = (t, select) => [
           select("موردو المصانع", "Factory Suppliers"),
         ),
         path: "/suppliers",
-        permission: "can_view_products",
+        permission: "can_view_suppliers",
       },
       {
         icon: Truck,
@@ -90,7 +90,7 @@ const buildSharedNav = (t, select) => [
           select("موردو القماش", "Fabric Suppliers"),
         ),
         path: "/suppliers/fabric-suppliers",
-        permission: "can_view_products",
+        permission: "can_view_suppliers",
       },
       {
         icon: BarChart3,

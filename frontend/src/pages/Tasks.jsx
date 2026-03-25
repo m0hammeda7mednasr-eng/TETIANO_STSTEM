@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import { useLocale } from "../context/LocaleContext";
 import api, { getErrorMessage } from "../utils/api";
 import { extractArray } from "../utils/response";
 import {
@@ -50,6 +51,7 @@ const getSelectedAssigneeIds = (formData) =>
       : [];
 
 export default function Tasks() {
+  const { select } = useLocale();
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -341,7 +343,9 @@ export default function Tasks() {
     return (
       <div className="flex h-screen bg-slate-100">
         <Sidebar />
-        <main className="flex-1 p-8">Loading tasks...</main>
+        <main className="flex-1 p-8">
+          {select("\u062c\u0627\u0631\u064d \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0645\u0647\u0627\u0645...", "Loading tasks...")}
+        </main>
       </div>
     );
   }
@@ -415,10 +419,15 @@ export default function Tasks() {
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
-                  {editingTask ? "Edit Task" : "Create Task"}
+                  {editingTask
+                    ? select("\u062a\u0639\u062f\u064a\u0644 \u0645\u0647\u0645\u0629", "Edit Task")
+                    : select("\u0625\u0646\u0634\u0627\u0621 \u0645\u0647\u0645\u0629", "Create Task")}
                 </h2>
                 <p className="text-sm text-slate-500">
-                  Choose single assignment or coordinated group delivery
+                  {select(
+                    "\u0627\u062e\u062a\u0631 \u0625\u0633\u0646\u0627\u062f\u064b\u0627 \u0641\u0631\u062f\u064a\u064b\u0627 \u0623\u0648 \u062a\u0633\u0644\u064a\u0645\u064b\u0627 \u062c\u0645\u0627\u0639\u064a\u064b\u0627 \u0645\u0646\u0638\u0645\u064b\u0627.",
+                    "Choose single assignment or coordinated group delivery",
+                  )}
                 </p>
               </div>
               <button
@@ -674,7 +683,7 @@ export default function Tasks() {
                 className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-3 text-white hover:bg-emerald-700"
               >
                 <Save size={18} />
-                Save
+                {select("\u062d\u0641\u0638", "Save")}
               </button>
             </form>
           </div>

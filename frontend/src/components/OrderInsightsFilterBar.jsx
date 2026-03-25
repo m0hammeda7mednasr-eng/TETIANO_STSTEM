@@ -6,10 +6,13 @@ import {
 } from "lucide-react";
 import { useLocale } from "../context/LocaleContext";
 import {
+  applyOrderScopeDatePreset,
   getActiveOrderScopePresetId,
+  getOrderScopeDatePresets,
   getOrderScopePresets,
   getOrderScopeSummary,
   hasActiveOrderScopeFilters,
+  resolveOrderScopeDatePreset,
 } from "../utils/orderScope";
 
 export default function OrderInsightsFilterBar({
@@ -18,10 +21,13 @@ export default function OrderInsightsFilterBar({
   onReset,
   title,
   description,
+  baseFilters,
 }) {
   const { locale, t } = useLocale();
-  const presets = getOrderScopePresets(locale);
-  const activePresetId = getActiveOrderScopePresetId(filters);
+  const presets = getOrderScopePresets(locale, baseFilters);
+  const datePresets = getOrderScopeDatePresets(locale);
+  const activePresetId = getActiveOrderScopePresetId(filters, baseFilters);
+  const activeDatePresetId = resolveOrderScopeDatePreset(filters);
   const activeSummary = getOrderScopeSummary(filters, locale);
   const hasActiveFilters = hasActiveOrderScopeFilters(filters);
   const resolvedTitle = title || t("orderFilterBar.title", "Analysis Filters");
@@ -37,6 +43,14 @@ export default function OrderInsightsFilterBar({
       ...filters,
       [key]: value,
     });
+  };
+
+  const handleDatePresetChange = (presetId) => {
+    if (presetId === "custom") {
+      return;
+    }
+
+    onChange(applyOrderScopeDatePreset(filters, presetId));
   };
 
   return (
@@ -85,7 +99,30 @@ export default function OrderInsightsFilterBar({
           })}
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
+          <Field
+            label={t("orderFilterBar.period", "Period")}
+            icon={CalendarRange}
+          >
+            <select
+              value={activeDatePresetId}
+              onChange={(event) => handleDatePresetChange(event.target.value)}
+              className="app-input px-3 py-2.5 text-sm"
+            >
+              {datePresets.map((preset) => (
+                <option
+                  key={preset.id}
+                  value={preset.id}
+                  disabled={
+                    preset.id === "custom" && activeDatePresetId !== "custom"
+                  }
+                >
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+
           <Field
             label={t("orderFilterBar.fromDate", "From Date")}
             icon={CalendarRange}
@@ -125,12 +162,12 @@ export default function OrderInsightsFilterBar({
                   String(event.target.value || "").replace(/[^\d]/g, ""),
                 )
               }
-              placeholder={locale === "ar" ? "1000 أو 4000" : "1000 or 4000"}
+              placeholder={locale === "ar" ? "1000 or 4000" : "1000 or 4000"}
               className="app-input px-3 py-2.5 text-sm"
             />
             <p className="mt-2 text-xs text-slate-500">
               {locale === "ar"
-                ? "اتركه فارغًا لتحليل كل الطلبات داخل النطاق، أو اكتب عدد الأوردرات المطلوب."
+                ? "\u0627\u062a\u0631\u0643\u0647 \u0641\u0627\u0631\u063a\u064b\u0627 \u0644\u062a\u062d\u0644\u064a\u0644 \u0643\u0644 \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u062f\u0627\u062e\u0644 \u0627\u0644\u0646\u0637\u0627\u0642\u060c \u0623\u0648 \u0627\u0643\u062a\u0628 \u0639\u062f\u062f \u0627\u0644\u0623\u0648\u0631\u062f\u0631\u0627\u062a \u0627\u0644\u0645\u0637\u0644\u0648\u0628."
                 : "Leave empty to analyze all orders in scope, or enter the number of recent orders to analyze."}
             </p>
           </Field>
@@ -145,32 +182,42 @@ export default function OrderInsightsFilterBar({
               className="app-input px-3 py-2.5 text-sm"
             >
               <option value="all">
-                {locale === "ar" ? "كل الحالات" : "All statuses"}
+                {locale === "ar" ? "\u0643\u0644 \u0627\u0644\u062d\u0627\u0644\u0627\u062a" : "All statuses"}
               </option>
               <option value="paid_or_partial">
-                {locale === "ar" ? "مدفوع + مدفوع جزئيًا" : "Paid + Partially Paid"}
+                {locale === "ar"
+                  ? "\u0645\u062f\u0641\u0648\u0639 + \u0645\u062f\u0641\u0648\u0639 \u062c\u0632\u0626\u064a\u064b\u0627"
+                  : "Paid + Partially Paid"}
               </option>
               <option value="pending_or_authorized">
-                {locale === "ar" ? "معلق + مصرح به" : "Pending + Authorized"}
+                {locale === "ar"
+                  ? "\u0645\u0639\u0644\u0642 + \u0645\u0635\u0631\u062d \u0628\u0647"
+                  : "Pending + Authorized"}
               </option>
-              <option value="paid">{locale === "ar" ? "مدفوع" : "Paid"}</option>
+              <option value="paid">
+                {locale === "ar" ? "\u0645\u062f\u0641\u0648\u0639" : "Paid"}
+              </option>
               <option value="partially_paid">
-                {locale === "ar" ? "مدفوع جزئيًا" : "Partially Paid"}
+                {locale === "ar"
+                  ? "\u0645\u062f\u0641\u0648\u0639 \u062c\u0632\u0626\u064a\u064b\u0627"
+                  : "Partially Paid"}
               </option>
               <option value="pending">
-                {locale === "ar" ? "معلق" : "Pending"}
+                {locale === "ar" ? "\u0645\u0639\u0644\u0642" : "Pending"}
               </option>
               <option value="authorized">
-                {locale === "ar" ? "مصرح به" : "Authorized"}
+                {locale === "ar" ? "\u0645\u0635\u0631\u062d \u0628\u0647" : "Authorized"}
               </option>
               <option value="partially_refunded">
-                {locale === "ar" ? "استرداد جزئي" : "Partially Refunded"}
+                {locale === "ar"
+                  ? "\u0627\u0633\u062a\u0631\u062f\u0627\u062f \u062c\u0632\u0626\u064a"
+                  : "Partially Refunded"}
               </option>
               <option value="refunded">
-                {locale === "ar" ? "مسترد" : "Refunded"}
+                {locale === "ar" ? "\u0645\u0633\u062a\u0631\u062f" : "Refunded"}
               </option>
               <option value="voided">
-                {locale === "ar" ? "ملغي" : "Voided"}
+                {locale === "ar" ? "\u0645\u0644\u063a\u064a" : "Voided"}
               </option>
             </select>
           </Field>
@@ -187,16 +234,22 @@ export default function OrderInsightsFilterBar({
               className="app-input px-3 py-2.5 text-sm"
             >
               <option value="all">
-                {locale === "ar" ? "كل الحالات" : "All statuses"}
+                {locale === "ar" ? "\u0643\u0644 \u0627\u0644\u062d\u0627\u0644\u0627\u062a" : "All statuses"}
               </option>
               <option value="fulfilled">
-                {locale === "ar" ? "تم التسليم" : "Fulfilled"}
+                {locale === "ar"
+                  ? "\u062a\u0645 \u0627\u0644\u062a\u0633\u0644\u064a\u0645"
+                  : "Fulfilled"}
               </option>
               <option value="partial">
-                {locale === "ar" ? "تسليم جزئي" : "Partially Fulfilled"}
+                {locale === "ar"
+                  ? "\u062a\u0633\u0644\u064a\u0645 \u062c\u0632\u0626\u064a"
+                  : "Partially Fulfilled"}
               </option>
               <option value="unfulfilled">
-                {locale === "ar" ? "غير مسلّم" : "Unfulfilled"}
+                {locale === "ar"
+                  ? "\u063a\u064a\u0631 \u0645\u0633\u0644\u0651\u0645"
+                  : "Unfulfilled"}
               </option>
             </select>
           </Field>
@@ -208,19 +261,27 @@ export default function OrderInsightsFilterBar({
               className="app-input px-3 py-2.5 text-sm"
             >
               <option value="all">
-                {locale === "ar" ? "كل الحالات" : "All statuses"}
+                {locale === "ar" ? "\u0643\u0644 \u0627\u0644\u062d\u0627\u0644\u0627\u062a" : "All statuses"}
               </option>
               <option value="any">
-                {locale === "ar" ? "يوجد استرجاع" : "Has refund"}
+                {locale === "ar"
+                  ? "\u064a\u0648\u062c\u062f \u0627\u0633\u062a\u0631\u062c\u0627\u0639"
+                  : "Has refund"}
               </option>
               <option value="partial">
-                {locale === "ar" ? "استرجاع جزئي" : "Partial refund"}
+                {locale === "ar"
+                  ? "\u0627\u0633\u062a\u0631\u062c\u0627\u0639 \u062c\u0632\u0626\u064a"
+                  : "Partial refund"}
               </option>
               <option value="full">
-                {locale === "ar" ? "استرجاع كامل" : "Full refund"}
+                {locale === "ar"
+                  ? "\u0627\u0633\u062a\u0631\u062c\u0627\u0639 \u0643\u0627\u0645\u0644"
+                  : "Full refund"}
               </option>
               <option value="none">
-                {locale === "ar" ? "بدون استرجاع" : "No refund"}
+                {locale === "ar"
+                  ? "\u0628\u062f\u0648\u0646 \u0627\u0633\u062a\u0631\u062c\u0627\u0639"
+                  : "No refund"}
               </option>
             </select>
           </Field>

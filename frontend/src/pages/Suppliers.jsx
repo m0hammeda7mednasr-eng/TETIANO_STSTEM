@@ -720,7 +720,7 @@ export default function Suppliers() {
   const { hasPermission } = useAuth();
   const { locale, isRTL } = useLocale();
   const location = useLocation();
-  const canManageSuppliers = hasPermission("can_edit_products");
+  const canManageSuppliers = hasPermission("can_edit_suppliers");
   const supplierViewType = getSupplierViewType(location.pathname);
   const isFactorySuppliersView = supplierViewType === "factory";
 

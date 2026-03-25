@@ -237,9 +237,7 @@ const CUSTOMER_LIST_SELECTS = [
     "default_address",
     "created_at",
     "updated_at",
-    "data",
   ].join(","),
-  CUSTOMER_LIST_SELECT,
   [
     "id",
     "shopify_id",
@@ -255,6 +253,9 @@ const CUSTOMER_LIST_SELECTS = [
     "created_at",
     "updated_at",
   ].join(","),
+  CUSTOMER_LIST_SELECT,
+];
+const CUSTOMER_DETAIL_SELECTS = [
   [
     "id",
     "shopify_id",
@@ -421,6 +422,22 @@ const filterRowsByStoreId = (rows, requestedStoreId) => {
 const toNonNegativeInteger = (value, fallback = 0) => {
   const parsed = parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const toBooleanQueryFlag = (value, fallback = false) => {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
 };
 
 const getListPagination = (query = {}, defaultLimit = DEFAULT_LIST_LIMIT) => {
@@ -654,10 +671,11 @@ const getScopedEntityPage = async ({
       }
 
       lastError = result.error;
-      console.error("Error executing query:", result.error);
       if (isSchemaCompatibilityError(result.error)) {
         break;
       }
+
+      console.error("Error executing query:", result.error);
 
       if (isQueryRetryableError(result.error)) {
         continue;
@@ -2277,10 +2295,18 @@ const buildMissingOrderRecord = (
   };
 };
 
-const buildCustomerListItem = (customer) => {
+const buildCustomerListItem = (
+  customer,
+  { includeData = false, includeDetails = false } = {},
+) => {
   const parsedData = parseJsonField(customer?.data);
-
-  return {
+  const tags = Array.isArray(parsedData?.tags)
+    ? parsedData.tags
+    : String(parsedData?.tags || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+  const result = {
     ...customer,
     phone: extractCustomerPhone(customer),
     default_address:
@@ -2288,6 +2314,19 @@ const buildCustomerListItem = (customer) => {
     city: customer?.city || parsedData?.default_address?.city || "",
     country: customer?.country || parsedData?.default_address?.country || "",
   };
+
+  if (!includeData) {
+    delete result.data;
+  }
+
+  if (includeDetails) {
+    result.tags = tags;
+    result.last_order_name =
+      parsedData?.last_order_name || parsedData?.last_order?.name || "";
+    result.default_address_details = parsedData?.default_address || {};
+  }
+
+  return result;
 };
 
 const getOrderCustomerPhone = (order) => {
@@ -2318,33 +2357,52 @@ const enrichCustomersWithOrderPhones = async (req, customers = []) => {
   }
 
   try {
-    let query = db
-      .from("orders")
-      .select("customer_email,data,customer_phone,store_id,user_id,updated_at")
-      .in("customer_email", unresolvedEmails)
-      .order("updated_at", { ascending: false });
-
     const requestedStoreId = getRequestedStoreId(req);
     const isAdmin = await resolveIsAdmin(req);
+    const selectCandidates = [
+      "customer_email,data,customer_phone,store_id,user_id,updated_at",
+      "customer_email,data,store_id,user_id,updated_at",
+    ];
+    let orderRows = [];
+    let lastError = null;
 
-    if (requestedStoreId) {
-      query = query.eq("store_id", requestedStoreId);
-    } else if (!isAdmin) {
-      const accessibleStoreIds = await getAccessibleStoreIds(req.user.id);
-      if (accessibleStoreIds.length > 0) {
-        query = query.in("store_id", accessibleStoreIds);
-      } else {
-        query = query.eq("user_id", req.user.id);
+    for (const selectedColumns of selectCandidates) {
+      let query = db
+        .from("orders")
+        .select(selectedColumns)
+        .in("customer_email", unresolvedEmails)
+        .order("updated_at", { ascending: false });
+
+      if (requestedStoreId) {
+        query = query.eq("store_id", requestedStoreId);
+      } else if (!isAdmin) {
+        const accessibleStoreIds = await getAccessibleStoreIds(req.user.id);
+        if (accessibleStoreIds.length > 0) {
+          query = query.in("store_id", accessibleStoreIds);
+        } else {
+          query = query.eq("user_id", req.user.id);
+        }
+      }
+
+      const { data, error } = await query;
+      if (!error) {
+        orderRows = data || [];
+        lastError = null;
+        break;
+      }
+
+      lastError = error;
+      if (!isSchemaCompatibilityError(error)) {
+        throw error;
       }
     }
 
-    const { data, error } = await query;
-    if (error) {
-      throw error;
+    if (lastError) {
+      throw lastError;
     }
 
     const phoneByEmail = new Map();
-    for (const order of data || []) {
+    for (const order of orderRows) {
       const email = String(order?.customer_email || "").trim();
       if (!email || phoneByEmail.has(email)) {
         continue;
@@ -3730,6 +3788,11 @@ router.get(
   async (req, res) => {
     try {
       const pagination = getListPagination(req.query);
+      const includeData = toBooleanQueryFlag(req.query.include_data, false);
+      const includeOrderPhoneFallback = toBooleanQueryFlag(
+        req.query.include_order_phone_fallback,
+        false,
+      );
       const sortOptions = getListSortOptions(
         req.query,
         CUSTOMER_SORT_FIELDS,
@@ -3739,7 +3802,7 @@ router.get(
       const { data, error } = await getScopedEntityPage({
         req,
         tableName: "customers",
-        selects: CUSTOMER_LIST_SELECTS,
+        selects: includeData ? CUSTOMER_DETAIL_SELECTS : CUSTOMER_LIST_SELECTS,
         pagination,
         sortOptions,
       });
@@ -3761,19 +3824,46 @@ router.get(
         `Returning ${data?.length || 0} customers for user ${req.user.id}`,
       );
       const normalizedCustomers = (data || []).map((customer) =>
-        buildCustomerListItem(customer),
+        buildCustomerListItem(customer, { includeData }),
       );
-      const enrichedCustomers = await enrichCustomersWithOrderPhones(
-        req,
-        normalizedCustomers,
-      );
-      res.json(buildPaginatedCollection(enrichedCustomers, pagination));
+      const finalCustomers = includeOrderPhoneFallback
+        ? await enrichCustomersWithOrderPhones(req, normalizedCustomers)
+        : normalizedCustomers;
+      res.json(buildPaginatedCollection(finalCustomers, pagination));
     } catch (e) {
       console.error("Exception fetching customers:", e);
       res.status(500).json({ error: e.message });
     }
   },
 );
+
+router.get(
+  "/customers/:id",
+  verifyToken,
+  requirePermission("can_view_customers"),
+  async (req, res) => {
+    try {
+      const { data, error } = await Customer.findByIdForUser(
+        req.user.id,
+        req.params.id,
+      );
+
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+
+      if (!data) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+
+      res.json(buildCustomerListItem(data, { includeDetails: true }));
+    } catch (e) {
+      console.error("Exception fetching customer details:", e);
+      res.status(500).json({ error: e.message });
+    }
+  },
+);
+
 router.get(
   "/products/:id",
   verifyToken,

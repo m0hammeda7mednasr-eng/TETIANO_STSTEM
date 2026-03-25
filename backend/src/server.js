@@ -31,26 +31,53 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const isDevelopment = process.env.NODE_ENV === "development";
+const ALLOWED_CORS_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "http://localhost:3002",
+  "http://localhost:3003",
+  process.env.FRONTEND_URL,
+  "https://tetiano.me",
+  "https://www.tetiano.me",
+  /^https:\/\/.*\.vercel\.app$/,
+  /^https:\/\/.*\.railway\.app$/,
+].filter(Boolean);
+
+const normalizeCorsOrigin = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/\/+$/, "");
+
+const isAllowedCorsOrigin = (origin) => {
+  const normalizedOrigin = normalizeCorsOrigin(origin);
+  if (!normalizedOrigin) {
+    return true;
+  }
+
+  return ALLOWED_CORS_ORIGINS.some((allowedOrigin) => {
+    if (allowedOrigin instanceof RegExp) {
+      return allowedOrigin.test(normalizedOrigin);
+    }
+
+    return normalizeCorsOrigin(allowedOrigin) === normalizedOrigin;
+  });
+};
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (isAllowedCorsOrigin(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`CORS origin blocked: ${normalizeCorsOrigin(origin)}`));
+  },
+  credentials: true,
+};
 
 // Middleware
-app.use(
-  cors({
-    origin: [
-      "http://localhost:3000",
-      "http://localhost:3001",
-      "http://localhost:3002",
-      "http://localhost:3003",
-      process.env.FRONTEND_URL,
-      "https://tetiano.me",
-      "https://www.tetiano.me",
-      // Vercel domains
-      /^https:\/\/.*\.vercel\.app$/,
-      // Railway domains (for testing)
-      /^https:\/\/.*\.railway\.app$/,
-    ].filter(Boolean),
-    credentials: true,
-  }),
-);
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(
   "/api/shopify/webhooks",
   express.raw({ type: "application/json" }),

@@ -20,6 +20,8 @@ import { subscribeToSharedDataUpdates } from "../utils/realtime";
 const getRequestablePermissions = (locale) => [
   { value: "can_view_products", label: getPermissionLabel("can_view_products", locale) },
   { value: "can_edit_products", label: getPermissionLabel("can_edit_products", locale) },
+  { value: "can_view_suppliers", label: getPermissionLabel("can_view_suppliers", locale) },
+  { value: "can_edit_suppliers", label: getPermissionLabel("can_edit_suppliers", locale) },
   { value: "can_view_orders", label: getPermissionLabel("can_view_orders", locale) },
   { value: "can_edit_orders", label: getPermissionLabel("can_edit_orders", locale) },
   { value: "can_view_customers", label: getPermissionLabel("can_view_customers", locale) },
@@ -145,8 +147,8 @@ export default function RequestAccess() {
 
             <div className="mb-4 rounded-xl border border-sky-100 bg-sky-50 p-3 text-sm text-sky-800">
               {select(
-                "صلاحيات الموردين ضمن صلاحيات المنتجات. إذا أردت الدخول إلى الموردين أو تعديلهم، اختر صلاحية المنتجات المناسبة من القائمة.",
-                "Supplier access is included under product permissions. If you need to open or edit suppliers, choose the matching product permission from the list.",
+                "صلاحيات الموردين بقت مستقلة عن المنتجات. اختَر برمشن الموردين المناسب لو محتاج عرض أو إدارة الموردين.",
+                "Supplier permissions are now separate from product permissions. Choose the matching supplier permission if you need supplier access or management.",
               )}
             </div>
 

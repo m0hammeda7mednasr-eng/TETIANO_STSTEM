@@ -1450,8 +1450,6 @@ router.get("/scans", requirePermission("can_view_products"), async (req, res) =>
       generated_at: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Error fetching warehouse scans:", error);
-
     if (isSchemaCompatibilityError(error)) {
       const pagination = getPagination(req.query);
       const requestedStoreId = getRequestedStoreId(req);
@@ -1467,6 +1465,8 @@ router.get("/scans", requirePermission("can_view_products"), async (req, res) =>
           "Warehouse scan history is not available yet. Scanner actions still update local warehouse stock.",
       });
     }
+
+    console.error("Error fetching warehouse scans:", error);
 
     res.status(error.status || 500).json({
       error: error.status ? error.message : "Failed to fetch warehouse scan history",

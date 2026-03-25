@@ -88,7 +88,7 @@ function App() {
               <Route
                 path="/suppliers"
                 element={
-                  <ProtectedRoute permission="can_view_products">
+                  <ProtectedRoute permission="can_view_suppliers">
                     <Suppliers />
                   </ProtectedRoute>
                 }
@@ -96,7 +96,7 @@ function App() {
               <Route
                 path="/suppliers/fabric-suppliers"
                 element={
-                  <ProtectedRoute permission="can_view_products">
+                  <ProtectedRoute permission="can_view_suppliers">
                     <Suppliers />
                   </ProtectedRoute>
                 }

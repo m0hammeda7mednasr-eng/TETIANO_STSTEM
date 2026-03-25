@@ -6,6 +6,7 @@ import {
   buildPermissionsForRole,
   getUserPermissions,
   normalizeRole,
+  primeUserAccessContext,
 } from "../middleware/permissions.js";
 import { getJwtSecret } from "../helpers/jwt.js";
 import {
@@ -111,15 +112,22 @@ router.post("/register", async (req, res) => {
       return res.status(500).json({ error: "Failed to create account" });
     }
 
+    const normalizedRole = normalizeRole(user.role || "user");
+    const permissions = buildPermissionsForRole(normalizedRole);
+    primeUserAccessContext(user.id, {
+      role: normalizedRole,
+      permissions,
+    });
+
     res.json({
       token: signUserToken(user),
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: normalizeRole(user.role || "user"),
+        role: normalizedRole,
       },
-      permissions: buildPermissionsForRole(user.role),
+      permissions,
     });
   } catch (error) {
     console.error("Register error:", error);
@@ -175,6 +183,10 @@ router.post("/login", async (req, res) => {
       normalizedRole,
       normalizedRole === "admin" ? null : await getUserPermissions(user.id),
     );
+    primeUserAccessContext(user.id, {
+      role: normalizedRole,
+      permissions,
+    });
 
     res.json({
       token: signUserToken(user),

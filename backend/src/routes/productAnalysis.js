@@ -134,11 +134,67 @@ const parseJsonField = (value) => {
 
 const normalizeKey = (value) => String(value || "").trim();
 
+const normalizeIdentifier = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
 const normalizeSku = (value) =>
   String(value || "")
     .trim()
     .replace(/\s+/g, " ")
     .toUpperCase();
+
+const extractIdentifierVariants = (value) => {
+  const normalized = normalizeKey(value);
+  if (!normalized) {
+    return [];
+  }
+
+  const candidates = new Set([normalizeIdentifier(normalized)]);
+  const numericIdMatch = normalized.match(/(?:^|\/)(\d+)(?:[/?#].*)?$/);
+  if (numericIdMatch?.[1]) {
+    candidates.add(numericIdMatch[1]);
+  }
+
+  return Array.from(candidates).filter(Boolean);
+};
+
+const rememberIdentifier = (map, value, entry) => {
+  for (const candidate of extractIdentifierVariants(value)) {
+    map.set(candidate, entry);
+  }
+};
+
+const resolveIdentifierMatch = (map, values = []) => {
+  for (const value of values) {
+    for (const candidate of extractIdentifierVariants(value)) {
+      if (map.has(candidate)) {
+        return map.get(candidate);
+      }
+    }
+  }
+
+  return null;
+};
+
+const rememberSku = (map, value, entry) => {
+  const normalizedSku = normalizeSku(value);
+  if (normalizedSku) {
+    map.set(normalizedSku, entry);
+  }
+};
+
+const resolveSkuMatch = (map, values = []) => {
+  for (const value of values) {
+    const normalizedSku = normalizeSku(value);
+    if (normalizedSku && map.has(normalizedSku)) {
+      return map.get(normalizedSku);
+    }
+  }
+
+  return null;
+};
 
 const isSchemaCompatibilityError = (error) => {
   if (!error) {
@@ -867,28 +923,19 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
   const productBySku = new Map();
   const variantById = new Map();
   const variantBySku = new Map();
-  const variantToProduct = new Map();
+  const variantToProductById = new Map();
+  const variantToProductBySku = new Map();
 
   for (const productEntry of productEntries) {
-    if (productEntry.shopify_id) {
-      productByShopifyId.set(productEntry.shopify_id, productEntry);
-    }
-
-    if (productEntry.sku) {
-      productBySku.set(normalizeSku(productEntry.sku), productEntry);
-    }
+    rememberIdentifier(productByShopifyId, productEntry.shopify_id, productEntry);
+    rememberIdentifier(productByShopifyId, productEntry.id, productEntry);
+    rememberSku(productBySku, productEntry.sku, productEntry);
 
     for (const variantEntry of productEntry.variants) {
-      if (variantEntry.id) {
-        variantById.set(normalizeKey(variantEntry.id), variantEntry);
-        variantToProduct.set(normalizeKey(variantEntry.id), productEntry);
-      }
-
-      if (variantEntry.sku) {
-        const normalizedVariantSku = normalizeSku(variantEntry.sku);
-        variantBySku.set(normalizedVariantSku, variantEntry);
-        variantToProduct.set(normalizedVariantSku, productEntry);
-      }
+      rememberIdentifier(variantById, variantEntry.id, variantEntry);
+      rememberIdentifier(variantToProductById, variantEntry.id, productEntry);
+      rememberSku(variantBySku, variantEntry.sku, variantEntry);
+      rememberSku(variantToProductBySku, variantEntry.sku, productEntry);
     }
   }
 
@@ -915,17 +962,24 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
       const itemVariantId = normalizeKey(item?.variant_id);
       const itemSku = normalizeSku(item?.sku);
 
+      const variantEntry =
+        resolveIdentifierMatch(variantById, [itemVariantId]) ||
+        resolveSkuMatch(variantBySku, [itemSku]) ||
+        null;
       const productEntry =
-        productByShopifyId.get(itemProductId) || productBySku.get(itemSku) || null;
+        resolveIdentifierMatch(productByShopifyId, [itemProductId]) ||
+        resolveIdentifierMatch(variantToProductById, [itemVariantId]) ||
+        resolveSkuMatch(productBySku, [itemSku]) ||
+        resolveSkuMatch(variantToProductBySku, [itemSku]) ||
+        null;
       if (!productEntry) {
         continue;
       }
 
-      const variantEntry =
-        variantById.get(itemVariantId) ||
-        variantBySku.get(itemSku) ||
+      const resolvedVariantEntry =
+        variantEntry ||
         productEntry.variants[0];
-      if (!variantEntry) {
+      if (!resolvedVariantEntry) {
         continue;
       }
       const orderCreatedAt = order?.created_at || null;
@@ -937,7 +991,7 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
         refundDetails.latestAtByLineItemId.get(lineItemId) ||
         (refundedQuantity > 0 ? order?.updated_at || order?.created_at : null);
 
-      const targets = [productEntry, variantEntry];
+      const targets = [productEntry, resolvedVariantEntry];
 
       for (const target of targets) {
         target.ordered_quantity += orderedQuantity;

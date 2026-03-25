@@ -8,6 +8,7 @@ import {
   PERMISSION_KEYS,
   normalizePermissions,
   normalizeRole,
+  primeUserAccessContext,
 } from "../middleware/permissions.js";
 import { supabase } from "../supabaseClient.js";
 import {
@@ -18,6 +19,9 @@ import { getAccessibleStoreIds } from "../models/index.js";
 
 const router = express.Router();
 const MAX_USERS_LIST_LIMIT = 200;
+const FAST_AUTH_QUERY_RETRY_OPTIONS = {
+  attempts: 1,
+};
 
 const parseListLimit = (value) => {
   const parsed = parseInt(value, 10);
@@ -41,6 +45,9 @@ const shouldIncludeCount = (value) =>
   ["1", "true", "yes"].includes(String(value || "").toLowerCase());
 
 const shouldUseCompactSelect = (value) =>
+  ["1", "true", "yes"].includes(String(value || "").toLowerCase());
+
+const shouldIncludeRelatedStores = (value) =>
   ["1", "true", "yes"].includes(String(value || "").toLowerCase());
 
 const getStoreFallbackName = (storeId) =>
@@ -70,6 +77,39 @@ const rememberDiscoveredStore = (storesMap, storeId, preferredName = "") => {
   if (normalizedName && existingUsesFallbackName) {
     storesMap.set(normalizedId, nextStore);
   }
+};
+
+const listAccessibleStoresForUser = async (userId, normalizedRole = "user") => {
+  if (normalizedRole === "admin") {
+    const adminStores = await getAdminVisibleStores();
+    if (adminStores.length > 0) {
+      return adminStores;
+    }
+  }
+
+  const accessibleStoreIds = await getAccessibleStoreIds(userId);
+  if (!Array.isArray(accessibleStoreIds) || accessibleStoreIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("stores")
+    .select("*")
+    .in("id", accessibleStoreIds)
+    .order("name", { ascending: true });
+
+  if (!error && Array.isArray(data) && data.length > 0) {
+    return data;
+  }
+
+  if (error) {
+    console.error("Error fetching accessible stores:", error);
+  }
+
+  return accessibleStoreIds.map((storeId) => ({
+    id: storeId,
+    name: `Store ${String(storeId).slice(0, 8)}`,
+  }));
 };
 
 export const getAdminVisibleStores = async () => {
@@ -390,38 +430,8 @@ router.delete(
 router.get("/me/stores", authenticateToken, async (req, res) => {
   try {
     const normalizedRole = String(req.user?.role || "").toLowerCase();
-
-    if (normalizedRole === "admin") {
-      const adminStores = await getAdminVisibleStores();
-      if (adminStores.length > 0) {
-        return res.json(adminStores);
-      }
-    }
-
-    const accessibleStoreIds = await getAccessibleStoreIds(req.user.id);
-    if (!Array.isArray(accessibleStoreIds) || accessibleStoreIds.length === 0) {
-      return res.json([]);
-    }
-
-    const { data, error } = await supabase
-      .from("stores")
-      .select("*")
-      .in("id", accessibleStoreIds)
-      .order("name", { ascending: true });
-
-    if (!error && Array.isArray(data) && data.length > 0) {
-      return res.json(data);
-    }
-
-    if (error) {
-      console.error("Error fetching accessible stores:", error);
-    }
-
     return res.json(
-      accessibleStoreIds.map((storeId) => ({
-        id: storeId,
-        name: `Store ${String(storeId).slice(0, 8)}`,
-      })),
+      await listAccessibleStoresForUser(req.user.id, normalizedRole),
     );
   } catch (error) {
     console.error("Error fetching user stores:", error);
@@ -432,6 +442,7 @@ router.get("/me/stores", authenticateToken, async (req, res) => {
 // Get current user info (no admin required) - MUST be before /:userId
 router.get("/me", authenticateToken, async (req, res) => {
   try {
+    const includeStores = shouldIncludeRelatedStores(req.query.include_stores);
     const { data: user, error } = await withSupabaseRetry(() =>
       supabase
         .from("users")
@@ -439,10 +450,11 @@ router.get("/me", authenticateToken, async (req, res) => {
         .eq("id", req.user.id)
         .limit(1)
         .maybeSingle(),
+      FAST_AUTH_QUERY_RETRY_OPTIONS,
     );
 
     if (error && isTransientSupabaseError(error)) {
-      return res.json({
+      const degradedResponse = {
         id: req.user.id,
         email: req.user.email,
         name: null,
@@ -451,7 +463,29 @@ router.get("/me", authenticateToken, async (req, res) => {
         created_at: null,
         permissions: buildPermissionsForRole(req.user.role),
         degraded: true,
+      };
+
+      if (includeStores) {
+        try {
+          degradedResponse.stores = await listAccessibleStoresForUser(
+            req.user.id,
+            degradedResponse.role,
+          );
+        } catch (storesError) {
+          console.error(
+            "Error fetching user stores for degraded profile:",
+            storesError,
+          );
+          degradedResponse.stores = [];
+        }
+      }
+
+      primeUserAccessContext(req.user.id, {
+        role: degradedResponse.role,
+        permissions: degradedResponse.permissions,
       });
+
+      return res.json(degradedResponse);
     }
 
     if (error) throw error;
@@ -474,6 +508,7 @@ router.get("/me", authenticateToken, async (req, res) => {
             .eq("user_id", req.user.id)
             .limit(1)
             .maybeSingle(),
+          FAST_AUTH_QUERY_RETRY_OPTIONS,
         );
 
       if (permissionsError && isTransientSupabaseError(permissionsError)) {
@@ -487,11 +522,33 @@ router.get("/me", authenticateToken, async (req, res) => {
       }
     }
 
-    res.json({
+    const responsePayload = {
       ...user,
       role: normalizedUserRole,
       permissions: normalizedPermissions,
+    };
+
+    if (includeStores) {
+      try {
+        responsePayload.stores = await listAccessibleStoresForUser(
+          req.user.id,
+          normalizedUserRole,
+        );
+      } catch (storesError) {
+        console.error(
+          "Error embedding user stores in /me response:",
+          storesError,
+        );
+        responsePayload.stores = [];
+      }
+    }
+
+    primeUserAccessContext(req.user.id, {
+      role: normalizedUserRole,
+      permissions: normalizedPermissions,
     });
+
+    res.json(responsePayload);
   } catch (error) {
     console.error("Error fetching user:", error);
     res.status(isTransientSupabaseError(error) ? 503 : 500).json({
@@ -512,10 +569,16 @@ router.get("/me/permissions", authenticateToken, async (req, res) => {
         .eq("id", req.user.id)
         .limit(1)
         .maybeSingle(),
+      FAST_AUTH_QUERY_RETRY_OPTIONS,
     );
 
     if (userError && isTransientSupabaseError(userError)) {
-      return res.json(buildPermissionsForRole(req.user.role));
+      const fallbackPermissions = buildPermissionsForRole(req.user.role);
+      primeUserAccessContext(req.user.id, {
+        role: normalizeRole(req.user.role),
+        permissions: fallbackPermissions,
+      });
+      return res.json(fallbackPermissions);
     }
 
     if (userError && userError.code !== "PGRST116") {
@@ -523,7 +586,12 @@ router.get("/me/permissions", authenticateToken, async (req, res) => {
     }
 
     if (normalizeRole(userData?.role) === "admin") {
-      return res.json(buildPermissionsForRole("admin"));
+      const adminPermissions = buildPermissionsForRole("admin");
+      primeUserAccessContext(req.user.id, {
+        role: "admin",
+        permissions: adminPermissions,
+      });
+      return res.json(adminPermissions);
     }
 
     const { data, error } = await withSupabaseRetry(() =>
@@ -533,15 +601,27 @@ router.get("/me/permissions", authenticateToken, async (req, res) => {
         .eq("user_id", req.user.id)
         .limit(1)
         .maybeSingle(),
+      FAST_AUTH_QUERY_RETRY_OPTIONS,
     );
 
     if (error && isTransientSupabaseError(error)) {
-      return res.json(buildPermissionsForRole(req.user.role));
+      const fallbackPermissions = buildPermissionsForRole(req.user.role);
+      primeUserAccessContext(req.user.id, {
+        role: normalizeRole(req.user.role),
+        permissions: fallbackPermissions,
+      });
+      return res.json(fallbackPermissions);
     }
 
     if (error && error.code !== "PGRST116") throw error;
 
-    res.json(normalizePermissions(data));
+    const normalizedPermissions = normalizePermissions(data);
+    primeUserAccessContext(req.user.id, {
+      role: normalizeRole(userData?.role || req.user.role),
+      permissions: normalizedPermissions,
+    });
+
+    res.json(normalizedPermissions);
   } catch (error) {
     console.error("Error fetching permissions:", error);
     res.status(isTransientSupabaseError(error) ? 503 : 500).json({

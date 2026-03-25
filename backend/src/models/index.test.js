@@ -28,7 +28,39 @@ const resolveRows = (table, filters = []) => {
   return rows.filter((row) => matchesFilters(row, filters));
 };
 
-const findMatchingFailure = (table, filters = [], mode) =>
+const applyOrderingAndBounds = (rows, state) => {
+  let nextRows = [...rows];
+
+  if (state.orderBy?.column) {
+    const { column, options } = state.orderBy;
+    const ascending = options?.ascending !== false;
+    nextRows.sort((left, right) => {
+      const leftValue = left?.[column];
+      const rightValue = right?.[column];
+      if (leftValue === rightValue) return 0;
+      if (leftValue === undefined || leftValue === null) return ascending ? -1 : 1;
+      if (rightValue === undefined || rightValue === null) return ascending ? 1 : -1;
+      return leftValue > rightValue === ascending ? 1 : -1;
+    });
+  }
+
+  if (Array.isArray(state.rangeValues)) {
+    const [from, to] = state.rangeValues;
+    nextRows = nextRows.slice(from, to + 1);
+  } else if (typeof state.limitCount === "number") {
+    nextRows = nextRows.slice(0, state.limitCount);
+  }
+
+  return nextRows;
+};
+
+const parseConflictColumns = (onConflict) =>
+  String(onConflict || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+const findMatchingFailure = (table, filters = [], mode, payload = null, options = null) =>
   queryFailures.find((failure) => {
     if (failure.table !== table) {
       return false;
@@ -36,6 +68,27 @@ const findMatchingFailure = (table, filters = [], mode) =>
 
     if (failure.mode && failure.mode !== mode) {
       return false;
+    }
+
+    if (
+      failure.onConflict &&
+      failure.onConflict !== String(options?.onConflict || "")
+    ) {
+      return false;
+    }
+
+    if (failure.payloadHasField) {
+      const payloadRows = Array.isArray(payload) ? payload : [payload];
+      const hasMatchingField = payloadRows.some(
+        (row) =>
+          row &&
+          typeof row === "object" &&
+          Object.prototype.hasOwnProperty.call(row, failure.payloadHasField),
+      );
+
+      if (!hasMatchingField) {
+        return false;
+      }
     }
 
     return (failure.filters || []).every((expectedFilter) =>
@@ -52,6 +105,109 @@ const createQueryBuilder = (table) => {
     table,
     filters: [],
     orderBy: null,
+    limitCount: null,
+    rangeValues: null,
+    action: "select",
+    payload: null,
+    options: null,
+  };
+
+  const commitMutation = (rows) => {
+    tableData[state.table] = rows;
+  };
+
+  const execute = async (finalMode) => {
+    const mode = state.action === "select" ? finalMode : state.action;
+
+    executedQueries.push({
+      table: state.table,
+      filters: [...state.filters],
+      orderBy: state.orderBy,
+      mode,
+      payload: state.payload,
+      options: state.options,
+    });
+
+    const failure = findMatchingFailure(
+      state.table,
+      state.filters,
+      mode,
+      state.payload,
+      state.options,
+    );
+    if (failure) {
+      return { data: null, error: failure.error };
+    }
+
+    if (state.action === "upsert") {
+      const conflictColumns = parseConflictColumns(state.options?.onConflict);
+      const nextRows = [...(tableData[state.table] || [])];
+      const payloadRows = Array.isArray(state.payload) ? state.payload : [state.payload];
+      const persistedRows = payloadRows.map((row) => {
+        const existingIndex =
+          conflictColumns.length > 0
+            ? nextRows.findIndex((existingRow) =>
+                conflictColumns.every(
+                  (column) => existingRow?.[column] === row?.[column],
+                ),
+              )
+            : -1;
+
+        const nextRow =
+          existingIndex >= 0
+            ? { ...nextRows[existingIndex], ...row }
+            : { ...row };
+
+        if (existingIndex >= 0) {
+          nextRows[existingIndex] = nextRow;
+        } else {
+          nextRows.push(nextRow);
+        }
+
+        return nextRow;
+      });
+
+      commitMutation(nextRows);
+      return { data: persistedRows, error: null };
+    }
+
+    if (state.action === "insert") {
+      const payloadRows = Array.isArray(state.payload) ? state.payload : [state.payload];
+      const persistedRows = payloadRows.map((row) => ({ ...row }));
+      commitMutation([...(tableData[state.table] || []), ...persistedRows]);
+      return {
+        data: finalMode === "single" ? persistedRows[0] || null : persistedRows,
+        error: null,
+      };
+    }
+
+    if (state.action === "update") {
+      const updatedRows = [];
+      const nextRows = (tableData[state.table] || []).map((row) => {
+        if (!matchesFilters(row, state.filters)) {
+          return row;
+        }
+
+        const nextRow = { ...row, ...state.payload };
+        updatedRows.push(nextRow);
+        return nextRow;
+      });
+
+      commitMutation(nextRows);
+      return {
+        data: finalMode === "single" ? updatedRows[0] || null : updatedRows,
+        error: null,
+      };
+    }
+
+    const rows = applyOrderingAndBounds(resolveRows(state.table, state.filters), state);
+    return {
+      data:
+        finalMode === "maybeSingle" || finalMode === "single"
+          ? rows[0] || null
+          : rows,
+      error: null,
+    };
   };
 
   const builder = {
@@ -60,7 +216,14 @@ const createQueryBuilder = (table) => {
       state.orderBy = { column, options };
       return builder;
     }),
-    limit: jest.fn(() => builder),
+    limit: jest.fn((count) => {
+      state.limitCount = count;
+      return builder;
+    }),
+    range: jest.fn((from, to) => {
+      state.rangeValues = [from, to];
+      return builder;
+    }),
     eq: jest.fn((column, value) => {
       state.filters.push({ type: "eq", column, value });
       return builder;
@@ -73,43 +236,26 @@ const createQueryBuilder = (table) => {
       state.filters.push({ type: "not", column, operator, value });
       return builder;
     }),
-    maybeSingle: jest.fn(async () => {
-      executedQueries.push({
-        table: state.table,
-        filters: [...state.filters],
-        orderBy: state.orderBy,
-        mode: "maybeSingle",
-      });
-      const failure = findMatchingFailure(
-        state.table,
-        state.filters,
-        "maybeSingle",
-      );
-      if (failure) {
-        return { data: null, error: failure.error };
-      }
-      const rows = resolveRows(state.table, state.filters);
-      return { data: rows[0] || null, error: null };
+    upsert: jest.fn((payload, options = {}) => {
+      state.action = "upsert";
+      state.payload = payload;
+      state.options = options;
+      return builder;
     }),
-    then: (resolve, reject) => {
-      executedQueries.push({
-        table: state.table,
-        filters: [...state.filters],
-        orderBy: state.orderBy,
-        mode: "list",
-      });
-      const failure = findMatchingFailure(state.table, state.filters, "list");
-      if (failure) {
-        return Promise.resolve({
-          data: null,
-          error: failure.error,
-        }).then(resolve, reject);
-      }
-      return Promise.resolve({
-        data: resolveRows(state.table, state.filters),
-        error: null,
-      }).then(resolve, reject);
-    },
+    insert: jest.fn((payload) => {
+      state.action = "insert";
+      state.payload = payload;
+      return builder;
+    }),
+    update: jest.fn((payload) => {
+      state.action = "update";
+      state.payload = payload;
+      return builder;
+    }),
+    maybeSingle: jest.fn(async () => execute("maybeSingle")),
+    single: jest.fn(async () => execute("single")),
+    then: (resolve, reject) =>
+      Promise.resolve(execute("list")).then(resolve, reject),
   };
 
   return builder;
@@ -123,7 +269,7 @@ jest.unstable_mockModule("../supabaseClient.js", () => ({
   supabase: supabaseMock,
 }));
 
-const { Product, getAccessibleStoreIds } = await import("./index.js");
+const { Product, Customer, getAccessibleStoreIds } = await import("./index.js");
 
 describe("models/index Shopify scoping", () => {
   beforeEach(() => {
@@ -437,5 +583,97 @@ describe("models/index Shopify scoping", () => {
           ),
       ),
     ).toBe(false);
+  });
+
+  it("uses store-scoped conflict keys for Shopify product upserts", async () => {
+    tableData.products = [
+      {
+        id: "product-1",
+        shopify_id: "shopify-1",
+        store_id: "store-1",
+        title: "Before",
+      },
+    ];
+
+    const result = await Product.updateMultiple([
+      {
+        id: "product-1",
+        shopify_id: "shopify-1",
+        store_id: "store-1",
+        title: "After",
+      },
+    ]);
+
+    expect(result.error).toBeNull();
+    expect(
+      executedQueries.find(
+        (query) => query.table === "products" && query.mode === "upsert",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          onConflict: "shopify_id,store_id",
+        }),
+      }),
+    );
+    expect(tableData.products[0].title).toBe("After");
+  });
+
+  it("drops unsupported sync columns and retries customer upserts", async () => {
+    queryFailures = [
+      {
+        table: "customers",
+        mode: "upsert",
+        onConflict: "shopify_id,store_id",
+        payloadHasField: "last_synced_at",
+        error: {
+          code: "PGRST204",
+          message:
+            "Could not find the 'last_synced_at' column of 'customers' in the schema cache",
+        },
+      },
+    ];
+
+    const result = await Customer.updateMultiple([
+      {
+        shopify_id: "customer-1",
+        store_id: "store-1",
+        name: "Alice",
+        last_synced_at: "2026-03-25T00:00:00.000Z",
+      },
+    ]);
+
+    expect(result.error).toBeNull();
+
+    const upsertQueries = executedQueries.filter(
+      (query) => query.table === "customers" && query.mode === "upsert",
+    );
+
+    expect(upsertQueries).toHaveLength(2);
+    expect(upsertQueries[0].payload[0]).toHaveProperty("last_synced_at");
+    expect(upsertQueries[1].payload[0]).not.toHaveProperty("last_synced_at");
+    expect(tableData.customers[0]).not.toHaveProperty("last_synced_at");
+  });
+
+  it("skips bulk Shopify upserts for legacy rows without store scope", async () => {
+    const result = await Customer.updateMultiple([
+      {
+        shopify_id: "legacy-customer-1",
+        user_id: "user-1",
+        name: "Legacy Customer",
+      },
+    ]);
+
+    expect(result.error).toBeNull();
+    expect(
+      executedQueries.some(
+        (query) => query.table === "customers" && query.mode === "upsert",
+      ),
+    ).toBe(false);
+    expect(
+      executedQueries.some(
+        (query) => query.table === "customers" && query.mode === "insert",
+      ),
+    ).toBe(true);
   });
 });

@@ -4,8 +4,10 @@ const PERMISSION_COPY = {
   ar: {
     labels: {
       can_view_dashboard: "عرض لوحة التحكم",
-      can_view_products: "عرض المنتجات والموردين والمخزن",
-      can_edit_products: "إدارة المنتجات والموردين وحركات المخزن",
+      can_view_products: "عرض المنتجات والمخزن",
+      can_edit_products: "إدارة المنتجات وحركات المخزن",
+      can_view_suppliers: "عرض الموردين",
+      can_edit_suppliers: "إدارة الموردين وحساباتهم",
       can_view_orders: "عرض الطلبات",
       can_edit_orders: "تعديل الطلبات",
       can_view_customers: "عرض العملاء",
@@ -21,23 +23,30 @@ const PERMISSION_COPY = {
     descriptions: {
       can_view_dashboard: "يعرض لوحة التحكم والإحصائيات الرئيسية للمتجر.",
       can_view_products:
-        "يعرض المنتجات وتفاصيلها وتحليل المنتجات والموردين وشاشات المخزن.",
+        "يعرض المنتجات وتفاصيلها وتحليل المنتجات وشاشات المخزن.",
       can_edit_products:
-        "يسمح بتعديل المنتجات وSKU والسعر والمخزون، وإدارة الموردين وحركات المخزن بما فيها الماسح.",
+        "يسمح بتعديل المنتجات وSKU والسعر والمخزون، وإدارة حركات المخزن بما فيها الماسح.",
+      can_view_suppliers:
+        "يعرض قوائم الموردين والحسابات وحركاتهم بدون تعديل.",
+      can_edit_suppliers:
+        "يسمح بإدارة الموردين وإضافتهم وتعديلهم وتسجيل الوارد والدفعات.",
       can_view_orders:
         "يعرض الطلبات والطلبات المفقودة وتفاصيل الطلب وصور المنتجات داخل الطلب.",
       can_edit_orders:
         "يسمح بتعديل حالة الطلب والدفع وتنفيذ أو restock الطلب كله أو عناصر محددة منه.",
       can_view_customers:
         "يعرض قائمة العملاء وبيانات التواصل والطلبات المرتبطة بهم.",
-      can_edit_customers: "يسمح بتعديل بيانات العملاء والإجراءات المرتبطة بهم.",
-      can_manage_users: "يسمح بإدارة المستخدمين والصلاحيات وطلبات الوصول.",
+      can_edit_customers:
+        "يسمح بتعديل بيانات العملاء والإجراءات المرتبطة بهم.",
+      can_manage_users:
+        "يسمح بإدارة المستخدمين والصلاحيات وطلبات الوصول.",
       can_manage_settings:
         "يسمح بالدخول إلى الإعدادات وإدارة المزامنة والتكوين العام.",
       can_view_profits: "يعرض صافي الربح وهوامش الربحية والتكلفة.",
       can_manage_tasks: "يسمح بإدارة المهام وتعيينها ومتابعتها.",
       can_view_all_reports: "يعرض جميع التقارير وتقارير الموظفين.",
-      can_view_activity_log: "يعرض سجل النشاط والعمليات التي تمت داخل النظام.",
+      can_view_activity_log:
+        "يعرض سجل النشاط والعمليات التي تمت داخل النظام.",
       can_print_barcode_labels:
         "يسمح بطباعة ليبلات الباركود للمنتجات بمقاسات مختلفة.",
     },
@@ -45,8 +54,10 @@ const PERMISSION_COPY = {
   en: {
     labels: {
       can_view_dashboard: "View Dashboard",
-      can_view_products: "View Products, Suppliers, and Warehouse",
-      can_edit_products: "Manage Products, Suppliers, and Warehouse Movements",
+      can_view_products: "View Products and Warehouse",
+      can_edit_products: "Manage Products and Warehouse Movements",
+      can_view_suppliers: "View Suppliers",
+      can_edit_suppliers: "Manage Suppliers and Accounts",
       can_view_orders: "View Orders",
       can_edit_orders: "Edit Orders",
       can_view_customers: "View Customers",
@@ -62,9 +73,13 @@ const PERMISSION_COPY = {
     descriptions: {
       can_view_dashboard: "Shows the main dashboard and key store metrics.",
       can_view_products:
-        "Shows products, product details, product analysis, suppliers, and warehouse views.",
+        "Shows products, product details, product analysis, and warehouse views.",
       can_edit_products:
-        "Allows editing products, SKU, price, stock, suppliers, and warehouse movements.",
+        "Allows editing products, SKU, price, stock, and warehouse movements.",
+      can_view_suppliers:
+        "Shows supplier lists, balances, and supplier activity without editing.",
+      can_edit_suppliers:
+        "Allows creating and editing suppliers plus recording deliveries and payments.",
       can_view_orders:
         "Shows orders, missing orders, order details, and product images inside orders.",
       can_edit_orders:

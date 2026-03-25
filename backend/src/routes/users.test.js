@@ -84,6 +84,7 @@ jest.unstable_mockModule("../middleware/permissions.js", () => ({
   PERMISSION_KEYS: [],
   normalizePermissions: jest.fn((value) => value || {}),
   normalizeRole: jest.fn((value) => value || "user"),
+  primeUserAccessContext: jest.fn(),
 }));
 
 jest.unstable_mockModule("../helpers/supabaseRetry.js", () => ({

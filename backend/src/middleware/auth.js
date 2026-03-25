@@ -67,10 +67,18 @@ export const authenticateToken = async (req, res, next) => {
       normalizedRole = normalizeRole(decoded.role || "user");
     } else {
       const tokenRole = normalizeRole(decoded.role || "user");
+      const isSafeMethod = ["GET", "HEAD", "OPTIONS"].includes(
+        String(req.method || "").toUpperCase(),
+      );
+      const roleRetryOptions = isSafeMethod
+        ? { attempts: 1 }
+        : { attempts: 2, baseDelayMs: 150 };
 
       try {
         // Always resolve current role from DB to avoid stale JWT role privileges.
-        const dbRole = await getUserRole(decoded.id);
+        const dbRole = await getUserRole(decoded.id, {
+          retryOptions: roleRetryOptions,
+        });
         if (!dbRole) {
           return res.status(401).json({
             error: "User not found",
@@ -79,10 +87,6 @@ export const authenticateToken = async (req, res, next) => {
 
         normalizedRole = normalizeRole(dbRole);
       } catch (roleError) {
-        const isSafeMethod = ["GET", "HEAD", "OPTIONS"].includes(
-          String(req.method || "").toUpperCase(),
-        );
-
         if (isSafeMethod && isTransientSupabaseError(roleError)) {
           normalizedRole = tokenRole;
           req.authFallback = {

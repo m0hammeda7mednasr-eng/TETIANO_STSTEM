@@ -288,6 +288,79 @@ describe("routes/productAnalysis buildAnalyticsPayload", () => {
     expect(payload.data[0].net_delivered_quantity).toBe(0);
   });
 
+  it("matches Shopify GIDs to numeric product ids and keeps money-set line totals", async () => {
+    tableData.products = [
+      {
+        id: "product-1",
+        shopify_id: "123456789",
+        store_id: "store-1",
+        title: "Money Set Product",
+        sku: "SKU-MONEY",
+        inventory_quantity: 3,
+        data: {
+          variants: [
+            {
+              id: "987654321",
+              title: "Default",
+              sku: "SKU-MONEY",
+              inventory_quantity: 3,
+            },
+          ],
+        },
+      },
+    ];
+    tableData.orders = [
+      {
+        id: "order-money-set",
+        store_id: "store-1",
+        financial_status: "paid",
+        fulfillment_status: "fulfilled",
+        total_price: 88.5,
+        created_at: "2026-03-04T09:00:00.000Z",
+        updated_at: "2026-03-04T10:00:00.000Z",
+        data: {
+          line_items: [
+            {
+              id: "line-money-set",
+              product_id: "gid://shopify/Product/123456789",
+              variant_id: "gid://shopify/ProductVariant/987654321",
+              sku: "SKU-MONEY",
+              quantity: 1,
+              discounted_total_set: {
+                shop_money: {
+                  amount: "88.50",
+                },
+              },
+            },
+          ],
+          fulfillments: [
+            {
+              created_at: "2026-03-04T09:30:00.000Z",
+              line_items: [{ id: "line-money-set", quantity: 1 }],
+            },
+          ],
+        },
+      },
+    ];
+
+    const payload = await buildAnalyticsPayload(
+      {
+        user: {
+          id: "admin-1",
+          role: "admin",
+          isAdmin: true,
+        },
+      },
+      "store-1",
+    );
+
+    expect(payload.data).toHaveLength(1);
+    expect(payload.data[0].gross_sales).toBe(88.5);
+    expect(payload.data[0].net_sales).toBe(88.5);
+    expect(payload.data[0].variants[0].gross_sales).toBe(88.5);
+    expect(payload.summary.net_sales).toBe(88.5);
+  });
+
   it("applies scoped order filters and removes products with no matching order activity", async () => {
     tableData.products = [
       {

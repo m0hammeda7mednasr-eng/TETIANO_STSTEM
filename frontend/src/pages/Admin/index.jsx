@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../../components/Sidebar";
+import { useLocale } from "../../context/LocaleContext";
 import api from "../../utils/api";
 import { formatDateTime, formatNumber } from "../../utils/helpers";
 import { extractArray } from "../../utils/response";
@@ -23,6 +24,7 @@ const getTotalFromResponse = (payload) => {
 };
 
 const AdminPage = () => {
+  const { select } = useLocale();
   const navigate = useNavigate();
   const [activityLogs, setActivityLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -153,37 +155,60 @@ const AdminPage = () => {
       <main className="flex-1 overflow-auto">
         <div className="p-8 space-y-6">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 mb-2">Admin Dashboard</h1>
+            <h1 className="text-3xl font-bold text-slate-900 mb-2">
+              {select("\u0644\u0648\u062d\u0629 \u0627\u0644\u0623\u062f\u0645\u0646", "Admin Dashboard")}
+            </h1>
             <p className="text-slate-600">
-              Manage users, permission requests, and activity logs.
+              {select(
+                "\u0625\u062f\u0627\u0631\u0629 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645\u064a\u0646 \u0648\u0637\u0644\u0628\u0627\u062a \u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0627\u062a \u0648\u0633\u062c\u0644 \u0627\u0644\u0646\u0634\u0627\u0637.",
+                "Manage users, permission requests, and activity logs.",
+              )}
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <AdminCard
-              title="Users Management"
+              title={select(
+                "\u0625\u062f\u0627\u0631\u0629 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645\u064a\u0646",
+                "Users Management",
+              )}
               value={formatNumber(usersCount, {
                 maximumFractionDigits: 0,
               })}
-              subtitle="Accounts, roles, and permissions"
+              subtitle={select(
+                "\u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a \u0648\u0627\u0644\u0623\u062f\u0648\u0627\u0631 \u0648\u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0627\u062a",
+                "Accounts, roles, and permissions",
+              )}
               icon={Shield}
               onClick={() => navigate("/users?tab=users")}
               color="from-fuchsia-600 to-fuchsia-800"
             />
             <AdminCard
-              title="Access Requests"
+              title={select(
+                "\u0637\u0644\u0628\u0627\u062a \u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0627\u062a",
+                "Access Requests",
+              )}
               value={formatNumber(pendingRequestsCount, {
                 maximumFractionDigits: 0,
               })}
-              subtitle="Pending requests"
+              subtitle={select(
+                "\u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0642\u064a\u062f \u0627\u0644\u0645\u0631\u0627\u062c\u0639\u0629",
+                "Pending requests",
+              )}
               icon={UserCheck}
               onClick={() => navigate("/users?tab=requests")}
               color="from-amber-500 to-amber-700"
             />
             <AdminCard
-              title="Employee Reports"
+              title={select(
+                "\u062a\u0642\u0627\u0631\u064a\u0631 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646",
+                "Employee Reports",
+              )}
               value="-"
-              subtitle="Daily report oversight"
+              subtitle={select(
+                "\u0645\u062a\u0627\u0628\u0639\u0629 \u0627\u0644\u062a\u0642\u0627\u0631\u064a\u0631 \u0627\u0644\u064a\u0648\u0645\u064a\u0629",
+                "Daily report oversight",
+              )}
               icon={FileText}
               onClick={() => navigate("/reports")}
               color="from-sky-600 to-sky-800"
@@ -201,19 +226,21 @@ const AdminPage = () => {
             <div className="p-6 border-b border-slate-200 flex items-center justify-between">
               <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                 <Activity size={22} className="text-sky-600" />
-                Activity Log
+                {select("\u0633\u062c\u0644 \u0627\u0644\u0646\u0634\u0627\u0637", "Activity Log")}
               </h2>
               <button
                 onClick={() => fetchAdminData()}
                 className="text-sm text-sky-700 hover:text-sky-900"
               >
-                Refresh
+                {select("\u062a\u062d\u062f\u064a\u062b", "Refresh")}
               </button>
             </div>
 
             <div className="p-6">
               {loading ? (
-                <div className="text-center py-10 text-slate-500">Loading...</div>
+                <div className="text-center py-10 text-slate-500">
+                  {select("\u062c\u0627\u0631\u064d \u0627\u0644\u062a\u062d\u0645\u064a\u0644...", "Loading...")}
+                </div>
               ) : activityLogs.length === 0 ? (
                 <div className="text-center py-10 text-slate-500">
                   <Activity size={46} className="mx-auto text-slate-300 mb-3" />

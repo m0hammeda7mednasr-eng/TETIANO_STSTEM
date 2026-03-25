@@ -453,6 +453,8 @@ export default function Customers() {
   const [cityFilter, setCityFilter] = useState("");
   const [countryFilter, setCountryFilter] = useState("all");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [selectedCustomerDetails, setSelectedCustomerDetails] = useState(null);
+  const [selectedCustomerLoading, setSelectedCustomerLoading] = useState(false);
   const [relatedOrdersLoading, setRelatedOrdersLoading] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(
     () => initialCachedSnapshot.updatedAt,
@@ -512,7 +514,10 @@ export default function Customers() {
 
         setLoadStatus({
           active: true,
-          message: "Loading customers in batches...",
+          message: select(
+            "\u062c\u0627\u0631\u064d \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0639\u0645\u0644\u0627\u0621 \u0639\u0644\u0649 \u062f\u0641\u0639\u0627\u062a...",
+            "Loading customers in batches...",
+          ),
         });
 
         try {
@@ -524,6 +529,8 @@ export default function Customers() {
                   offset,
                   sort_by: "created_at",
                   sort_dir: "desc",
+                  include_data: 0,
+                  include_order_phone_fallback: 0,
                 },
               }),
             {
@@ -534,12 +541,22 @@ export default function Customers() {
                 setLoadStatus({
                   active: hasMore,
                   message: hasMore
-                    ? `Loaded ${formatNumber(accumulatedRows.length, {
-                        maximumFractionDigits: 0,
-                      })} customers so far...`
-                    : `Loaded ${formatNumber(accumulatedRows.length, {
-                        maximumFractionDigits: 0,
-                      })} customers`,
+                    ? select(
+                        `\u062a\u0645 \u062a\u062d\u0645\u064a\u0644 ${formatNumber(accumulatedRows.length, {
+                          maximumFractionDigits: 0,
+                        })} \u0639\u0645\u064a\u0644 \u062d\u062a\u0649 \u0627\u0644\u0622\u0646...`,
+                        `Loaded ${formatNumber(accumulatedRows.length, {
+                          maximumFractionDigits: 0,
+                        })} customers so far...`,
+                      )
+                    : select(
+                        `\u062a\u0645 \u062a\u062d\u0645\u064a\u0644 ${formatNumber(accumulatedRows.length, {
+                          maximumFractionDigits: 0,
+                        })} \u0639\u0645\u064a\u0644`,
+                        `Loaded ${formatNumber(accumulatedRows.length, {
+                          maximumFractionDigits: 0,
+                        })} customers`,
+                      ),
                 });
               },
             },
@@ -555,10 +572,18 @@ export default function Customers() {
             active: false,
             message:
               normalizedCustomers.length > 0
-                ? `Loaded ${formatNumber(normalizedCustomers.length, {
-                    maximumFractionDigits: 0,
-                  })} customers`
-                : "No customers found",
+                ? select(
+                    `\u062a\u0645 \u062a\u062d\u0645\u064a\u0644 ${formatNumber(normalizedCustomers.length, {
+                      maximumFractionDigits: 0,
+                    })} \u0639\u0645\u064a\u0644`,
+                    `Loaded ${formatNumber(normalizedCustomers.length, {
+                      maximumFractionDigits: 0,
+                    })} customers`,
+                  )
+                : select(
+                    "\u0644\u0627 \u064a\u0648\u062c\u062f \u0639\u0645\u0644\u0627\u0621",
+                    "No customers found",
+                  ),
           });
           await writeCachedView(cacheKey, {
             customers: normalizedCustomers,
@@ -592,7 +617,7 @@ export default function Customers() {
         fetchPromiseRef.current = null;
       }
     },
-    [cacheKey],
+    [cacheKey, select],
   );
 
   useEffect(() => {
@@ -725,6 +750,8 @@ export default function Customers() {
 
   useEffect(() => {
     if (!selectedCustomer) {
+      setSelectedCustomerDetails(null);
+      setSelectedCustomerLoading(false);
       setOrders([]);
       setRelatedOrdersLoading(false);
       return;
@@ -732,6 +759,46 @@ export default function Customers() {
 
     loadSelectedCustomerOrders(selectedCustomer);
   }, [loadSelectedCustomerOrders, selectedCustomer]);
+
+  useEffect(() => {
+    if (!selectedCustomer?.id) {
+      setSelectedCustomerDetails(null);
+      setSelectedCustomerLoading(false);
+      return;
+    }
+
+    let active = true;
+    setSelectedCustomerLoading(true);
+
+    api
+      .get(`/shopify/customers/${selectedCustomer.id}`)
+      .then((response) => {
+        if (!active) {
+          return;
+        }
+
+        setSelectedCustomerDetails(normalizeCustomerRow(response?.data || {}));
+      })
+      .catch((requestError) => {
+        console.error("Failed to load customer details:", requestError);
+        if (!active) {
+          return;
+        }
+
+        setSelectedCustomerDetails(null);
+      })
+      .finally(() => {
+        if (!active) {
+          return;
+        }
+
+        setSelectedCustomerLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedCustomer]);
 
   const cityOptions = useMemo(() => buildCityRegistry(customers), [customers]);
 
@@ -938,23 +1005,48 @@ export default function Customers() {
     select,
   ]);
 
+  const selectedCustomerRecord = useMemo(() => {
+    if (!selectedCustomer) {
+      return null;
+    }
+
+    if (
+      selectedCustomerDetails?.id &&
+      String(selectedCustomerDetails.id) === String(selectedCustomer.id)
+    ) {
+      return {
+        ...selectedCustomer,
+        ...selectedCustomerDetails,
+      };
+    }
+
+    return selectedCustomer;
+  }, [selectedCustomer, selectedCustomerDetails]);
+
   const selectedCustomerMeta = useMemo(() => {
-    if (!selectedCustomer) return null;
-    const data = parseJson(selectedCustomer.data);
+    if (!selectedCustomerRecord) return null;
+    const data = parseJson(selectedCustomerRecord.data);
 
     return {
       data,
       relatedOrders: canViewOrders ? orders.slice(0, 8) : [],
-      tags: Array.isArray(data.tags)
-        ? data.tags
-        : String(data.tags || "")
+      tags: Array.isArray(selectedCustomerRecord.tags)
+        ? selectedCustomerRecord.tags
+        : Array.isArray(data.tags)
+          ? data.tags
+          : String(data.tags || "")
             .split(",")
             .map((item) => item.trim())
             .filter(Boolean),
-      lastOrderName: data.last_order_name || data.last_order?.name || "",
-      defaultAddress: data.default_address || {},
+      lastOrderName:
+        selectedCustomerRecord.last_order_name ||
+        data.last_order_name ||
+        data.last_order?.name ||
+        "",
+      defaultAddress:
+        selectedCustomerRecord.default_address_details || data.default_address || {},
     };
-  }, [canViewOrders, orders, selectedCustomer]);
+  }, [canViewOrders, orders, selectedCustomerRecord]);
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -971,7 +1063,7 @@ export default function Customers() {
               {lastUpdatedAt && (
                 <p className="mt-2 text-xs text-slate-500 flex items-center gap-1">
                   <Clock3 size={12} />
-                  Last refresh: {formatTime(lastUpdatedAt, {
+                  {select("\u0622\u062e\u0631 \u062a\u062d\u062f\u064a\u062b", "Last refresh")}: {formatTime(lastUpdatedAt, {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
@@ -991,7 +1083,7 @@ export default function Customers() {
                 className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
               >
                 <RefreshCw size={18} />
-                Refresh
+                {select("\u062a\u062d\u062f\u064a\u062b", "Refresh")}
               </button>
             </div>
           </div>
@@ -1005,26 +1097,26 @@ export default function Customers() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <SummaryCard
               icon={Users}
-              label="Customers"
+              label={select("\u0627\u0644\u0639\u0645\u0644\u0627\u0621", "Customers")}
               value={formatNumber(summary.totalCustomers, {
                 maximumFractionDigits: 0,
               })}
             />
             <SummaryCard
               icon={ShoppingCart}
-              label="Orders"
+              label={select("\u0627\u0644\u0637\u0644\u0628\u0627\u062a", "Orders")}
               value={formatNumber(summary.totalOrders, {
                 maximumFractionDigits: 0,
               })}
             />
             <SummaryCard
               icon={ShoppingCart}
-              label="Total Spent"
+              label={select("\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0625\u0646\u0641\u0627\u0642", "Total Spent")}
               value={formatAmount(summary.totalSpent)}
             />
             <SummaryCard
               icon={User}
-              label="Avg Spend"
+              label={select("\u0645\u062a\u0648\u0633\u0637 \u0627\u0644\u0625\u0646\u0641\u0627\u0642", "Avg Spend")}
               value={formatAmount(summary.avgSpent)}
             />
           </div>
@@ -1192,7 +1284,10 @@ export default function Customers() {
                   ) : (
                     <tr>
                       <td colSpan="7" className="px-6 py-10 text-center text-slate-500">
-                        No customers found.
+                        {select(
+                          "\u0644\u0627 \u064a\u0648\u062c\u062f \u0639\u0645\u0644\u0627\u0621 \u0645\u0637\u0627\u0628\u0642\u0648\u0646.",
+                          "No customers found.",
+                        )}
                       </td>
                     </tr>
                   )}
@@ -1201,32 +1296,55 @@ export default function Customers() {
             </div>
           </div>
 
-          {selectedCustomer && selectedCustomerMeta && (
+          {selectedCustomerRecord && selectedCustomerMeta && (
             <div className="bg-white rounded-xl shadow p-5 space-y-5">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-bold text-slate-900">
-                  Customer Details: {selectedCustomer.name || "Unknown"}
+                  {select(
+                    "\u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u0639\u0645\u064a\u0644",
+                    "Customer Details",
+                  )}: {selectedCustomerRecord.name || select("\u063a\u064a\u0631 \u0645\u0639\u0631\u0648\u0641", "Unknown")}
                 </h2>
                 <button
-                  onClick={() => setSelectedCustomer(null)}
+                  onClick={() => {
+                    setSelectedCustomer(null);
+                    setSelectedCustomerDetails(null);
+                  }}
                   className="text-sm text-slate-500 hover:text-slate-800"
                 >
-                  Close
+                  {select("\u0625\u063a\u0644\u0627\u0642", "Close")}
                 </button>
               </div>
 
+              {selectedCustomerLoading ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  {select(
+                    "\u062c\u0627\u0631\u064d \u062a\u062d\u0645\u064a\u0644 \u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u0639\u0645\u064a\u0644...",
+                    "Loading customer details...",
+                  )}
+                </div>
+              ) : null}
+
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                <InfoItem icon={Mail} label="Email" value={selectedCustomer.email || "-"} />
-                <InfoItem icon={Phone} label="Phone" value={selectedCustomer.phone || "-"} />
+                <InfoItem
+                  icon={Mail}
+                  label="Email"
+                  value={selectedCustomerRecord.email || "-"}
+                />
+                <InfoItem
+                  icon={Phone}
+                  label="Phone"
+                  value={selectedCustomerRecord.phone || "-"}
+                />
                 <InfoItem
                   icon={MapPin}
                   label="Location"
                   value={
                     [
-                      selectedCustomer.city_display ||
-                        selectedCustomer.city ||
+                      selectedCustomerRecord.city_display ||
+                        selectedCustomerRecord.city ||
                         selectedCustomerMeta.defaultAddress?.city,
-                      selectedCustomer.country ||
+                      selectedCustomerRecord.country ||
                         selectedCustomerMeta.defaultAddress?.country,
                     ]
                       .filter(Boolean)
@@ -1236,10 +1354,10 @@ export default function Customers() {
                 <InfoItem
                   icon={ShoppingCart}
                   label="Orders / Spent"
-                  value={`${formatNumber(selectedCustomer.orders_count, {
+                  value={`${formatNumber(selectedCustomerRecord.orders_count, {
                     maximumFractionDigits: 0,
                   })} / ${formatAmount(
-                    selectedCustomer.total_spent,
+                    selectedCustomerRecord.total_spent,
                   )}`}
                 />
               </div>
@@ -1248,7 +1366,7 @@ export default function Customers() {
                 <div className="bg-slate-50 rounded-lg p-4">
                   <h3 className="font-semibold text-slate-900 mb-2">Address</h3>
                   <p className="text-sm text-slate-600">
-                    {selectedCustomer.default_address ||
+                    {selectedCustomerRecord.default_address ||
                       selectedCustomerMeta.defaultAddress?.address1 ||
                       "No address provided"}
                   </p>
@@ -1264,8 +1382,8 @@ export default function Customers() {
                   </p>
                   <p className="text-sm text-slate-600">
                     Joined:{" "}
-                    {selectedCustomer.created_at
-                      ? formatDate(selectedCustomer.created_at)
+                    {selectedCustomerRecord.created_at
+                      ? formatDate(selectedCustomerRecord.created_at)
                       : "-"}
                   </p>
                   <p className="text-sm text-slate-600">
@@ -1279,14 +1397,22 @@ export default function Customers() {
 
               {canViewOrders ? (
                 <div>
-                  <h3 className="font-semibold text-slate-900 mb-3">Recent Orders</h3>
+                  <h3 className="font-semibold text-slate-900 mb-3">
+                    {select("\u0622\u062e\u0631 \u0627\u0644\u0637\u0644\u0628\u0627\u062a", "Recent Orders")}
+                  </h3>
                   {relatedOrdersLoading ? (
                     <p className="text-sm text-slate-500">
-                      Recent orders will appear here automatically.
+                      {select(
+                        "\u0633\u062a\u0638\u0647\u0631 \u0622\u062e\u0631 \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0647\u0646\u0627 \u062a\u0644\u0642\u0627\u0626\u064a\u064b\u0627.",
+                        "Recent orders will appear here automatically.",
+                      )}
                     </p>
                   ) : selectedCustomerMeta.relatedOrders.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                      No related orders found in the scanned order batches.
+                      {select(
+                        "\u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u0639\u062b\u0648\u0631 \u0639\u0644\u0649 \u0637\u0644\u0628\u0627\u062a \u0645\u0631\u062a\u0628\u0637\u0629 \u062f\u0627\u062e\u0644 \u062f\u0641\u0639\u0627\u062a \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0627\u0644\u0645\u0645\u0633\u0648\u062d\u0629.",
+                        "No related orders found in the scanned order batches.",
+                      )}
                     </p>
                   ) : (
                     <div className="overflow-x-auto">

@@ -17,6 +17,8 @@ const DEFAULT_CLIENT_PERMISSIONS = {
   can_view_dashboard: true,
   can_view_products: true,
   can_edit_products: false,
+  can_view_suppliers: true,
+  can_edit_suppliers: false,
   can_view_orders: true,
   can_edit_orders: false,
   can_view_customers: true,
@@ -133,7 +135,11 @@ export const AuthProvider = ({ children }) => {
         authRefreshInFlight.current = true;
         lastAuthRefreshAt.current = now;
 
-        const { data: userData } = await api.get("/users/me");
+        const { data: userData } = await api.get("/users/me", {
+          params: {
+            include_stores: true,
+          },
+        });
 
         let perms = userData?.permissions;
         if (!perms) {
@@ -159,11 +165,9 @@ export const AuthProvider = ({ children }) => {
         );
 
         try {
-          const storesResponse = await api.get("/users/me/stores");
-          const stores = Array.isArray(storesResponse?.data)
-            ? storesResponse.data
-            : [];
-          syncCurrentStoreId(stores);
+          if (Array.isArray(userData?.stores)) {
+            syncCurrentStoreId(userData.stores);
+          }
         } catch (storesError) {
           console.error("Failed to sync current store", storesError);
         }

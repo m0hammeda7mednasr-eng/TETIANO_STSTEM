@@ -8,6 +8,8 @@ export const PERMISSION_KEYS = [
   "can_view_dashboard",
   "can_view_products",
   "can_edit_products",
+  "can_view_suppliers",
+  "can_edit_suppliers",
   "can_view_orders",
   "can_edit_orders",
   "can_view_customers",
@@ -25,6 +27,8 @@ export const DEFAULT_PERMISSIONS = {
   can_view_dashboard: true,
   can_view_products: true,
   can_edit_products: false,
+  can_view_suppliers: true,
+  can_edit_suppliers: false,
   can_view_orders: true,
   can_edit_orders: false,
   can_view_customers: true,
@@ -36,6 +40,57 @@ export const DEFAULT_PERMISSIONS = {
   can_view_all_reports: false,
   can_view_activity_log: false,
   can_print_barcode_labels: true,
+};
+
+const USER_ACCESS_CACHE_TTL_MS = 60 * 1000;
+const userAccessCache = new Map();
+
+const getUserAccessCacheKey = (userId) => String(userId || "").trim();
+
+const getCachedUserAccessContext = (userId) => {
+  const cacheKey = getUserAccessCacheKey(userId);
+  if (!cacheKey) {
+    return null;
+  }
+
+  const cachedEntry = userAccessCache.get(cacheKey);
+  if (!cachedEntry) {
+    return null;
+  }
+
+  if (Date.now() - cachedEntry.updatedAt > USER_ACCESS_CACHE_TTL_MS) {
+    userAccessCache.delete(cacheKey);
+    return null;
+  }
+
+  return cachedEntry.value;
+};
+
+const rememberUserAccessContext = (userId, nextValue = {}) => {
+  const cacheKey = getUserAccessCacheKey(userId);
+  if (!cacheKey) {
+    return null;
+  }
+
+  const previousValue = getCachedUserAccessContext(cacheKey) || {};
+  const value = {
+    ...previousValue,
+    ...nextValue,
+  };
+
+  userAccessCache.set(cacheKey, {
+    value,
+    updatedAt: Date.now(),
+  });
+
+  return value;
+};
+
+export const primeUserAccessContext = (userId, nextValue = {}) =>
+  rememberUserAccessContext(userId, nextValue);
+
+export const clearUserAccessContextCache = () => {
+  userAccessCache.clear();
 };
 
 export const normalizePermissions = (permissionsRow = null) => {
@@ -82,9 +137,17 @@ export const normalizeRole = (role) => {
   return "user";
 };
 
-export const getUserRole = async (userId) => {
+export const getUserRole = async (
+  userId,
+  { retryOptions = undefined } = {},
+) => {
   if (!userId) {
     return null;
+  }
+
+  const cachedContext = getCachedUserAccessContext(userId);
+  if (cachedContext?.role) {
+    return cachedContext.role;
   }
 
   const { data: user, error } = await withSupabaseRetry(() =>
@@ -94,6 +157,7 @@ export const getUserRole = async (userId) => {
       .eq("id", userId)
       .limit(1)
       .maybeSingle(),
+    retryOptions,
   );
 
   if (error && error.code !== "PGRST116") {
@@ -104,12 +168,22 @@ export const getUserRole = async (userId) => {
     return null;
   }
 
-  return normalizeRole(user.role);
+  const normalizedRole = normalizeRole(user.role);
+  rememberUserAccessContext(userId, { role: normalizedRole });
+  return normalizedRole;
 };
 
-export const getUserPermissions = async (userId) => {
+export const getUserPermissions = async (
+  userId,
+  { retryOptions = undefined } = {},
+) => {
   if (!userId) {
     return { ...DEFAULT_PERMISSIONS };
+  }
+
+  const cachedContext = getCachedUserAccessContext(userId);
+  if (cachedContext?.permissions) {
+    return cachedContext.permissions;
   }
 
   const { data: permissions, error } = await withSupabaseRetry(() =>
@@ -119,13 +193,16 @@ export const getUserPermissions = async (userId) => {
       .eq("user_id", userId)
       .limit(1)
       .maybeSingle(),
+    retryOptions,
   );
 
   if (error && error.code !== "PGRST116") {
     throw error;
   }
 
-  return normalizePermissions(permissions);
+  const normalizedPermissions = normalizePermissions(permissions);
+  rememberUserAccessContext(userId, { permissions: normalizedPermissions });
+  return normalizedPermissions;
 };
 
 export const requireAdminRole = async (req, res, next) => {
@@ -156,17 +233,34 @@ export const requireAdminRole = async (req, res, next) => {
 export const requirePermission = (permissionName) => {
   return async (req, res, next) => {
     try {
+      const isSafeMethod = ["GET", "HEAD", "OPTIONS"].includes(
+        String(req.method || "").toUpperCase(),
+      );
+      const retryOptions = isSafeMethod
+        ? { attempts: 1 }
+        : { attempts: 2, baseDelayMs: 150 };
       const role = normalizeRole(
-        req.user?.role || (await getUserRole(req.user?.id)),
+        req.user?.role ||
+          (await getUserRole(req.user?.id, {
+            retryOptions,
+          })),
       );
 
       if (role === "admin") {
+        const adminPermissions = buildPermissionsForRole("admin");
         req.user.role = "admin";
         req.user.isAdmin = true;
+        req.user.permissions = adminPermissions;
+        primeUserAccessContext(req.user?.id, {
+          role: "admin",
+          permissions: adminPermissions,
+        });
         return next();
       }
 
-      const permissions = await getUserPermissions(req.user?.id);
+      const permissions = await getUserPermissions(req.user?.id, {
+        retryOptions,
+      });
 
       if (!permissions[permissionName]) {
         return res.status(403).json({
@@ -177,6 +271,10 @@ export const requirePermission = (permissionName) => {
       req.user.role = role || "user";
       req.user.isAdmin = false;
       req.user.permissions = permissions;
+      primeUserAccessContext(req.user?.id, {
+        role: role || "user",
+        permissions,
+      });
       next();
     } catch (error) {
       console.error("Permission check error:", error);

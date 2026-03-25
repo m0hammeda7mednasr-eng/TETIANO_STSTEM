@@ -4,6 +4,7 @@ import {
   preserveProductWarehouseData,
 } from "../helpers/productLocalMetadata.js";
 import { preserveOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
+import { measureAsync } from "../helpers/requestProfiler.js";
 
 const sortByCreatedAtDesc = { ascending: false };
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
@@ -818,10 +819,16 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
     // Try user_stores table first
     try {
       const { data: directAccessRows, error: directAccessError } =
-        await supabase
-          .from("user_stores")
-          .select("store_id")
-          .eq("user_id", userId);
+        await measureAsync(
+          "access-scope.user-stores",
+          () =>
+            supabase.from("user_stores").select("store_id").eq("user_id", userId),
+          {
+            category: "scope",
+            serverTimingKey: "scope",
+            serverTimingDescription: "Store scope resolution",
+          },
+        );
 
       if (
         !directAccessError &&
@@ -840,11 +847,21 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
 
     // Fallback: stores connected directly by this user
     try {
-      const { data: ownedTokenRows, error: ownedTokenError } = await supabase
-        .from("shopify_tokens")
-        .select("store_id")
-        .eq("user_id", userId)
-        .not("store_id", "is", null);
+      const { data: ownedTokenRows, error: ownedTokenError } =
+        await measureAsync(
+          "access-scope.shopify-tokens",
+          () =>
+            supabase
+              .from("shopify_tokens")
+              .select("store_id")
+              .eq("user_id", userId)
+              .not("store_id", "is", null),
+          {
+            category: "scope",
+            serverTimingKey: "scope",
+            serverTimingDescription: "Store scope resolution",
+          },
+        );
 
       if (!ownedTokenError && ownedTokenRows && ownedTokenRows.length > 0) {
         const ownedStoreIds = getUniqueStoreIds(ownedTokenRows);
@@ -862,24 +879,51 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
     // Final fallback: infer stores from previously synced data owned by the user.
     try {
       const inferredResults = await Promise.all([
-        supabase
-          .from("products")
-          .select("store_id")
-          .eq("user_id", userId)
-          .not("store_id", "is", null)
-          .limit(20),
-        supabase
-          .from("orders")
-          .select("store_id")
-          .eq("user_id", userId)
-          .not("store_id", "is", null)
-          .limit(20),
-        supabase
-          .from("customers")
-          .select("store_id")
-          .eq("user_id", userId)
-          .not("store_id", "is", null)
-          .limit(20),
+        measureAsync(
+          "access-scope.infer-products",
+          () =>
+            supabase
+              .from("products")
+              .select("store_id")
+              .eq("user_id", userId)
+              .not("store_id", "is", null)
+              .limit(20),
+          {
+            category: "scope",
+            serverTimingKey: "scope",
+            serverTimingDescription: "Store scope resolution",
+          },
+        ),
+        measureAsync(
+          "access-scope.infer-orders",
+          () =>
+            supabase
+              .from("orders")
+              .select("store_id")
+              .eq("user_id", userId)
+              .not("store_id", "is", null)
+              .limit(20),
+          {
+            category: "scope",
+            serverTimingKey: "scope",
+            serverTimingDescription: "Store scope resolution",
+          },
+        ),
+        measureAsync(
+          "access-scope.infer-customers",
+          () =>
+            supabase
+              .from("customers")
+              .select("store_id")
+              .eq("user_id", userId)
+              .not("store_id", "is", null)
+              .limit(20),
+          {
+            category: "scope",
+            serverTimingKey: "scope",
+            serverTimingDescription: "Store scope resolution",
+          },
+        ),
       ]);
 
       const inferredStoreIds = getUniqueStoreIds(
@@ -896,12 +940,21 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
     // Inherit store access from the account creator so secondary users work on
     // the same store data without leaking unrelated stores.
     try {
-      const { data: userRow, error: userError } = await supabase
-        .from("users")
-        .select("created_by")
-        .eq("id", userId)
-        .limit(1)
-        .maybeSingle();
+      const { data: userRow, error: userError } = await measureAsync(
+        "access-scope.creator-inheritance",
+        () =>
+          supabase
+            .from("users")
+            .select("created_by")
+            .eq("id", userId)
+            .limit(1)
+            .maybeSingle(),
+        {
+          category: "scope",
+          serverTimingKey: "scope",
+          serverTimingDescription: "Store scope resolution",
+        },
+      );
 
       if (!userError) {
         const creatorId = String(userRow?.created_by || "").trim();

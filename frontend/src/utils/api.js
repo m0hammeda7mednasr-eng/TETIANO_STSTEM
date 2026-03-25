@@ -8,6 +8,8 @@ const SHOPIFY_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
 const META_SYNC_TIMEOUT_MS = 3 * 60 * 1000;
 const META_ANALYSIS_TIMEOUT_MS = 2 * 60 * 1000;
 const META_CHAT_TIMEOUT_MS = 2 * 60 * 1000;
+const SLOW_API_REQUEST_THRESHOLD_MS = 1500;
+const isDevelopment = process.env.NODE_ENV !== "production";
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -20,6 +22,62 @@ const api = axios.create({
 });
 
 const MUTATION_METHODS = new Set(["post", "put", "patch", "delete"]);
+
+const getNow = () =>
+  typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+
+const parseMilliseconds = (value) => {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/ms$/i, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const buildRequestPerformance = (config = {}, headers = {}) => {
+  const startedAt = Number(config?.metadata?.startedAt);
+  const clientDurationMs =
+    Number.isFinite(startedAt) && startedAt > 0
+      ? Number.parseFloat((getNow() - startedAt).toFixed(2))
+      : null;
+
+  return {
+    clientDurationMs,
+    serverDurationMs: parseMilliseconds(headers?.["x-response-time"]),
+    serverTiming: String(headers?.["server-timing"] || "").trim(),
+    requestId: String(headers?.["x-request-id"] || "").trim(),
+  };
+};
+
+const logSlowRequest = (config, status, performanceMeta, isError = false) => {
+  if (!isDevelopment) {
+    return;
+  }
+
+  const durationMs = Number(performanceMeta?.clientDurationMs);
+  if (!Number.isFinite(durationMs) || durationMs < SLOW_API_REQUEST_THRESHOLD_MS) {
+    return;
+  }
+
+  const payload = {
+    method: String(config?.method || "get").toUpperCase(),
+    url: String(config?.url || ""),
+    status: Number(status || 0),
+    clientDurationMs: durationMs,
+    serverDurationMs: performanceMeta?.serverDurationMs,
+    requestId: performanceMeta?.requestId || "",
+    serverTiming: performanceMeta?.serverTiming || "",
+  };
+
+  if (isError) {
+    console.warn("[api][slow][error]", payload);
+    return;
+  }
+
+  console.info("[api][slow]", payload);
+};
 
 const shouldBroadcastMutation = (response) => {
   const method = String(response?.config?.method || "").toLowerCase();
@@ -46,6 +104,11 @@ const shouldBroadcastMutation = (response) => {
 
 // Add token to requests
 api.interceptors.request.use((config) => {
+  config.metadata = {
+    ...(config.metadata || {}),
+    startedAt: getNow(),
+  };
+
   const token = localStorage.getItem("token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -64,6 +127,17 @@ api.interceptors.request.use((config) => {
 // Handle errors
 api.interceptors.response.use(
   (response) => {
+    response.performance = buildRequestPerformance(
+      response.config,
+      response.headers,
+    );
+    logSlowRequest(
+      response.config,
+      response.status,
+      response.performance,
+      false,
+    );
+
     if (shouldBroadcastMutation(response)) {
       markSharedDataUpdated({
         source: String(response?.config?.url || ""),
@@ -74,6 +148,17 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
+    error.performance = buildRequestPerformance(
+      error.config,
+      error.response?.headers || {},
+    );
+    logSlowRequest(
+      error.config,
+      error.response?.status,
+      error.performance,
+      true,
+    );
+
     const status = error.response?.status;
     const backendError = error.response?.data?.error;
     const requestUrl = String(error.config?.url || "");

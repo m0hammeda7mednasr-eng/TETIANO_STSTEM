@@ -20,6 +20,11 @@ import {
 import { calculateDashboardOrderStats } from "../helpers/dashboardStats.js";
 import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 import { ProductUpdateService } from "../services/productUpdateService.js";
+import {
+  getRequestProfiler,
+  measureAsync,
+  measureSync,
+} from "../helpers/requestProfiler.js";
 
 const router = express.Router();
 const UUID_REGEX =
@@ -168,6 +173,107 @@ const DASHBOARD_ORDER_FILTERED_STATS_SELECTS = [
   DASHBOARD_ORDER_ANALYTICS_SELECT,
   ...DASHBOARD_ORDER_ANALYTICS_SELECTS,
 ];
+const DASHBOARD_PRODUCT_PROFITABILITY_SELECT = [
+  "id",
+  "store_id",
+  "user_id",
+  "title",
+  "image_url",
+  "shopify_id",
+  "sku",
+  "price",
+  "cost_price",
+  "ads_cost",
+  "operation_cost",
+  "shipping_cost",
+].join(",");
+const DASHBOARD_PRODUCT_PROFITABILITY_SELECTS = [
+  DASHBOARD_PRODUCT_PROFITABILITY_SELECT,
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "title",
+    "shopify_id",
+    "sku",
+    "price",
+    "cost_price",
+    "ads_cost",
+    "operation_cost",
+    "shipping_cost",
+  ].join(","),
+  ["id", "store_id", "user_id", "title", "shopify_id", "sku", "price"].join(","),
+];
+const DASHBOARD_PRODUCT_FULFILLED_PROFIT_SELECTS = [
+  [DASHBOARD_PRODUCT_PROFITABILITY_SELECT, "data"].join(","),
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "title",
+    "shopify_id",
+    "sku",
+    "price",
+    "cost_price",
+    "ads_cost",
+    "operation_cost",
+    "shipping_cost",
+    "data",
+  ].join(","),
+  ["id", "store_id", "user_id", "title", "shopify_id", "sku", "price", "data"].join(
+    ",",
+  ),
+];
+const DASHBOARD_ORDER_PROFITABILITY_SELECT = [
+  "id",
+  "store_id",
+  "user_id",
+  "total_price",
+  "current_total_price",
+  "total_refunded",
+  "financial_status",
+  "status",
+  "cancelled_at",
+  "data",
+].join(",");
+const DASHBOARD_ORDER_PROFITABILITY_SELECTS = [
+  DASHBOARD_ORDER_PROFITABILITY_SELECT,
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "total_price",
+    "total_refunded",
+    "financial_status",
+    "status",
+    "cancelled_at",
+    "data",
+  ].join(","),
+  ["id", "store_id", "user_id", "total_price", "status", "cancelled_at", "data"].join(
+    ",",
+  ),
+];
+const DASHBOARD_ORDER_FULFILLED_PROFIT_SELECTS = [
+  [DASHBOARD_ORDER_PROFITABILITY_SELECT, "fulfillment_status"].join(","),
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "total_price",
+    "total_refunded",
+    "financial_status",
+    "status",
+    "cancelled_at",
+    "fulfillment_status",
+    "data",
+  ].join(","),
+  ["id", "store_id", "user_id", "total_price", "status", "fulfillment_status", "data"].join(
+    ",",
+  ),
+];
+const DASHBOARD_OPERATIONAL_COST_SELECT = ["product_id", "amount", "apply_to"].join(
+  ",",
+);
 
 const toNumber = (value) => {
   if (value === null || value === undefined || value === "") {
@@ -1175,6 +1281,7 @@ const getScopedRowsBatched = async (
     offset,
     useLegacyUserScope,
   ) => {
+    const profiler = getRequestProfiler();
     let query = supabase.from(tableName).select(selectedColumns);
 
     if (currentOrderField) {
@@ -1195,10 +1302,21 @@ const getScopedRowsBatched = async (
       query = applyOrderDateRangeFilters(query, scopeFilters);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await measureAsync(
+      `dashboard.${tableName}.batch`,
+      () => query,
+      {
+        category: "db",
+        serverTimingKey: "db",
+        serverTimingDescription: "Database queries",
+      },
+    );
     if (error) {
       throw error;
     }
+
+    profiler.incrementCounter(`${tableName}_batches`, 1);
+    profiler.incrementCounter(`${tableName}_rows`, Array.isArray(data) ? data.length : 0);
 
     return data || [];
   };
@@ -1269,6 +1387,46 @@ const getScopedRowsBatched = async (
   return applyStoreFilter(dedupeRowsById(rows), requestedStoreId);
 };
 
+const getSingleScopedProduct = async (req, productId, selectCandidates = []) => {
+  const requestedStoreId = getRequestedStoreId(req);
+  let lastError = null;
+
+  for (const selectedColumns of (selectCandidates || []).filter(Boolean)) {
+    const { data, error } = await measureAsync(
+      "dashboard.products.single",
+      () =>
+        supabase
+          .from("products")
+          .select(selectedColumns)
+          .eq("id", productId)
+          .maybeSingle(),
+      {
+        category: "db",
+        serverTimingKey: "db",
+        serverTimingDescription: "Database queries",
+      },
+    );
+
+    if (!error) {
+      const filteredRows = applyStoreFilter(data ? [data] : [], requestedStoreId);
+      return filteredRows[0] || null;
+    }
+
+    lastError = error;
+    if (isSchemaCompatibilityError(error)) {
+      continue;
+    }
+
+    throw error;
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return null;
+};
+
 const getOperationalCostsByProduct = async (productIds, userId) => {
   if (!Array.isArray(productIds) || productIds.length === 0) {
     return [];
@@ -1276,7 +1434,7 @@ const getOperationalCostsByProduct = async (productIds, userId) => {
 
   let query = supabase
     .from("operational_costs")
-    .select("*")
+    .select(DASHBOARD_OPERATIONAL_COST_SELECT)
     .in("product_id", productIds)
     .eq("is_active", true);
 
@@ -1285,7 +1443,15 @@ const getOperationalCostsByProduct = async (productIds, userId) => {
     query = query.eq("user_id", userId);
   }
 
-  const { data, error } = await query;
+  const { data, error } = await measureAsync(
+    "dashboard.operational-costs.load",
+    () => query,
+    {
+      category: "db",
+      serverTimingKey: "db",
+      serverTimingDescription: "Database queries",
+    },
+  );
   if (error) {
     throw error;
   }
@@ -1296,13 +1462,16 @@ const getOperationalCostsByProduct = async (productIds, userId) => {
 // Dashboard summary cards
 router.get("/stats", authenticateToken, async (req, res) => {
   const cacheKey = getDashboardCacheKey(req);
+  const profiler = getRequestProfiler();
   const cachedEntry = getFreshCacheEntry(dashboardStatsCache, cacheKey);
   if (cachedEntry) {
+    profiler.setMeta("dashboard.stats.cache", "hit");
     res.setHeader("X-Dashboard-Cache", "hit");
     return res.json(cachedEntry.payload);
   }
 
   try {
+    profiler.setMeta("dashboard.stats.cache", "miss");
     const hasScopedOrderFilters = hasActiveOrderScopeFilters(req.query || {});
     const [products, orders, customers] = await Promise.all([
       getScopedRowsBatched(req, Product, {
@@ -1322,32 +1491,42 @@ router.get("/stats", authenticateToken, async (req, res) => {
       }),
     ]);
 
-    const filteredOrders = filterOrdersByScope(orders, req.query || {});
-    const { saleOrders, totalOrderValue, totalSales, pendingOrderValue } =
-      calculateDashboardOrderStats(filteredOrders);
-    const lowStockProductsCount = countLowStockProducts(products);
-    const filteredEntitySummary = hasScopedOrderFilters
-      ? buildFilteredOrderEntitySummary(filteredOrders)
-      : {
-          totalProducts: products.length,
-          totalCustomers: customers.length,
-        };
+    const payload = measureSync(
+      "dashboard.stats.compute",
+      () => {
+        const filteredOrders = filterOrdersByScope(orders, req.query || {});
+        const { saleOrders, totalOrderValue, totalSales, pendingOrderValue } =
+          calculateDashboardOrderStats(filteredOrders);
+        const lowStockProductsCount = countLowStockProducts(products);
+        const filteredEntitySummary = hasScopedOrderFilters
+          ? buildFilteredOrderEntitySummary(filteredOrders)
+          : {
+              totalProducts: products.length,
+              totalCustomers: customers.length,
+            };
 
-    const payload = {
-      total_sales: parseFloat(totalSales.toFixed(2)),
-      total_order_value: parseFloat(totalOrderValue.toFixed(2)),
-      pending_order_value: parseFloat(pendingOrderValue.toFixed(2)),
-      total_orders: filteredOrders.length,
-      total_products: filteredEntitySummary.totalProducts,
-      total_customers: filteredEntitySummary.totalCustomers,
-      low_stock_products: lowStockProductsCount,
-      orders_window_limit: DASHBOARD_ORDER_VISIBLE_LIMIT,
-      paid_orders_count: saleOrders.length,
-      avg_order_value:
-        saleOrders.length > 0
-          ? parseFloat((totalSales / saleOrders.length).toFixed(2))
-          : 0,
-    };
+        return {
+          total_sales: parseFloat(totalSales.toFixed(2)),
+          total_order_value: parseFloat(totalOrderValue.toFixed(2)),
+          pending_order_value: parseFloat(pendingOrderValue.toFixed(2)),
+          total_orders: filteredOrders.length,
+          total_products: filteredEntitySummary.totalProducts,
+          total_customers: filteredEntitySummary.totalCustomers,
+          low_stock_products: lowStockProductsCount,
+          orders_window_limit: DASHBOARD_ORDER_VISIBLE_LIMIT,
+          paid_orders_count: saleOrders.length,
+          avg_order_value:
+            saleOrders.length > 0
+              ? parseFloat((totalSales / saleOrders.length).toFixed(2))
+              : 0,
+        };
+      },
+      {
+        category: "app",
+        serverTimingKey: "app",
+        serverTimingDescription: "Server processing",
+      },
+    );
 
     rememberCacheEntry(dashboardStatsCache, cacheKey, payload);
     ensureLowStockNotifications(products).catch((notificationError) => {
@@ -1375,13 +1554,16 @@ router.get(
   requireAdminRole,
   async (req, res) => {
     const cacheKey = getDashboardCacheKey(req);
+    const profiler = getRequestProfiler();
     const cachedEntry = getFreshCacheEntry(dashboardAnalyticsCache, cacheKey);
     if (cachedEntry) {
+      profiler.setMeta("dashboard.analytics.cache", "hit");
       res.setHeader("X-Dashboard-Cache", "hit");
       return res.json(cachedEntry.payload);
     }
 
     try {
+      profiler.setMeta("dashboard.analytics.cache", "miss");
       const orderScopeFilters = normalizeOrderScopeFilters(req.query || {});
       const orders = await getScopedRowsBatched(req, Order, {
         selects: DASHBOARD_ORDER_ANALYTICS_SELECTS,
@@ -1389,170 +1571,180 @@ router.get(
         scopeFilters: orderScopeFilters,
       });
 
-      const allOrders = filterOrdersByScope(orders || [], orderScopeFilters);
-      const paidOrders = allOrders.filter((order) => isPaidOrder(order));
-      const refundedOrders = allOrders.filter((order) =>
-        isRefundedOrder(order),
-      );
-      const cancelledOrders = allOrders.filter((order) =>
-        isCancelledOrder(order),
-      );
-
-      const ordersByStatus = {
-        pending: allOrders.filter((order) => isPendingOrder(order)).length,
-        paid: paidOrders.length,
-        refunded: refundedOrders.length,
-        cancelled: cancelledOrders.length,
-        fulfilled: allOrders.filter((o) => {
-          const s = String(o.fulfillment_status || "")
-            .toLowerCase()
-            .trim();
-          return s === "fulfilled";
-        }).length,
-        unfulfilled: allOrders.filter((o) => {
-          const s = String(o.fulfillment_status || "")
-            .toLowerCase()
-            .trim();
-          return s === "" || s === "unfulfilled" || s === "null";
-        }).length,
-      };
-
-      const totalRevenue = allOrders.reduce(
-        (sum, order) => sum + getOrderGrossSalesAmount(order),
-        0,
-      );
-
-      const refundedAmount = allOrders.reduce(
-        (sum, order) => sum + getOrderRefundedAmount(order),
-        0,
-      );
-
-      const netRevenue = Math.max(0, totalRevenue - refundedAmount);
-      const revenueOrders = allOrders.filter(
-        (order) => getOrderGrossSalesAmount(order) > 0,
-      );
-
-      const pendingAmount = allOrders
-        .filter((order) => isPendingOrder(order))
-        .reduce((sum, order) => sum + getOrderGrossAmount(order), 0);
-      const timeline = buildAnalyticsTrends(allOrders, orderScopeFilters);
-
-      const productRevenueMap = new Map();
-      revenueOrders.forEach((order) => {
-        const grossOrderAmount = getOrderGrossSalesAmount(order);
-        const netOrderAmount = getOrderNetSalesAmount(order);
-        const netRatio =
-          grossOrderAmount > 0
-            ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
-            : 0;
-        if (netRatio <= 0) {
-          return;
-        }
-        const lineItems = parseLineItems(order);
-        lineItems.forEach((item) => {
-          const productKey = String(
-            item.product_id || item.id || item.sku || "",
+      const payload = measureSync(
+        "dashboard.analytics.compute",
+        () => {
+          const allOrders = filterOrdersByScope(orders || [], orderScopeFilters);
+          const paidOrders = allOrders.filter((order) => isPaidOrder(order));
+          const refundedOrders = allOrders.filter((order) =>
+            isRefundedOrder(order),
           );
-          if (!productKey) return;
+          const cancelledOrders = allOrders.filter((order) =>
+            isCancelledOrder(order),
+          );
 
-          const quantity = toNumber(item.quantity || 0);
-          const lineRevenue = toNumber(item.price || 0) * quantity * netRatio;
-
-          const current = productRevenueMap.get(productKey) || {
-            product_id: item.product_id || null,
-            title: item.title || item.name || "Unknown product",
-            total_revenue: 0,
-            total_quantity: 0,
-            orders_count: 0,
+          const ordersByStatus = {
+            pending: allOrders.filter((order) => isPendingOrder(order)).length,
+            paid: paidOrders.length,
+            refunded: refundedOrders.length,
+            cancelled: cancelledOrders.length,
+            fulfilled: allOrders.filter((o) => {
+              const s = String(o.fulfillment_status || "")
+                .toLowerCase()
+                .trim();
+              return s === "fulfilled";
+            }).length,
+            unfulfilled: allOrders.filter((o) => {
+              const s = String(o.fulfillment_status || "")
+                .toLowerCase()
+                .trim();
+              return s === "" || s === "unfulfilled" || s === "null";
+            }).length,
           };
 
-          current.total_revenue += lineRevenue;
-          current.total_quantity += quantity;
-          current.orders_count += 1;
-          productRevenueMap.set(productKey, current);
-        });
-      });
+          const totalRevenue = allOrders.reduce(
+            (sum, order) => sum + getOrderGrossSalesAmount(order),
+            0,
+          );
+          const refundedAmount = allOrders.reduce(
+            (sum, order) => sum + getOrderRefundedAmount(order),
+            0,
+          );
+          const netRevenue = Math.max(0, totalRevenue - refundedAmount);
+          const revenueOrders = allOrders.filter(
+            (order) => getOrderGrossSalesAmount(order) > 0,
+          );
+          const pendingAmount = allOrders
+            .filter((order) => isPendingOrder(order))
+            .reduce((sum, order) => sum + getOrderGrossAmount(order), 0);
+          const timeline = buildAnalyticsTrends(allOrders, orderScopeFilters);
 
-      const topProducts = Array.from(productRevenueMap.values())
-        .sort((a, b) => b.total_revenue - a.total_revenue)
-        .slice(0, 10)
-        .map((item) => ({
-          ...item,
-          total_revenue: parseFloat(item.total_revenue.toFixed(2)),
-        }));
+          const productRevenueMap = new Map();
+          revenueOrders.forEach((order) => {
+            const grossOrderAmount = getOrderGrossSalesAmount(order);
+            const netOrderAmount = getOrderNetSalesAmount(order);
+            const netRatio =
+              grossOrderAmount > 0
+                ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
+                : 0;
+            if (netRatio <= 0) {
+              return;
+            }
 
-      const customerSpendMap = new Map();
-      allOrders.forEach((order) => {
-        const data = parseOrderData(order);
-        const key = getOrderCustomerKey(order);
-        if (!key) return;
+            parseLineItems(order).forEach((item) => {
+              const productKey = String(
+                item.product_id || item.id || item.sku || "",
+              );
+              if (!productKey) return;
 
-        const current = customerSpendMap.get(key) || {
-          customer_id: null,
-          email:
-            order.customer_email ||
-            order.email ||
-            data?.email ||
-            data?.customer?.email ||
-            "",
-          name: order.customer_name || data?.customer?.name || "",
-          orders_count: 0,
-          total_spent: 0,
-        };
+              const quantity = toNumber(item.quantity || 0);
+              const lineRevenue =
+                toNumber(item.price || 0) * quantity * netRatio;
+              const current = productRevenueMap.get(productKey) || {
+                product_id: item.product_id || null,
+                title: item.title || item.name || "Unknown product",
+                total_revenue: 0,
+                total_quantity: 0,
+                orders_count: 0,
+              };
 
-        current.orders_count += 1;
-        current.total_spent += getOrderNetSalesAmount(order);
-        customerSpendMap.set(key, current);
-      });
+              current.total_revenue += lineRevenue;
+              current.total_quantity += quantity;
+              current.orders_count += 1;
+              productRevenueMap.set(productKey, current);
+            });
+          });
 
-      const topCustomers = Array.from(customerSpendMap.values())
-        .sort((a, b) => b.total_spent - a.total_spent)
-        .slice(0, 10)
-        .map((entry) => ({
-          ...entry,
-          name: entry.name || entry.email || "",
-          total_spent: parseFloat(entry.total_spent.toFixed(2)),
-        }));
+          const topProducts = Array.from(productRevenueMap.values())
+            .sort((a, b) => b.total_revenue - a.total_revenue)
+            .slice(0, 10)
+            .map((item) => ({
+              ...item,
+              total_revenue: parseFloat(item.total_revenue.toFixed(2)),
+            }));
 
-      const totalOrders = allOrders.length;
-      const payload = {
-        ordersByStatus,
-        financial: {
-          totalRevenue: parseFloat(totalRevenue.toFixed(2)),
-          refundedAmount: parseFloat(refundedAmount.toFixed(2)),
-          pendingAmount: parseFloat(pendingAmount.toFixed(2)),
-          netRevenue: parseFloat(netRevenue.toFixed(2)),
+          const customerSpendMap = new Map();
+          allOrders.forEach((order) => {
+            const data = parseOrderData(order);
+            const key = getOrderCustomerKey(order);
+            if (!key) return;
+
+            const current = customerSpendMap.get(key) || {
+              customer_id: null,
+              email:
+                order.customer_email ||
+                order.email ||
+                data?.email ||
+                data?.customer?.email ||
+                "",
+              name: order.customer_name || data?.customer?.name || "",
+              orders_count: 0,
+              total_spent: 0,
+            };
+
+            current.orders_count += 1;
+            current.total_spent += getOrderNetSalesAmount(order);
+            customerSpendMap.set(key, current);
+          });
+
+          const topCustomers = Array.from(customerSpendMap.values())
+            .sort((a, b) => b.total_spent - a.total_spent)
+            .slice(0, 10)
+            .map((entry) => ({
+              ...entry,
+              name: entry.name || entry.email || "",
+              total_spent: parseFloat(entry.total_spent.toFixed(2)),
+            }));
+
+          const totalOrders = allOrders.length;
+          return {
+            ordersByStatus,
+            financial: {
+              totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+              refundedAmount: parseFloat(refundedAmount.toFixed(2)),
+              pendingAmount: parseFloat(pendingAmount.toFixed(2)),
+              netRevenue: parseFloat(netRevenue.toFixed(2)),
+            },
+            topProducts,
+            topCustomers,
+            summary: {
+              totalOrders,
+              successRate:
+                totalOrders > 0
+                  ? parseFloat(
+                      ((ordersByStatus.paid / totalOrders) * 100).toFixed(2),
+                    )
+                  : 0,
+              cancellationRate:
+                totalOrders > 0
+                  ? parseFloat(
+                      (
+                        (ordersByStatus.cancelled / totalOrders) *
+                        100
+                      ).toFixed(2),
+                    )
+                  : 0,
+              refundRate:
+                totalOrders > 0
+                  ? parseFloat(
+                      ((ordersByStatus.refunded / totalOrders) * 100).toFixed(2),
+                    )
+                  : 0,
+            },
+            meta: {
+              filters: orderScopeFilters,
+              trendGranularity: timeline.granularity,
+              dateRange: timeline.range,
+            },
+            monthlyTrends: timeline.trends,
+          };
         },
-        topProducts,
-        topCustomers,
-        summary: {
-          totalOrders,
-          successRate:
-            totalOrders > 0
-              ? parseFloat(
-                  ((ordersByStatus.paid / totalOrders) * 100).toFixed(2),
-                )
-              : 0,
-          cancellationRate:
-            totalOrders > 0
-              ? parseFloat(
-                  ((ordersByStatus.cancelled / totalOrders) * 100).toFixed(2),
-                )
-              : 0,
-          refundRate:
-            totalOrders > 0
-              ? parseFloat(
-                  ((ordersByStatus.refunded / totalOrders) * 100).toFixed(2),
-                )
-              : 0,
+        {
+          category: "app",
+          serverTimingKey: "app",
+          serverTimingDescription: "Server processing",
         },
-        meta: {
-          filters: orderScopeFilters,
-          trendGranularity: timeline.granularity,
-          dateRange: timeline.range,
-        },
-        monthlyTrends: timeline.trends,
-      };
+      );
 
       rememberCacheEntry(dashboardAnalyticsCache, cacheKey, payload);
       res.json(payload);
@@ -1608,56 +1800,15 @@ router.get(
       const offset = parseInt(req.query.offset, 10) || 0;
 
       const [products, orders] = await Promise.all([
-        getScopedRowsBatched(req, Product),
-        getScopedRowsBatched(req, Order),
+        getScopedRowsBatched(req, Product, {
+          selects: DASHBOARD_PRODUCT_PROFITABILITY_SELECTS,
+          allowUnorderedFallback: true,
+        }),
+        getScopedRowsBatched(req, Order, {
+          selects: DASHBOARD_ORDER_PROFITABILITY_SELECTS,
+          allowUnorderedFallback: true,
+        }),
       ]);
-
-      const profitabilityOrders = orders.filter(
-        (order) => getOrderBookedNetAmount(order) > 0,
-      );
-
-      const salesByProduct = new Map();
-      const ordersByProduct = new Map();
-
-      profitabilityOrders.forEach((order) => {
-        const grossOrderAmount = getOrderBookedGrossAmount(order);
-        const netOrderAmount = getOrderBookedNetAmount(order);
-        const netRatio =
-          grossOrderAmount > 0
-            ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
-            : 0;
-        if (netRatio <= 0) {
-          return;
-        }
-        const lineItems = parseLineItems(order);
-        const orderProductSet = new Set();
-
-        lineItems.forEach((item) => {
-          const qty = toNumber(item.quantity || 0) * netRatio;
-          const unitPrice = toNumber(item.price || 0);
-          const revenue = qty * unitPrice;
-          const keys = [
-            String(item.product_id || ""),
-            String(item.id || ""),
-            String(item.sku || ""),
-          ].filter(Boolean);
-
-          keys.forEach((key) => {
-            const current = salesByProduct.get(key) || {
-              soldQuantity: 0,
-              totalRevenue: 0,
-            };
-            current.soldQuantity += qty;
-            current.totalRevenue += revenue;
-            salesByProduct.set(key, current);
-            orderProductSet.add(key);
-          });
-        });
-
-        orderProductSet.forEach((key) => {
-          ordersByProduct.set(key, (ordersByProduct.get(key) || 0) + 1);
-        });
-      });
 
       const productIds = products.map((p) => p.id);
       const scopedUserId = req.user?.role === "admin" ? null : req.user?.id;
@@ -1666,118 +1817,184 @@ router.get(
         scopedUserId,
       );
 
-      const costsByProductId = new Map();
-      productCosts.forEach((cost) => {
-        const list = costsByProductId.get(cost.product_id) || [];
-        list.push(cost);
-        costsByProductId.set(cost.product_id, list);
-      });
+      const { paginated, total, summary } = measureSync(
+        "dashboard.products.compute",
+        () => {
+          const profitabilityOrders = orders.filter(
+            (order) => getOrderBookedNetAmount(order) > 0,
+          );
+          const salesByProduct = new Map();
+          const ordersByProduct = new Map();
 
-      const metrics = products.map((product) => {
-        const productKeys = [
-          String(product.id),
-          String(product.shopify_id || ""),
-          String(product.sku || ""),
-        ].filter(Boolean);
+          profitabilityOrders.forEach((order) => {
+            const grossOrderAmount = getOrderBookedGrossAmount(order);
+            const netOrderAmount = getOrderBookedNetAmount(order);
+            const netRatio =
+              grossOrderAmount > 0
+                ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
+                : 0;
+            if (netRatio <= 0) {
+              return;
+            }
 
-        let soldQuantity = 0;
-        let totalRevenue = 0;
-        let ordersCount = 0;
-        productKeys.forEach((key) => {
-          const sales = salesByProduct.get(key);
-          if (sales) {
-            soldQuantity = Math.max(soldQuantity, sales.soldQuantity);
-            totalRevenue = Math.max(totalRevenue, sales.totalRevenue);
-          }
-          const cnt = ordersByProduct.get(key) || 0;
-          ordersCount = Math.max(ordersCount, cnt);
-        });
+            const orderProductSet = new Set();
+            parseLineItems(order).forEach((item) => {
+              const qty = toNumber(item.quantity || 0) * netRatio;
+              const unitPrice = toNumber(item.price || 0);
+              const revenue = qty * unitPrice;
+              const keys = [
+                String(item.product_id || ""),
+                String(item.id || ""),
+                String(item.sku || ""),
+              ].filter(Boolean);
 
-        const unitCost = toNumber(product.cost_price);
-        const adsCost = toNumber(product.ads_cost || 0);
-        const operationCost = toNumber(product.operation_cost || 0);
-        const shippingCost = toNumber(product.shipping_cost || 0);
-        const totalUnitCost = unitCost + adsCost + operationCost + shippingCost;
-        const totalCost = totalUnitCost * soldQuantity;
-        const grossProfit = totalRevenue - totalCost;
+              keys.forEach((key) => {
+                const current = salesByProduct.get(key) || {
+                  soldQuantity: 0,
+                  totalRevenue: 0,
+                };
+                current.soldQuantity += qty;
+                current.totalRevenue += revenue;
+                salesByProduct.set(key, current);
+                orderProductSet.add(key);
+              });
+            });
 
-        const operationalCosts = costsByProductId.get(product.id) || [];
-        const perUnitCosts = operationalCosts
-          .filter((c) => String(c.apply_to || "") === "per_unit")
-          .reduce((sum, c) => sum + toNumber(c.amount), 0);
-        const perOrderCosts = operationalCosts
-          .filter((c) => String(c.apply_to || "") === "per_order")
-          .reduce((sum, c) => sum + toNumber(c.amount), 0);
-        const fixedProductCosts = operationalCosts
-          .filter((c) => String(c.apply_to || "") === "fixed")
-          .reduce((sum, c) => sum + toNumber(c.amount), 0);
+            orderProductSet.forEach((key) => {
+              ordersByProduct.set(key, (ordersByProduct.get(key) || 0) + 1);
+            });
+          });
 
-        const operationalCostsTotal =
-          perUnitCosts * soldQuantity +
-          perOrderCosts * ordersCount +
-          fixedProductCosts;
+          const costsByProductId = new Map();
+          productCosts.forEach((cost) => {
+            const list = costsByProductId.get(cost.product_id) || [];
+            list.push(cost);
+            costsByProductId.set(cost.product_id, list);
+          });
 
-        const netProfit = grossProfit - operationalCostsTotal;
-        const profitPerUnit = soldQuantity > 0 ? netProfit / soldQuantity : 0;
-        const avgSellingPrice =
-          soldQuantity > 0
-            ? totalRevenue / soldQuantity
-            : toNumber(product.price);
-        const profitMargin =
-          totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+          const metrics = products.map((product) => {
+            const productKeys = [
+              String(product.id),
+              String(product.shopify_id || ""),
+              String(product.sku || ""),
+            ].filter(Boolean);
 
-        return {
-          ...product,
-          sold_quantity: soldQuantity,
-          orders_count: ordersCount,
-          total_revenue: parseFloat(totalRevenue.toFixed(2)),
-          total_cost: parseFloat(totalCost.toFixed(2)),
-          gross_profit: parseFloat(grossProfit.toFixed(2)),
-          operational_costs_total: parseFloat(operationalCostsTotal.toFixed(2)),
-          fixed_cost_share: 0,
-          net_profit: parseFloat(netProfit.toFixed(2)),
-          profit_per_unit: parseFloat(profitPerUnit.toFixed(2)),
-          avg_selling_price: parseFloat(avgSellingPrice.toFixed(2)),
-          profit_margin: parseFloat(profitMargin.toFixed(2)),
-        };
-      });
+            let soldQuantity = 0;
+            let totalRevenue = 0;
+            let ordersCount = 0;
+            productKeys.forEach((key) => {
+              const sales = salesByProduct.get(key);
+              if (sales) {
+                soldQuantity = Math.max(soldQuantity, sales.soldQuantity);
+                totalRevenue = Math.max(totalRevenue, sales.totalRevenue);
+              }
+              const cnt = ordersByProduct.get(key) || 0;
+              ordersCount = Math.max(ordersCount, cnt);
+            });
 
-      const sorted = metrics.sort((a, b) => b.total_revenue - a.total_revenue);
-      const paginated = sorted.slice(offset, offset + limit);
+            const unitCost = toNumber(product.cost_price);
+            const adsCost = toNumber(product.ads_cost || 0);
+            const operationCost = toNumber(product.operation_cost || 0);
+            const shippingCost = toNumber(product.shipping_cost || 0);
+            const totalUnitCost =
+              unitCost + adsCost + operationCost + shippingCost;
+            const totalCost = totalUnitCost * soldQuantity;
+            const grossProfit = totalRevenue - totalCost;
 
-      const summary = sorted.reduce(
-        (acc, item) => {
-          acc.total_revenue += toNumber(item.total_revenue);
-          acc.total_cost += toNumber(item.total_cost);
-          acc.total_gross_profit += toNumber(item.gross_profit);
-          acc.total_operational_costs += toNumber(item.operational_costs_total);
-          acc.total_net_profit += toNumber(item.net_profit);
-          acc.total_sold_units += toNumber(item.sold_quantity);
-          return acc;
+            const operationalCosts = costsByProductId.get(product.id) || [];
+            const perUnitCosts = operationalCosts
+              .filter((c) => String(c.apply_to || "") === "per_unit")
+              .reduce((sum, c) => sum + toNumber(c.amount), 0);
+            const perOrderCosts = operationalCosts
+              .filter((c) => String(c.apply_to || "") === "per_order")
+              .reduce((sum, c) => sum + toNumber(c.amount), 0);
+            const fixedProductCosts = operationalCosts
+              .filter((c) => String(c.apply_to || "") === "fixed")
+              .reduce((sum, c) => sum + toNumber(c.amount), 0);
+
+            const operationalCostsTotal =
+              perUnitCosts * soldQuantity +
+              perOrderCosts * ordersCount +
+              fixedProductCosts;
+            const netProfit = grossProfit - operationalCostsTotal;
+            const profitPerUnit =
+              soldQuantity > 0 ? netProfit / soldQuantity : 0;
+            const avgSellingPrice =
+              soldQuantity > 0
+                ? totalRevenue / soldQuantity
+                : toNumber(product.price);
+            const profitMargin =
+              totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+            return {
+              ...product,
+              sold_quantity: soldQuantity,
+              orders_count: ordersCount,
+              total_revenue: parseFloat(totalRevenue.toFixed(2)),
+              total_cost: parseFloat(totalCost.toFixed(2)),
+              gross_profit: parseFloat(grossProfit.toFixed(2)),
+              operational_costs_total: parseFloat(
+                operationalCostsTotal.toFixed(2),
+              ),
+              fixed_cost_share: 0,
+              net_profit: parseFloat(netProfit.toFixed(2)),
+              profit_per_unit: parseFloat(profitPerUnit.toFixed(2)),
+              avg_selling_price: parseFloat(avgSellingPrice.toFixed(2)),
+              profit_margin: parseFloat(profitMargin.toFixed(2)),
+            };
+          });
+
+          const sorted = metrics.sort(
+            (left, right) => right.total_revenue - left.total_revenue,
+          );
+          const summary = sorted.reduce(
+            (acc, item) => {
+              acc.total_revenue += toNumber(item.total_revenue);
+              acc.total_cost += toNumber(item.total_cost);
+              acc.total_gross_profit += toNumber(item.gross_profit);
+              acc.total_operational_costs += toNumber(
+                item.operational_costs_total,
+              );
+              acc.total_net_profit += toNumber(item.net_profit);
+              acc.total_sold_units += toNumber(item.sold_quantity);
+              return acc;
+            },
+            {
+              total_revenue: 0,
+              total_cost: 0,
+              total_gross_profit: 0,
+              total_operational_costs: 0,
+              total_net_profit: 0,
+              total_sold_units: 0,
+            },
+          );
+
+          summary.profit_margin =
+            summary.total_revenue > 0
+              ? parseFloat(
+                  (
+                    (summary.total_net_profit / summary.total_revenue) *
+                    100
+                  ).toFixed(2),
+                )
+              : 0;
+
+          return {
+            paginated: sorted.slice(offset, offset + limit),
+            total: sorted.length,
+            summary,
+          };
         },
         {
-          total_revenue: 0,
-          total_cost: 0,
-          total_gross_profit: 0,
-          total_operational_costs: 0,
-          total_net_profit: 0,
-          total_sold_units: 0,
+          category: "app",
+          serverTimingKey: "app",
+          serverTimingDescription: "Server processing",
         },
       );
 
-      summary.profit_margin =
-        summary.total_revenue > 0
-          ? parseFloat(
-              (
-                (summary.total_net_profit / summary.total_revenue) *
-                100
-              ).toFixed(2),
-            )
-          : 0;
-
       res.json({
         data: paginated,
-        total: sorted.length,
+        total,
         limit,
         offset,
         summary: {
@@ -1807,110 +2024,128 @@ router.get(
     try {
       const { id } = req.params;
 
-      const [products, orders] = await Promise.all([
-        getScopedRowsBatched(req, Product),
-        getScopedRowsBatched(req, Order),
-      ]);
-
-      const product =
-        products.find((item) => String(item?.id || "") === String(id || "")) ||
-        null;
+      const product = await getSingleScopedProduct(
+        req,
+        id,
+        DASHBOARD_PRODUCT_FULFILLED_PROFIT_SELECTS,
+      );
 
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
 
-      const productMatchKeys = buildProductOrderMatchKeys(product);
-      let fulfilledUnits = 0;
-      let successfulOrdersCount = 0;
-      let totalRevenue = 0;
-
-      orders
-        .filter(
-          (order) =>
-            !isCancelledOrder(order) &&
-            getOrderFulfillmentStatus(order) === "fulfilled" &&
-            getOrderBookedNetAmount(order) > 0,
-        )
-        .forEach((order) => {
-          const grossOrderAmount = getOrderBookedGrossAmount(order);
-          const netOrderAmount = getOrderBookedNetAmount(order);
-          const netRatio =
-            grossOrderAmount > 0
-              ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
-              : 0;
-
-          if (netRatio <= 0) {
-            return;
-          }
-
-          let orderMatched = false;
-
-          parseLineItems(order).forEach((item) => {
-            const itemKeys = [
-              String(item?.product_id || ""),
-              String(item?.variant_id || ""),
-              String(item?.id || ""),
-              String(item?.sku || ""),
-            ].filter(Boolean);
-
-            if (!itemKeys.some((key) => productMatchKeys.has(key))) {
-              return;
-            }
-
-            const quantity = toNumber(item?.quantity || 0) * netRatio;
-            const unitPrice = toNumber(item?.price || 0);
-
-            fulfilledUnits += quantity;
-            totalRevenue += quantity * unitPrice;
-            orderMatched = true;
-          });
-
-          if (orderMatched) {
-            successfulOrdersCount += 1;
-          }
-        });
-
-      const unitCost = toNumber(product.cost_price);
-      const adsCost = toNumber(product.ads_cost);
-      const operationCost = toNumber(product.operation_cost);
-      const shippingCost = toNumber(product.shipping_cost);
-      const totalUnitCost = unitCost + adsCost + operationCost + shippingCost;
-      const savedProductCostsTotal = totalUnitCost * fulfilledUnits;
-      const grossProfit = totalRevenue - savedProductCostsTotal;
-
-      const [productOperationalCosts] = await Promise.all([
+      const [orders, productOperationalCosts] = await Promise.all([
+        getScopedRowsBatched(req, Order, {
+          selects: DASHBOARD_ORDER_FULFILLED_PROFIT_SELECTS,
+          allowUnorderedFallback: true,
+        }),
         getOperationalCostsByProduct([product.id], null),
       ]);
-      const perUnitCosts = productOperationalCosts
-        .filter((cost) => String(cost?.apply_to || "") === "per_unit")
-        .reduce((sum, cost) => sum + toNumber(cost.amount), 0);
-      const perOrderCosts = productOperationalCosts
-        .filter((cost) => String(cost?.apply_to || "") === "per_order")
-        .reduce((sum, cost) => sum + toNumber(cost.amount), 0);
-      const fixedCosts = productOperationalCosts
-        .filter((cost) => String(cost?.apply_to || "") === "fixed")
-        .reduce((sum, cost) => sum + toNumber(cost.amount), 0);
 
-      const totalOperationalCosts =
-        perUnitCosts * fulfilledUnits +
-        perOrderCosts * successfulOrdersCount +
-        fixedCosts;
-      const netProfit = grossProfit - totalOperationalCosts;
-      const profitMargin =
-        totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+      const payload = measureSync(
+        "dashboard.fulfilled-profit.compute",
+        () => {
+          const productMatchKeys = buildProductOrderMatchKeys(product);
+          let fulfilledUnits = 0;
+          let successfulOrdersCount = 0;
+          let totalRevenue = 0;
 
-      res.json({
-        successful_orders_count: successfulOrdersCount,
-        fulfilled_units: parseFloat(fulfilledUnits.toFixed(2)),
-        total_revenue: parseFloat(totalRevenue.toFixed(2)),
-        total_unit_cost: parseFloat(totalUnitCost.toFixed(2)),
-        saved_product_costs_total: parseFloat(savedProductCostsTotal.toFixed(2)),
-        total_operational_costs: parseFloat(totalOperationalCosts.toFixed(2)),
-        gross_profit: parseFloat(grossProfit.toFixed(2)),
-        net_profit: parseFloat(netProfit.toFixed(2)),
-        profit_margin: parseFloat(profitMargin.toFixed(2)),
-      });
+          orders
+            .filter(
+              (order) =>
+                !isCancelledOrder(order) &&
+                getOrderFulfillmentStatus(order) === "fulfilled" &&
+                getOrderBookedNetAmount(order) > 0,
+            )
+            .forEach((order) => {
+              const grossOrderAmount = getOrderBookedGrossAmount(order);
+              const netOrderAmount = getOrderBookedNetAmount(order);
+              const netRatio =
+                grossOrderAmount > 0
+                  ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
+                  : 0;
+
+              if (netRatio <= 0) {
+                return;
+              }
+
+              let orderMatched = false;
+              parseLineItems(order).forEach((item) => {
+                const itemKeys = [
+                  String(item?.product_id || ""),
+                  String(item?.variant_id || ""),
+                  String(item?.id || ""),
+                  String(item?.sku || ""),
+                ].filter(Boolean);
+
+                if (!itemKeys.some((key) => productMatchKeys.has(key))) {
+                  return;
+                }
+
+                const quantity = toNumber(item?.quantity || 0) * netRatio;
+                const unitPrice = toNumber(item?.price || 0);
+
+                fulfilledUnits += quantity;
+                totalRevenue += quantity * unitPrice;
+                orderMatched = true;
+              });
+
+              if (orderMatched) {
+                successfulOrdersCount += 1;
+              }
+            });
+
+          const unitCost = toNumber(product.cost_price);
+          const adsCost = toNumber(product.ads_cost);
+          const operationCost = toNumber(product.operation_cost);
+          const shippingCost = toNumber(product.shipping_cost);
+          const totalUnitCost =
+            unitCost + adsCost + operationCost + shippingCost;
+          const savedProductCostsTotal = totalUnitCost * fulfilledUnits;
+          const grossProfit = totalRevenue - savedProductCostsTotal;
+
+          const perUnitCosts = productOperationalCosts
+            .filter((cost) => String(cost?.apply_to || "") === "per_unit")
+            .reduce((sum, cost) => sum + toNumber(cost.amount), 0);
+          const perOrderCosts = productOperationalCosts
+            .filter((cost) => String(cost?.apply_to || "") === "per_order")
+            .reduce((sum, cost) => sum + toNumber(cost.amount), 0);
+          const fixedCosts = productOperationalCosts
+            .filter((cost) => String(cost?.apply_to || "") === "fixed")
+            .reduce((sum, cost) => sum + toNumber(cost.amount), 0);
+
+          const totalOperationalCosts =
+            perUnitCosts * fulfilledUnits +
+            perOrderCosts * successfulOrdersCount +
+            fixedCosts;
+          const netProfit = grossProfit - totalOperationalCosts;
+          const profitMargin =
+            totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+          return {
+            successful_orders_count: successfulOrdersCount,
+            fulfilled_units: parseFloat(fulfilledUnits.toFixed(2)),
+            total_revenue: parseFloat(totalRevenue.toFixed(2)),
+            total_unit_cost: parseFloat(totalUnitCost.toFixed(2)),
+            saved_product_costs_total: parseFloat(
+              savedProductCostsTotal.toFixed(2),
+            ),
+            total_operational_costs: parseFloat(
+              totalOperationalCosts.toFixed(2),
+            ),
+            gross_profit: parseFloat(grossProfit.toFixed(2)),
+            net_profit: parseFloat(netProfit.toFixed(2)),
+            profit_margin: parseFloat(profitMargin.toFixed(2)),
+          };
+        },
+        {
+          category: "app",
+          serverTimingKey: "app",
+          serverTimingDescription: "Server processing",
+        },
+      );
+
+      res.json(payload);
     } catch (error) {
       console.error("Dashboard product fulfilled profit error:", error);
       res

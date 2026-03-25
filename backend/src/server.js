@@ -26,6 +26,7 @@ import { supabase } from "./supabaseClient.js";
 import { setRlsContext } from "./middleware/rls.js";
 import { emitRealtimeEvent } from "./services/realtimeEventService.js";
 import { startShopifyBackgroundSync } from "./services/shopifyBackgroundSyncService.js";
+import { requestProfilingMiddleware } from "./helpers/requestProfiler.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -73,11 +74,13 @@ const corsOptions = {
     callback(new Error(`CORS origin blocked: ${normalizeCorsOrigin(origin)}`));
   },
   credentials: true,
+  exposedHeaders: ["X-Request-Id", "X-Response-Time", "Server-Timing"],
 };
 
 // Middleware
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
+app.use(requestProfilingMiddleware);
 app.use(
   "/api/shopify/webhooks",
   express.raw({ type: "application/json" }),

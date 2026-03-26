@@ -11,6 +11,12 @@ const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 const SHOPIFY_UPSERT_BATCH_SIZE = 200;
 const ACCESSIBLE_STORE_IDS_CACHE_TTL_MS = 60 * 1000;
 const UPSERT_FALLBACK_WARNING_TTL_MS = 5 * 60 * 1000;
+const LOCAL_PRODUCT_COST_FIELDS = [
+  "cost_price",
+  "ads_cost",
+  "operation_cost",
+  "shipping_cost",
+];
 const accessibleStoreIdsCache = new Map();
 const upsertFallbackWarningCache = new Map();
 
@@ -719,6 +725,35 @@ const findMatchingOrderRow = (existingRows = [], row = {}) => {
   return scopedRows[0];
 };
 
+const preserveLocalProductFieldsForUpsert = (incomingRow = {}, existingRow = {}) => {
+  if (!existingRow || typeof existingRow !== "object") {
+    return incomingRow;
+  }
+
+  const nextRow = { ...incomingRow };
+
+  LOCAL_PRODUCT_COST_FIELDS.forEach((fieldName) => {
+    const existingHasField = Object.prototype.hasOwnProperty.call(
+      existingRow,
+      fieldName,
+    );
+    if (!existingHasField) {
+      return;
+    }
+
+    const incomingHasField = Object.prototype.hasOwnProperty.call(
+      incomingRow,
+      fieldName,
+    );
+
+    if (fieldName === "cost_price" || !incomingHasField) {
+      nextRow[fieldName] = existingRow[fieldName];
+    }
+  });
+
+  return nextRow;
+};
+
 const preserveLocalProductMetadataForUpserts = async (rows = []) => {
   if (!Array.isArray(rows) || rows.length === 0) {
     return rows;
@@ -736,7 +771,9 @@ const preserveLocalProductMetadataForUpserts = async (rows = []) => {
 
   const { data: existingRows, error } = await supabase
     .from("products")
-    .select("shopify_id, store_id, user_id, data, inventory_quantity")
+    .select(
+      "shopify_id, store_id, user_id, data, inventory_quantity, cost_price, ads_cost, operation_cost, shipping_cost",
+    )
     .in("shopify_id", shopifyIds);
 
   if (error) {
@@ -746,14 +783,19 @@ const preserveLocalProductMetadataForUpserts = async (rows = []) => {
 
   return rows.map((row) => {
     const matchingRow = findMatchingProductRow(existingRows || [], row);
-    if (row?.data === undefined) {
-      return row;
+    const nextRow = preserveLocalProductFieldsForUpsert(
+      row,
+      matchingRow || {},
+    );
+
+    if (nextRow?.data === undefined) {
+      return nextRow;
     }
 
     return {
-      ...row,
+      ...nextRow,
       data: preserveProductLocalMetadata(
-        preserveProductWarehouseData(row.data, matchingRow?.data || {}),
+        preserveProductWarehouseData(nextRow.data, matchingRow?.data || {}),
         matchingRow?.data || {},
       ),
     };

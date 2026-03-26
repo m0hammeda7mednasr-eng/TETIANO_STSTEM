@@ -4,6 +4,7 @@ import {
   extractProductLocalMetadata,
   mergeProductLocalMetadata,
   preserveProductLocalMetadata,
+  preserveProductWarehouseData,
 } from "../helpers/productLocalMetadata.js";
 
 const SHOPIFY_API_VERSION = "2024-01";
@@ -877,7 +878,7 @@ export class ProductUpdateService {
       const syncedProductData =
         latestShopifyProduct || applyShopifyUpdateFallback(parsedProductData, updates);
       const mergedSyncedProductData = preserveProductLocalMetadata(
-        syncedProductData,
+        preserveProductWarehouseData(syncedProductData, product.data),
         product.data,
       );
       const syncedVariants = getProductVariants(syncedProductData);

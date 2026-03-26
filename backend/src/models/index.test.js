@@ -619,6 +619,137 @@ describe("models/index Shopify scoping", () => {
     expect(tableData.products[0].title).toBe("After");
   });
 
+  it("preserves local cost fields and warehouse metadata during Shopify product upserts", async () => {
+    tableData.products = [
+      {
+        id: "product-1",
+        shopify_id: "shopify-1",
+        store_id: "store-1",
+        title: "Before",
+        cost_price: 180,
+        ads_cost: 14,
+        operation_cost: 9,
+        shipping_cost: 11,
+        data: {
+          variants: [
+            {
+              id: "variant-1",
+              sku: "SKU-1",
+              inventory_quantity: 4,
+              _tetiano_warehouse_quantity: 12,
+            },
+          ],
+          _tetiano_local_product: {
+            supplier_phone: "01012345678",
+          },
+        },
+      },
+    ];
+
+    const result = await Product.updateMultiple([
+      {
+        id: "product-1",
+        shopify_id: "shopify-1",
+        store_id: "store-1",
+        title: "After",
+        cost_price: 25,
+        data: {
+          variants: [
+            {
+              id: "variant-1",
+              sku: "SKU-1",
+              inventory_quantity: 7,
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(result.error).toBeNull();
+    expect(tableData.products[0]).toEqual(
+      expect.objectContaining({
+        title: "After",
+        cost_price: 180,
+        ads_cost: 14,
+        operation_cost: 9,
+        shipping_cost: 11,
+        data: expect.objectContaining({
+          variants: [
+            expect.objectContaining({
+              id: "variant-1",
+              inventory_quantity: 7,
+              _tetiano_warehouse_quantity: 12,
+            }),
+          ],
+          _tetiano_local_product: expect.objectContaining({
+            supplier_phone: "01012345678",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("does not reset local cost price to zero when Shopify product sync sends zero cost", async () => {
+    tableData.products = [
+      {
+        id: "product-2",
+        shopify_id: "shopify-2",
+        store_id: "store-1",
+        title: "Saved Product",
+        cost_price: 245,
+        ads_cost: 20,
+        operation_cost: 12,
+        shipping_cost: 18,
+        data: {
+          variants: [
+            {
+              id: "variant-2",
+              sku: "SKU-2",
+              inventory_quantity: 3,
+            },
+          ],
+        },
+      },
+    ];
+
+    const result = await Product.updateMultiple([
+      {
+        id: "product-2",
+        shopify_id: "shopify-2",
+        store_id: "store-1",
+        title: "Saved Product",
+        cost_price: 0,
+        data: {
+          variants: [
+            {
+              id: "variant-2",
+              sku: "SKU-2",
+              inventory_quantity: 6,
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(result.error).toBeNull();
+    expect(tableData.products[0]).toEqual(
+      expect.objectContaining({
+        cost_price: 245,
+        ads_cost: 20,
+        operation_cost: 12,
+        shipping_cost: 18,
+        data: expect.objectContaining({
+          variants: [
+            expect.objectContaining({
+              id: "variant-2",
+              inventory_quantity: 6,
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
   it("drops unsupported sync columns and retries customer upserts", async () => {
     queryFailures = [
       {

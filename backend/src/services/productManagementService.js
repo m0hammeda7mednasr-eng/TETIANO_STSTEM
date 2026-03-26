@@ -1,5 +1,8 @@
 import { Product } from "../models/index.js";
-import { extractProductLocalMetadata } from "../helpers/productLocalMetadata.js";
+import {
+  extractProductLocalMetadata,
+  extractWarehouseInventorySnapshot,
+} from "../helpers/productLocalMetadata.js";
 
 export class ProductManagementService {
   /**
@@ -60,7 +63,10 @@ export class ProductManagementService {
 
       // Extract ALL variants with complete details
       const variants = productData?.variants || [];
-      product.variants = variants.map((variant) => ({
+      product.variants = variants.map((variant) => {
+        const warehouseSnapshot = extractWarehouseInventorySnapshot(variant);
+
+        return {
         id: variant.id,
         product_id: variant.product_id,
         title: variant.title,
@@ -85,10 +91,13 @@ export class ProductManagementService {
         weight_unit: variant.weight_unit,
         inventory_item_id: variant.inventory_item_id,
         inventory_quantity: variant.inventory_quantity,
+        shopify_inventory_quantity: variant.inventory_quantity,
+        warehouse_inventory_quantity: warehouseSnapshot.quantity,
         old_inventory_quantity: variant.old_inventory_quantity,
         requires_shipping: variant.requires_shipping,
         admin_graphql_api_id: variant.admin_graphql_api_id,
-      }));
+        };
+      });
 
       // Update cost_price from first variant if not set
       if (!product.cost_price && variants.length > 0) {
@@ -154,10 +163,18 @@ export class ProductManagementService {
         (sum, v) => sum + (v.inventory_quantity || 0),
         0,
       );
+      product.total_shopify_inventory = product.total_inventory;
+      product.total_warehouse_inventory = variants.reduce(
+        (sum, variant) =>
+          sum + extractWarehouseInventorySnapshot(variant).quantity,
+        0,
+      );
       product.inventory_quantity =
         variants.length > 0
           ? product.total_inventory
           : product.inventory_quantity;
+      product.shopify_inventory_quantity = product.inventory_quantity;
+      product.warehouse_inventory_quantity = product.total_warehouse_inventory;
       product.variants_count = variants.length;
       product.has_multiple_variants = variants.length > 1;
 

@@ -28,9 +28,12 @@ import { extractCustomerPhone } from "../helpers/customerContact.js";
 import { buildProductsSummaryExportPayload } from "../helpers/orderExport.js";
 import { hasActiveOrderScopeFilters } from "../helpers/orderScope.js";
 import { buildProductSourcingDetail } from "../helpers/suppliers.js";
+import { extractWarehouseInventorySnapshot } from "../helpers/productLocalMetadata.js";
 import {
   DAY_MS,
   buildMissingOrdersFromStock,
+  MISSING_ORDER_REASON_NO_ACTION,
+  MISSING_ORDER_REASON_STOCK_SHORTAGE,
 } from "../helpers/missingOrders.js";
 import { loadWarehouseAvailabilityByStoreIds } from "../services/warehouseAvailabilityService.js";
 
@@ -46,6 +49,7 @@ const ORDER_LIST_PAGE_LIMIT = 4500;
 const ORDER_LIST_MAX_VISIBLE = 4500;
 const ORDER_SEARCH_SHOPIFY_FALLBACK_LIMIT = 10;
 const MISSING_ORDER_NOTIFICATION_WINDOW_MS = DAY_MS;
+const ORDER_ACTION_LOOKUP_CHUNK_SIZE = 250;
 const MISSING_ORDER_NOTIFICATION_TYPES = new Set([
   "order_missing",
   "order_missing_escalated",
@@ -1121,6 +1125,19 @@ const getProductTotalInventory = (product) => {
   );
 };
 
+const getProductTotalWarehouseInventory = (product) => {
+  const variants = getProductVariantRows(product);
+  if (variants.length === 0) {
+    return extractWarehouseInventorySnapshot(parseJsonField(product?.data)).quantity;
+  }
+
+  return variants.reduce(
+    (sum, variant) =>
+      sum + extractWarehouseInventorySnapshot(parseJsonField(variant)).quantity,
+    0,
+  );
+};
+
 const getProductPrimarySku = (product) => {
   const currentSku = String(product?.sku || "").trim();
   if (currentSku) {
@@ -1190,6 +1207,10 @@ const buildProductVariantSummaries = (product) => {
   const primaryImageUrl = getProductPrimaryImageUrl(product);
 
   if (variants.length === 0) {
+    const warehouseSnapshot = extractWarehouseInventorySnapshot(
+      parseJsonField(product?.data),
+    );
+
     return [
       {
         id: product?.shopify_id || product?.id || null,
@@ -1210,6 +1231,8 @@ const buildProductVariantSummaries = (product) => {
         weight: null,
         weight_unit: null,
         inventory_quantity: toNumber(product?.inventory_quantity),
+        shopify_inventory_quantity: toNumber(product?.inventory_quantity),
+        warehouse_inventory_quantity: warehouseSnapshot.quantity,
         requires_shipping: true,
         taxable: true,
         created_at: product?.created_at || null,
@@ -1218,44 +1241,57 @@ const buildProductVariantSummaries = (product) => {
     ];
   }
 
-  return variants.map((variant, index) => ({
-    id: variant?.id || null,
-    product_id:
-      variant?.product_id || product?.shopify_id || product?.id || null,
-    title: variant?.title || `Variant ${index + 1}`,
-    price: variant?.price ?? product?.price ?? 0,
-    cost: variant?.cost ?? variant?.cost_price ?? product?.cost_price ?? 0,
-    cost_price:
-      variant?.cost_price ?? variant?.cost ?? product?.cost_price ?? 0,
-    sku: String(variant?.sku || "").trim(),
-    position: variant?.position ?? index + 1,
-    compare_at_price: variant?.compare_at_price ?? null,
-    option1: variant?.option1 ?? null,
-    option2: variant?.option2 ?? null,
-    option3: variant?.option3 ?? null,
-    barcode: variant?.barcode ?? null,
-    image_id: variant?.image_id ?? null,
-    image_url: resolveVariantImageUrl(variant, imageRows, primaryImageUrl),
-    weight: variant?.weight ?? null,
-    weight_unit: variant?.weight_unit ?? null,
-    inventory_quantity: toNumber(variant?.inventory_quantity),
-    requires_shipping: Boolean(variant?.requires_shipping),
-    taxable: Boolean(variant?.taxable),
-    created_at: variant?.created_at || null,
-    updated_at: variant?.updated_at || null,
-  }));
+  return variants.map((variant, index) => {
+    const warehouseSnapshot = extractWarehouseInventorySnapshot(
+      parseJsonField(variant),
+    );
+
+    return {
+      id: variant?.id || null,
+      product_id:
+        variant?.product_id || product?.shopify_id || product?.id || null,
+      title: variant?.title || `Variant ${index + 1}`,
+      price: variant?.price ?? product?.price ?? 0,
+      cost: variant?.cost ?? variant?.cost_price ?? product?.cost_price ?? 0,
+      cost_price:
+        variant?.cost_price ?? variant?.cost ?? product?.cost_price ?? 0,
+      sku: String(variant?.sku || "").trim(),
+      position: variant?.position ?? index + 1,
+      compare_at_price: variant?.compare_at_price ?? null,
+      option1: variant?.option1 ?? null,
+      option2: variant?.option2 ?? null,
+      option3: variant?.option3 ?? null,
+      barcode: variant?.barcode ?? null,
+      image_id: variant?.image_id ?? null,
+      image_url: resolveVariantImageUrl(variant, imageRows, primaryImageUrl),
+      weight: variant?.weight ?? null,
+      weight_unit: variant?.weight_unit ?? null,
+      inventory_quantity: toNumber(variant?.inventory_quantity),
+      shopify_inventory_quantity: toNumber(variant?.inventory_quantity),
+      warehouse_inventory_quantity: warehouseSnapshot.quantity,
+      requires_shipping: Boolean(variant?.requires_shipping),
+      taxable: Boolean(variant?.taxable),
+      created_at: variant?.created_at || null,
+      updated_at: variant?.updated_at || null,
+    };
+  });
 };
 
 const buildProductSummary = (product) => {
   const variants = buildProductVariantSummaries(product);
   const images = getProductImageRows(product);
   const totalInventory = getProductTotalInventory(product);
+  const totalWarehouseInventory = getProductTotalWarehouseInventory(product);
   const primaryImageUrl = getProductPrimaryImageUrl(product);
 
   return {
     ...product,
     inventory_quantity: totalInventory,
+    shopify_inventory_quantity: totalInventory,
+    warehouse_inventory_quantity: totalWarehouseInventory,
     total_inventory: totalInventory,
+    total_shopify_inventory: totalInventory,
+    total_warehouse_inventory: totalWarehouseInventory,
     sku: getProductPrimarySku(product),
     image_url: primaryImageUrl,
     images,
@@ -2291,6 +2327,122 @@ const enrichCustomersWithOrderPhones = async (req, customers = []) => {
   }
 };
 
+const parseJsonArrayField = (value) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+};
+
+const setLatestActionTimestamp = (map, lookupKey, timestamp) => {
+  const normalizedKey = String(lookupKey || "").trim();
+  if (!normalizedKey || !Number.isFinite(timestamp) || timestamp <= 0) {
+    return;
+  }
+
+  map.set(normalizedKey, Math.max(timestamp, toNumber(map.get(normalizedKey))));
+};
+
+const getLatestLegacyOrderActionTimestamp = (order) => {
+  const notes = parseJsonArrayField(order?.notes);
+
+  return notes.reduce((latestTimestamp, note) => {
+    const nextTimestamp = Math.max(
+      parseTimestampValue(note?.edited_at),
+      parseTimestampValue(note?.updated_at),
+      parseTimestampValue(note?.created_at),
+      parseTimestampValue(note?.createdAt),
+    );
+
+    return Math.max(latestTimestamp, nextTimestamp);
+  }, 0);
+};
+
+const loadLatestOrderActionTimestampsByKey = async (orders = []) => {
+  const rows = Array.isArray(orders) ? orders : [];
+  const actionTimestampsByKey = new Map();
+
+  for (const order of rows) {
+    const latestLegacyActionTimestamp = getLatestLegacyOrderActionTimestamp(order);
+    setLatestActionTimestamp(actionTimestampsByKey, order?.id, latestLegacyActionTimestamp);
+    setLatestActionTimestamp(
+      actionTimestampsByKey,
+      order?.shopify_id,
+      latestLegacyActionTimestamp,
+    );
+  }
+
+  const shopifyOrderIds = Array.from(
+    new Set(
+      rows
+        .map((order) => String(order?.shopify_id || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  for (
+    let startIndex = 0;
+    startIndex < shopifyOrderIds.length;
+    startIndex += ORDER_ACTION_LOOKUP_CHUNK_SIZE
+  ) {
+    const chunk = shopifyOrderIds.slice(
+      startIndex,
+      startIndex + ORDER_ACTION_LOOKUP_CHUNK_SIZE,
+    );
+
+    if (chunk.length === 0) {
+      continue;
+    }
+
+    try {
+      const { data, error } = await db
+        .from("order_comments")
+        .select("order_id, created_at, updated_at, edited_at")
+        .in("order_id", chunk);
+
+      if (error) {
+        console.warn(
+          "Order action lookup skipped for missing orders:",
+          error.message || error,
+        );
+        break;
+      }
+
+      for (const comment of data || []) {
+        const latestCommentTimestamp = Math.max(
+          parseTimestampValue(comment?.edited_at),
+          parseTimestampValue(comment?.updated_at),
+          parseTimestampValue(comment?.created_at),
+        );
+
+        setLatestActionTimestamp(
+          actionTimestampsByKey,
+          comment?.order_id,
+          latestCommentTimestamp,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        "Order action lookup failed for missing orders:",
+        error?.message || error,
+      );
+      break;
+    }
+  }
+
+  return actionTimestampsByKey;
+};
+
 const getMissingOrdersForRows = async (rows = []) => {
   const rawRows = Array.isArray(rows) ? rows : [];
   const storeIds = Array.from(
@@ -2302,9 +2454,13 @@ const getMissingOrdersForRows = async (rows = []) => {
   );
 
   const warehouseRowsByStoreId = await loadWarehouseAvailabilityByStoreIds(storeIds);
+  const orderActionTimestampsByKey =
+    await loadLatestOrderActionTimestampsByKey(rawRows);
+
   return buildMissingOrdersFromStock({
     orders: rawRows,
     warehouseRowsByStoreId,
+    orderActionTimestampsByKey,
     buildOrderListItem,
   });
 };
@@ -2390,15 +2546,66 @@ const shouldNotifyForMissingStage = (order, nowTimestamp = Date.now()) => {
 
 const buildWarehouseMissingOrderNotificationDraft = (order, userId) => {
   const isEscalated = order?.missing_state === "escalated";
+  const isInStockNoAction =
+    order?.missing_reason === MISSING_ORDER_REASON_NO_ACTION;
   const notificationType = isEscalated
     ? "order_missing_escalated"
     : "order_missing";
   const orderLabel =
     order?.order_number || order?.shopify_id || order?.id || "Unknown";
-  const daysWithoutStock =
-    order?.days_without_stock || order?.days_without_action || 0;
+  const daysWithoutAttention =
+    order?.days_without_action || order?.days_without_stock || 0;
   const shortageQuantity = toNumber(order?.warehouse_shortage_quantity);
   const shortageItemsCount = toNumber(order?.warehouse_shortage_items_count);
+  let title = `Ø·Ù„Ø¨ #${orderLabel} Ø¯Ø®Ù„ Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„Ø·Ù„Ø¨Ø§Øª Ø§Ù„Ø®Ø§Ø±Ø¬Ø© Ø¹Ù† Ø§Ù„Ù…Ø®Ø²ÙˆÙ†`;
+  let message = `Ø§Ù„Ø·Ù„Ø¨ ØºÙŠØ± Ù…ØªØºØ·Ù‰ Ø¨Ø§Ù„ÙƒØ§Ù…Ù„ Ù…Ù† Ù…Ø®Ø²ÙˆÙ† Ø§Ù„Ù…Ø®Ø²Ù† Ù…Ù†Ø° ${daysWithoutAttention || 3} Ø£ÙŠØ§Ù… ÙˆØªÙ… Ù†Ù‚Ù„Ù‡ Ø¥Ù„Ù‰ ØµÙØ­Ø© Ø§Ù„Ø·Ù„Ø¨Ø§Øª Ø§Ù„Ø®Ø§Ø±Ø¬Ø© Ø¹Ù† Ø§Ù„Ù…Ø®Ø²ÙˆÙ†.`;
+
+  if (isEscalated && isInStockNoAction) {
+    title = `Ø·Ù„Ø¨ #${orderLabel} Ø¨Ø¯ÙˆÙ† Ù…ØªØ§Ø¨Ø¹Ø© Ø¨Ø´ÙƒÙ„ Ø­Ø±Ø¬`;
+    message = `Ø¬Ù…ÙŠØ¹ Ø£ØµÙ†Ø§Ù Ø§Ù„Ø·Ù„Ø¨ Ù…ØºØ·Ø§Ø© Ù…Ù† Ø§Ù„Ù…Ø®Ø²Ù†ØŒ Ù„ÙƒÙ† Ù„Ù… ÙŠØªÙ… ØªØ³Ø¬ÙŠÙ„ Ø£ÙŠ Ù…ØªØ§Ø¨Ø¹Ø© Ø¹Ù„ÙŠÙ‡ Ù…Ù†Ø° ${daysWithoutAttention || 6} Ø£ÙŠØ§Ù….`;
+  } else if (isEscalated) {
+    title = `Ø·Ù„Ø¨ #${orderLabel} Ø®Ø§Ø±Ø¬ Ø§Ù„Ù…Ø®Ø²ÙˆÙ† Ø¨Ø´ÙƒÙ„ Ø­Ø±Ø¬`;
+    message = `Ø§Ù„Ø·Ù„Ø¨ ØºÙŠØ± Ù…ØªØºØ·Ù‰ Ù…Ù† Ù…Ø®Ø²ÙˆÙ† Ø§Ù„Ù…Ø®Ø²Ù† Ù…Ù†Ø° ${daysWithoutAttention || 6} Ø£ÙŠØ§Ù…ØŒ ÙˆØ§Ù„Ø¹Ø¬Ø² Ø§Ù„Ø­Ø§Ù„ÙŠ ${shortageQuantity} Ù‚Ø·Ø¹Ø© Ø¹Ø¨Ø± ${shortageItemsCount || 1} ØµÙ†Ù.`;
+  } else if (isInStockNoAction) {
+    title = `Ø·Ù„Ø¨ #${orderLabel} Ø¯Ø®Ù„ Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„Ù…ØªØ§Ø¨Ø¹Ø© Ø¨Ø¯ÙˆÙ† Ø¥Ø¬Ø±Ø§Ø¡`;
+    message = `Ø¬Ù…ÙŠØ¹ Ø£ØµÙ†Ø§Ù Ø§Ù„Ø·Ù„Ø¨ Ù…ØªØ§Ø­Ø© ÙÙŠ Ø§Ù„Ù…Ø®Ø²Ù†ØŒ Ù„ÙƒÙ† Ù„Ù… ÙŠØªÙ… ØªØ³Ø¬ÙŠÙ„ Ø£ÙŠ ØªØ¹Ù„ÙŠÙ‚ Ø£Ùˆ Ù…ØªØ§Ø¨Ø¹Ø© Ø¹Ù„ÙŠÙ‡ Ù…Ù†Ø° ${daysWithoutAttention || 3} Ø£ÙŠØ§Ù…ØŒ ÙØªÙ… Ù†Ù‚Ù„Ù‡ Ù„Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„Ù…ØªØ§Ø¨Ø¹Ø©.`;
+  }
+
+  let notificationTitle = `Order #${orderLabel} moved to out-of-stock follow-up`;
+  let notificationMessage = `Warehouse stock still does not fully cover this order after ${daysWithoutAttention || 3} days.`;
+
+  if (isEscalated && isInStockNoAction) {
+    notificationTitle = `Order #${orderLabel} is critical without follow-up`;
+    notificationMessage = `Warehouse stock fully covers this order, but no action or comment has been recorded for ${daysWithoutAttention || 6} days.`;
+  } else if (isEscalated) {
+    notificationTitle = `Order #${orderLabel} is critically out of stock`;
+    notificationMessage = `Warehouse stock still does not fully cover this order after ${daysWithoutAttention || 6} days. Current shortage: ${shortageQuantity} unit(s) across ${shortageItemsCount || 1} item(s).`;
+  } else if (isInStockNoAction) {
+    notificationTitle = `Order #${orderLabel} moved to no-action follow-up`;
+    notificationMessage = `Warehouse stock fully covers this order, but no action or comment has been recorded for ${daysWithoutAttention || 3} days.`;
+  }
+
+  return {
+    user_id: userId,
+    type: notificationType,
+    title: notificationTitle,
+    message: notificationMessage,
+    entity_type: "order",
+    entity_id: order?.id || null,
+    metadata: {
+      route: "/orders/missing",
+      order_id: order?.id || null,
+      order_number: order?.order_number || null,
+      missing_reason:
+        order?.missing_reason || MISSING_ORDER_REASON_STOCK_SHORTAGE,
+      missing_state: order?.missing_state || "missing",
+      days_without_stock: order?.days_without_stock || 0,
+      days_without_action: daysWithoutAttention,
+      warehouse_coverable: Boolean(order?.warehouse_coverable),
+      warehouse_shortage_quantity: shortageQuantity,
+      warehouse_shortage_items_count: shortageItemsCount,
+    },
+  };
 
   return {
     user_id: userId,
@@ -3621,6 +3828,13 @@ router.get(
         ).length,
         warning_count: missingOrders.filter(
           (order) => order?.missing_state !== "escalated",
+        ).length,
+        stock_shortage_count: missingOrders.filter(
+          (order) =>
+            order?.missing_reason === MISSING_ORDER_REASON_STOCK_SHORTAGE,
+        ).length,
+        no_action_count: missingOrders.filter(
+          (order) => order?.missing_reason === MISSING_ORDER_REASON_NO_ACTION,
         ).length,
       };
 

@@ -121,7 +121,7 @@ export default function ProductEditModal({
             </div>
             <div className="app-note px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-                {select("المخزون", "Inventory")}
+                {select("مخزون Shopify", "Shopify inventory")}
               </p>
               <p className="metric-number mt-2 text-lg font-semibold text-slate-950">
                 {inventory === "" ? "-" : inventory}
@@ -215,8 +215,8 @@ export default function ProductEditModal({
             <Field
               label={
                 hasMultipleVariants
-                  ? select("إجمالي المخزون", "Total inventory")
-                  : select("المخزون", "Inventory")
+                  ? select("إجمالي مخزون Shopify", "Total Shopify inventory")
+                  : select("مخزون Shopify", "Shopify inventory")
               }
             >
               <input
@@ -282,8 +282,8 @@ export default function ProductEditModal({
             </p>
             <p className="mt-1">
               {select(
-                "التغييرات يتم تثبيتها فقط بعد نجاح المزامنة مع Shopify. لو المزامنة فشلت لن يتم حفظ تعديل محلي.",
-                "Changes are applied only after a successful Shopify sync. If sync fails, no local change is kept.",
+                "هذه الشاشة تعدل مخزون Shopify فقط. مخزون المخزن/السكانر منفصل. والتغييرات هنا لا تثبت إلا بعد نجاح المزامنة مع Shopify.",
+                "This editor changes Shopify inventory only. Warehouse/scanner stock is separate. Changes here are kept only after Shopify sync succeeds.",
               )}
             </p>
           </div>

@@ -31,6 +31,7 @@ describe("productsView", () => {
           sku: "TEE-1",
           price: 250,
           inventory_quantity: 7,
+          warehouse_inventory_quantity: 11,
         },
       ],
       true,
@@ -40,6 +41,39 @@ describe("productsView", () => {
     expect(rows[0].product_title).toBe("Basic Tee");
     expect(rows[0].variant_title).toBe("Default Variant");
     expect(rows[0]._meta.stockState).toBe("low_stock");
+    expect(rows[0].shopify_inventory_quantity).toBe(7);
+    expect(rows[0].warehouse_inventory_quantity).toBe(11);
+  });
+
+  test("buildVariantRows preserves separate Shopify and warehouse quantities per variant", () => {
+    const rows = buildVariantRows(
+      [
+        {
+          id: "product-2",
+          title: "Valona Cardigan",
+          total_shopify_inventory: 0,
+          total_warehouse_inventory: 14,
+          variants: [
+            {
+              id: "v-1",
+              title: "Baby Blue",
+              price: 899,
+              inventory_quantity: 0,
+              shopify_inventory_quantity: 0,
+              warehouse_inventory_quantity: 6,
+            },
+          ],
+        },
+      ],
+      false,
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].inventory_quantity).toBe(0);
+    expect(rows[0].shopify_inventory_quantity).toBe(0);
+    expect(rows[0].warehouse_inventory_quantity).toBe(6);
+    expect(rows[0].total_shopify_inventory).toBe(0);
+    expect(rows[0].total_warehouse_inventory).toBe(14);
   });
 
   test("buildCatalogCounts keeps product totals separate from variant totals", () => {

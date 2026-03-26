@@ -9,6 +9,9 @@ import { normalizeWarehouseCode } from "./warehouseCatalog.js";
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const MISSING_ORDER_GRACE_MS = 3 * DAY_MS;
 export const MISSING_ORDER_ESCALATION_MS = 6 * DAY_MS;
+export const MISSING_ORDER_REASON_STOCK_SHORTAGE =
+  "warehouse_stock_shortage";
+export const MISSING_ORDER_REASON_NO_ACTION = "in_stock_without_action";
 
 const normalizeText = (value) => String(value || "").trim();
 
@@ -231,12 +234,40 @@ const buildShortagePreview = (shortageLines = []) =>
     .filter(Boolean)
     .join(", ");
 
+const getMissingReasonRank = (order) => {
+  if (order?.missing_reason === MISSING_ORDER_REASON_STOCK_SHORTAGE) {
+    return 0;
+  }
+
+  if (order?.missing_reason === MISSING_ORDER_REASON_NO_ACTION) {
+    return 1;
+  }
+
+  return 2;
+};
+
+const resolveLatestActionTimestamp = (order, actionTimestampByOrderKey) => {
+  const orderId = normalizeId(order?.id);
+  const shopifyOrderId = normalizeId(order?.shopify_id);
+
+  return Math.max(
+    orderId ? toNumber(actionTimestampByOrderKey.get(orderId)) : 0,
+    shopifyOrderId ? toNumber(actionTimestampByOrderKey.get(shopifyOrderId)) : 0,
+  );
+};
+
 export const sortMissingOrders = (orders = []) =>
   [...(orders || [])].sort((left, right) => {
     const leftRank = left?.missing_state === "escalated" ? 0 : 1;
     const rightRank = right?.missing_state === "escalated" ? 0 : 1;
     if (leftRank !== rightRank) {
       return leftRank - rightRank;
+    }
+
+    const leftReasonRank = getMissingReasonRank(left);
+    const rightReasonRank = getMissingReasonRank(right);
+    if (leftReasonRank !== rightReasonRank) {
+      return leftReasonRank - rightReasonRank;
     }
 
     const dayGap =
@@ -252,6 +283,7 @@ export const sortMissingOrders = (orders = []) =>
 export const buildMissingOrdersFromStock = ({
   orders = [],
   warehouseRowsByStoreId = new Map(),
+  orderActionTimestampsByKey = new Map(),
   buildOrderListItem = (order) => ({ ...order }),
   nowTimestamp = Date.now(),
 } = {}) => {
@@ -260,6 +292,10 @@ export const buildMissingOrdersFromStock = ({
     warehouseRowsByStoreId instanceof Map
       ? warehouseRowsByStoreId
       : new Map(Object.entries(warehouseRowsByStoreId || {}));
+  const actionTimestampByOrderKey =
+    orderActionTimestampsByKey instanceof Map
+      ? orderActionTimestampsByKey
+      : new Map(Object.entries(orderActionTimestampsByKey || {}));
   const availabilityByStoreId = new Map();
 
   for (const [storeId, rows] of rowsByStoreMap.entries()) {
@@ -336,39 +372,78 @@ export const buildMissingOrdersFromStock = ({
       }
     }
 
-    if (shortageQuantity <= 0) {
-      continue;
-    }
-
     const elapsedMs = nowTimestamp - createdTimestamp;
     if (elapsedMs < MISSING_ORDER_GRACE_MS) {
       continue;
     }
 
     const isEscalated = elapsedMs >= MISSING_ORDER_ESCALATION_MS;
-    const daysWithoutStock = Math.max(3, Math.floor(elapsedMs / DAY_MS));
+    const missingSince = new Date(
+      createdTimestamp + MISSING_ORDER_GRACE_MS,
+    ).toISOString();
+    const escalatedSince = isEscalated
+      ? new Date(createdTimestamp + MISSING_ORDER_ESCALATION_MS).toISOString()
+      : null;
+    const orderAgeDays = Math.max(0, Math.floor(elapsedMs / DAY_MS));
+    const latestActionAtTimestamp = resolveLatestActionTimestamp(
+      order,
+      actionTimestampByOrderKey,
+    );
+
+    if (shortageQuantity > 0) {
+      const daysWithoutStock = Math.max(3, Math.floor(elapsedMs / DAY_MS));
+
+      missingOrders.push({
+        ...buildOrderListItem(order),
+        missing_reason: MISSING_ORDER_REASON_STOCK_SHORTAGE,
+        missing_state: isEscalated ? "escalated" : "missing",
+        missing_since: missingSince,
+        escalated_since: escalatedSince,
+        requires_attention: true,
+        days_without_stock: daysWithoutStock,
+        days_without_action: daysWithoutStock,
+        order_age_days: orderAgeDays,
+        latest_action_at:
+          latestActionAtTimestamp > 0
+            ? new Date(latestActionAtTimestamp).toISOString()
+            : null,
+        warehouse_coverable: false,
+        warehouse_required_quantity: requiredQuantity,
+        warehouse_reserved_quantity: reservedQuantity,
+        warehouse_shortage_quantity: shortageQuantity,
+        warehouse_shortage_items_count: shortageLines.length,
+        warehouse_shortage_preview: buildShortagePreview(shortageLines),
+        warehouse_shortage_lines: shortageLines,
+      });
+      continue;
+    }
+
+    const hasRecordedAction =
+      latestActionAtTimestamp > 0 && latestActionAtTimestamp >= createdTimestamp;
+    if (hasRecordedAction) {
+      continue;
+    }
+
+    const daysWithoutAction = Math.max(3, Math.floor(elapsedMs / DAY_MS));
 
     missingOrders.push({
       ...buildOrderListItem(order),
-      missing_reason: "warehouse_stock_shortage",
+      missing_reason: MISSING_ORDER_REASON_NO_ACTION,
       missing_state: isEscalated ? "escalated" : "missing",
-      missing_since: new Date(
-        createdTimestamp + MISSING_ORDER_GRACE_MS,
-      ).toISOString(),
-      escalated_since: isEscalated
-        ? new Date(createdTimestamp + MISSING_ORDER_ESCALATION_MS).toISOString()
-        : null,
+      missing_since: missingSince,
+      escalated_since: escalatedSince,
       requires_attention: true,
-      days_without_stock: daysWithoutStock,
-      days_without_action: daysWithoutStock,
-      order_age_days: Math.max(0, Math.floor(elapsedMs / DAY_MS)),
-      warehouse_coverable: false,
+      days_without_stock: 0,
+      days_without_action: daysWithoutAction,
+      order_age_days: orderAgeDays,
+      latest_action_at: null,
+      warehouse_coverable: true,
       warehouse_required_quantity: requiredQuantity,
-      warehouse_reserved_quantity: reservedQuantity,
-      warehouse_shortage_quantity: shortageQuantity,
-      warehouse_shortage_items_count: shortageLines.length,
-      warehouse_shortage_preview: buildShortagePreview(shortageLines),
-      warehouse_shortage_lines: shortageLines,
+      warehouse_reserved_quantity: requiredQuantity,
+      warehouse_shortage_quantity: 0,
+      warehouse_shortage_items_count: 0,
+      warehouse_shortage_preview: "",
+      warehouse_shortage_lines: [],
     });
   }
 

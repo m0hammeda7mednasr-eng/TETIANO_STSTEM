@@ -1495,7 +1495,7 @@ export default function Orders() {
                   <p className="text-sm text-amber-800">
                     {select(
                       "هذه الطلبات انتقلت إلى صفحة الطلبات الخارجة عن المخزون لأن مخزون المخزن لا يغطيها بالكامل بعد مرور 3 أيام.",
-                      "These orders moved to the out-of-stock orders page because warehouse stock still does not fully cover them after 3 days.",
+                      "These orders moved to the out-of-stock orders page because warehouse stock still does not fully cover them after 3 days, or because they are fully in stock but still have no recorded action after 3 days.",
                     )}
                   </p>
                 </div>

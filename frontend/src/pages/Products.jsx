@@ -610,7 +610,7 @@ export default function Products() {
     }
     if (filters.stockStatus !== "all") {
       chips.push(
-        `Stock: ${
+        `Shopify Stock: ${
           PRODUCT_FILTER_LABELS.stockStatus[filters.stockStatus] ||
           filters.stockStatus
         }`,
@@ -801,13 +801,13 @@ export default function Products() {
                     })}{" "}
                     {select(
                       "\u0641\u0627\u0631\u064a\u0627\u0646\u062a\u0627\u062a \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0645\u0646\u062e\u0641\u0636 \u062a\u062d\u062a\u0627\u062c \u0645\u062a\u0627\u0628\u0639\u0629",
-                      "low-stock variants need follow-up",
+                      "low-Shopify-stock variants need follow-up",
                     )}
                   </p>
                   <p className="mt-1 text-xs text-amber-800/90">
                     {select(
                       "\u0631\u0643\u0632 \u0647\u0630\u0627 \u0627\u0644\u0639\u0631\u0636 \u0639\u0644\u0649 \u0627\u0644\u0645\u0646\u062a\u062c\u0627\u062a \u0627\u0644\u0623\u0642\u0644 \u0645\u0646 \u062d\u062f \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0644\u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u062a\u0648\u0631\u064a\u062f \u0623\u0633\u0631\u0639.",
-                      "Focus this view on products below the stock threshold to restock faster.",
+                      "This alert is based on Shopify stock shown on this page, not warehouse balance.",
                     )}
                   </p>
                 </div>
@@ -840,7 +840,7 @@ export default function Products() {
               color="from-indigo-500 to-indigo-700"
             />
             <SummaryCard
-              label={select("\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0645\u062e\u0632\u0648\u0646", "Total Stock")}
+              label={select("\u0625\u062c\u0645\u0627\u0644\u064a \u0645\u062e\u0632\u0648\u0646 Shopify", "Total Shopify Stock")}
               value={formatNumber(summary.totalInventory, {
                 maximumFractionDigits: 0,
               })}
@@ -848,7 +848,7 @@ export default function Products() {
               color="from-emerald-500 to-emerald-700"
             />
             <SummaryCard
-              label={select("\u0645\u062e\u0632\u0648\u0646 \u0645\u0646\u062e\u0641\u0636", "Low Stock")}
+              label={select("Shopify \u0645\u0646\u062e\u0641\u0636", "Low Shopify Stock")}
               value={formatNumber(summary.lowStock, {
                 maximumFractionDigits: 0,
               })}
@@ -856,7 +856,7 @@ export default function Products() {
               color="from-amber-500 to-amber-700"
             />
             <SummaryCard
-              label="Out of Stock"
+              label="Shopify OOS"
               value={formatNumber(summary.outOfStock, {
                 maximumFractionDigits: 0,
               })}
@@ -1009,7 +1009,7 @@ export default function Products() {
 
               <div>
                 <label className="block text-xs text-slate-500 mb-1">
-                  Stock
+                  Shopify Stock
                 </label>
                 <select
                   value={filters.stockStatus}
@@ -1228,7 +1228,11 @@ export default function Products() {
                         {getSyncStatusIcon(variant)}
                       </div>
                     )}
-                    <StockBadge stockState={variant._meta.stockState} />
+                    <StockBadge
+                      stockState={variant._meta.stockState}
+                      shopifyInventoryQuantity={variant.shopify_inventory_quantity}
+                      warehouseInventoryQuantity={variant.warehouse_inventory_quantity}
+                    />
                   </div>
 
                   <div className="p-4 space-y-4">
@@ -1262,8 +1266,8 @@ export default function Products() {
                         value={formatAmount(variant.price)}
                       />
                       <DetailItem
-                        label="Stock"
-                        value={formatNumber(variant.inventory_quantity, {
+                        label="Shopify"
+                        value={formatNumber(variant.shopify_inventory_quantity, {
                           maximumFractionDigits: 0,
                         })}
                         valueClassName={
@@ -1274,12 +1278,30 @@ export default function Products() {
                               : "text-rose-600"
                         }
                       />
+                      <DetailItem
+                        label="Warehouse"
+                        value={formatNumber(variant.warehouse_inventory_quantity, {
+                          maximumFractionDigits: 0,
+                        })}
+                        valueClassName={
+                          toNumber(variant.warehouse_inventory_quantity) > 0
+                            ? "text-emerald-600"
+                            : "text-slate-500"
+                        }
+                      />
                       <DetailItem label="SKU" value={variant.sku || "-"} />
                       <DetailItem
                         label="Updated"
                         value={formatDateTime(variant.updated_at)}
                       />
                     </div>
+
+                    {toNumber(variant.shopify_inventory_quantity) !==
+                    toNumber(variant.warehouse_inventory_quantity) ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        Shopify stock and warehouse stock are different for this variant.
+                      </div>
+                    ) : null}
 
                     {(variant.vendor || variant.barcode) && (
                       <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700 space-y-2">
@@ -1444,7 +1466,23 @@ function VariantImage({ variant }) {
   );
 }
 
-function StockBadge({ stockState }) {
+function StockBadge({
+  stockState,
+  shopifyInventoryQuantity = 0,
+  warehouseInventoryQuantity = 0,
+}) {
+  const hasWarehouseStockOnly =
+    toNumber(shopifyInventoryQuantity) <= 0 &&
+    toNumber(warehouseInventoryQuantity) > 0;
+
+  if (hasWarehouseStockOnly) {
+    return (
+      <span className="absolute top-3 right-3 bg-amber-600 text-white text-xs px-2.5 py-1 rounded-full shadow">
+        Shopify OOS
+      </span>
+    );
+  }
+
   if (stockState === "out_of_stock") {
     return (
       <span className="absolute top-3 right-3 bg-red-600 text-white text-xs px-2.5 py-1 rounded-full shadow">

@@ -66,7 +66,40 @@ const getStateBadge = (order, locale) =>
 const getCardClassName = (order) =>
   order?.missing_state === "escalated"
     ? "border-red-200 bg-red-50"
-    : "border-amber-200 bg-amber-50";
+    : isInStockNoActionOrder(order)
+      ? "border-sky-200 bg-sky-50"
+      : "border-amber-200 bg-amber-50";
+
+const getMissingReason = (order) =>
+  String(order?.missing_reason || "").trim().toLowerCase();
+
+const isInStockNoActionOrder = (order) =>
+  getMissingReason(order) === "in_stock_without_action";
+
+const getSeverityBadge = (order, locale) =>
+  order?.missing_state === "escalated"
+    ? {
+        label: locale === "ar" ? "Ø­Ø±Ø¬" : "Critical",
+        className: "border-red-600 bg-red-600 text-white",
+      }
+    : {
+        label: locale === "ar" ? "ÙŠØ­ØªØ§Ø¬ Ù…ØªØ§Ø¨Ø¹Ø©" : "Needs Follow-Up",
+        className: "border-slate-300 bg-white text-slate-700",
+      };
+
+const getReasonBadge = (order, locale) =>
+  isInStockNoActionOrder(order)
+    ? {
+        label:
+          locale === "ar"
+            ? "Ø§Ù„Ù…Ø®Ø²ÙˆÙ† Ù…ØªØ§Ø­ / Ù„Ø§ ÙŠÙˆØ¬Ø¯ Ø¥Ø¬Ø±Ø§Ø¡"
+            : "In Stock, No Action",
+        className: "border-sky-200 bg-sky-100 text-sky-800",
+      }
+    : {
+        label: locale === "ar" ? "Ø®Ø§Ø±Ø¬ Ø§Ù„Ù…Ø®Ø²ÙˆÙ†" : "Stock-Out",
+        className: "border-amber-200 bg-amber-100 text-amber-900",
+      };
 
 const matchesSearch = (order, keyword) => {
   const normalized = String(keyword || "").trim().toLowerCase();
@@ -106,6 +139,36 @@ const formatShortageSummary = (order, select, formatNumber) => {
   return select(
     `عجز ${formatNumber(shortageQuantity, { maximumFractionDigits: 0 })} من ${formatNumber(requiredQuantity, { maximumFractionDigits: 0 })} قطعة عبر ${formatNumber(blockedItemsCount, { maximumFractionDigits: 0 })} صنف`,
     `Short ${formatNumber(shortageQuantity, { maximumFractionDigits: 0 })} of ${formatNumber(requiredQuantity, { maximumFractionDigits: 0 })} units across ${formatNumber(blockedItemsCount, { maximumFractionDigits: 0 })} item(s)`,
+  );
+};
+
+const formatAlertSummary = (order, select, formatNumber) => {
+  if (isInStockNoActionOrder(order)) {
+    const requiredQuantity = Number(order?.warehouse_required_quantity || 0);
+
+    return select(
+      `Ø§Ù„Ù…Ø®Ø²ÙˆÙ† ÙŠØºØ·ÙŠ ${formatNumber(requiredQuantity, { maximumFractionDigits: 0 })} Ù‚Ø·Ø¹Ø© Ø¨Ø§Ù„ÙƒØ§Ù…Ù„ Ø¨Ø¯ÙˆÙ† Ø¥Ø¬Ø±Ø§Ø¡`,
+      `Warehouse covers ${formatNumber(requiredQuantity, { maximumFractionDigits: 0 })} unit(s), but no action was taken`,
+    );
+  }
+
+  return formatShortageSummary(order, select, formatNumber);
+};
+
+const formatAlertPreview = (order, select) => {
+  if (isInStockNoActionOrder(order)) {
+    return select(
+      "Ø¬Ù…ÙŠØ¹ Ø£ØµÙ†Ø§Ù Ø§Ù„Ø·Ù„Ø¨ Ù…ØªØ§Ø­Ø© ÙÙŠ Ø§Ù„Ù…Ø®Ø²Ù†ØŒ Ù„ÙƒÙ† Ù„Ù… ÙŠØªÙ… ØªØ³Ø¬ÙŠÙ„ Ø£ÙŠ comment Ø£Ùˆ Ù…ØªØ§Ø¨Ø¹Ø© Ø­ØªÙ‰ Ø§Ù„Ø¢Ù†.",
+      "All required items are available in warehouse stock, but no order comment or follow-up has been recorded yet.",
+    );
+  }
+
+  return (
+    getShortageStats(order).preview ||
+    select(
+      "ÙŠÙˆØ¬Ø¯ ØµÙ†Ù Ø£Ùˆ Ø£ÙƒØ«Ø± ØºÙŠØ± Ù…ØªØºØ·Ù‰ Ø¨Ø§Ù„ÙƒØ§Ù…Ù„.",
+      "One or more line items are not fully covered.",
+    )
   );
 };
 
@@ -235,7 +298,7 @@ export default function MissingOrders() {
         requestError?.response?.data?.error ||
           select(
             "فشل تحميل الطلبات الخارجة عن المخزون",
-            "Failed to load out-of-stock orders",
+            "Failed to load follow-up orders",
           ),
       );
     } finally {
@@ -267,11 +330,19 @@ export default function MissingOrders() {
     const escalatedCount = filteredOrders.filter(
       (order) => order?.missing_state === "escalated",
     ).length;
+    const stockShortageCount = filteredOrders.filter(
+      (order) => !isInStockNoActionOrder(order),
+    ).length;
+    const noActionCount = filteredOrders.filter((order) =>
+      isInStockNoActionOrder(order),
+    ).length;
 
     return {
       total: filteredOrders.length,
       missing: filteredOrders.length - escalatedCount,
       escalated: escalatedCount,
+      stockShortage: stockShortageCount,
+      noAction: noActionCount,
     };
   }, [filteredOrders]);
 
@@ -359,7 +430,7 @@ export default function MissingOrders() {
                 <p className="mt-1 text-slate-600">
                   {select(
                     "أي طلب لا يغطيه مخزون المخزن بالكامل يبقى في قائمة الطلبات العادية أول 3 أيام، ثم ينتقل هنا تلقائيًا. وإذا تجاوز 6 أيام يتحول إلى حالة حرجة.",
-                    "Any order that is not fully covered by warehouse stock stays in the main orders list for the first 3 days, then moves here automatically. If it passes 6 days, it becomes critical.",
+                    "Orders with warehouse stock shortages, plus orders that are fully in stock but still have no recorded action, stay in the main list for 3 days and then move here automatically. After 6 days they become critical.",
                   )}
                 </p>
                 {lastUpdatedAt ? (
@@ -392,11 +463,11 @@ export default function MissingOrders() {
             </div>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <SummaryCard
               title={select(
                 "إجمالي الطلبات الخارجة عن المخزون",
-                "Total Out-of-Stock Orders",
+                "Total Follow-Up Orders",
               )}
               value={formatNumber(summary.total, {
                 maximumFractionDigits: 0,
@@ -405,12 +476,23 @@ export default function MissingOrders() {
               icon={Search}
             />
             <SummaryCard
-              title={select("تحتاج تدخل", "Need Action")}
-              value={formatNumber(summary.missing, {
+              title={select("حالات عجز المخزون", "Stock-Out Cases")}
+              value={formatNumber(summary.stockShortage, {
                 maximumFractionDigits: 0,
               })}
               tone="amber"
               icon={AlertTriangle}
+            />
+            <SummaryCard
+              title={select(
+                "Ø§Ù„Ù…Ø®Ø²ÙˆÙ† Ù…ØªØ§Ø­ ÙˆÙ„Ø§ ÙŠÙˆØ¬Ø¯ Ø¥Ø¬Ø±Ø§Ø¡",
+                "In-Stock, No Action",
+              )}
+              value={formatNumber(summary.noAction, {
+                maximumFractionDigits: 0,
+              })}
+              tone="blue"
+              icon={Clock3}
             />
             <SummaryCard
               title={select("حالات حرجة", "Critical Cases")}
@@ -462,14 +544,14 @@ export default function MissingOrders() {
               <EmptyState
                 text={select(
                   "جاري تحميل الطلبات الخارجة عن المخزون...",
-                  "Loading out-of-stock orders...",
+                  "Loading follow-up orders...",
                 )}
               />
             ) : filteredOrders.length === 0 ? (
               <EmptyState
                 text={select(
                   "لا توجد طلبات خارجة عن المخزون حاليًا.",
-                  "There are no out-of-stock orders right now.",
+                  "There are no follow-up orders right now.",
                 )}
               />
             ) : (
@@ -478,13 +560,13 @@ export default function MissingOrders() {
                   <p className="text-sm font-medium text-slate-700">
                     {select(
                       `عرض ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} من ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} طلب خارج المخزون`,
-                      `Showing ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} of ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} out-of-stock orders`,
+                      `Showing ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} of ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} follow-up orders`,
                     )}
                   </p>
                   <p className="text-xs text-slate-500">
                     {select(
                       "الأحمر = حالة حرجة، الأصفر = تحتاج متابعة.",
-                      "Red = critical, amber = needs follow-up.",
+                      "Red = critical, amber = stock shortage, blue = in stock with no action.",
                     )}
                   </p>
                 </div>
@@ -513,7 +595,7 @@ export default function MissingOrders() {
                           {select("الحالة", "Status")}
                         </th>
                         <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}>
-                          {select("العجز", "Stock Gap")}
+                          {select("سبب التنبيه", "Alert Reason")}
                         </th>
                         <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}>
                           {select("عمر الطلب", "Order Age")}
@@ -531,13 +613,14 @@ export default function MissingOrders() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {paginatedOrders.map((order) => {
-                        const stateBadge = getStateBadge(order, locale);
-                        const shortageSummary = formatShortageSummary(
+                        const severityBadge = getSeverityBadge(order, locale);
+                        const reasonBadge = getReasonBadge(order, locale);
+                        const alertSummary = formatAlertSummary(
                           order,
                           select,
                           formatNumber,
                         );
-                        const shortagePreview = getShortageStats(order).preview;
+                        const alertPreview = formatAlertPreview(order, select);
                         const fulfillmentStatus = getLocalizedStatusLabel(
                           normalizeStatus(order?.fulfillment_status, "unfulfilled"),
                           locale,
@@ -558,7 +641,9 @@ export default function MissingOrders() {
                             className={`cursor-pointer transition hover:bg-slate-50 ${
                               order?.missing_state === "escalated"
                                 ? "bg-red-50/45"
-                                : "bg-amber-50/40"
+                                : isInStockNoActionOrder(order)
+                                  ? "bg-sky-50/50"
+                                  : "bg-amber-50/40"
                             }`}
                             onClick={() => navigate(`/orders/${order.id}`)}
                           >
@@ -585,20 +670,21 @@ export default function MissingOrders() {
                               </p>
                             </td>
                             <td className="px-4 py-4 align-top">
-                              <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${stateBadge.className}`}>
-                                {stateBadge.label}
-                              </span>
+                              <div className="flex flex-wrap gap-2">
+                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${severityBadge.className}`}>
+                                  {severityBadge.label}
+                                </span>
+                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${reasonBadge.className}`}>
+                                  {reasonBadge.label}
+                                </span>
+                              </div>
                             </td>
                             <td className="px-4 py-4 align-top text-sm text-slate-700">
                               <p className="font-medium text-slate-900">
-                                {shortageSummary}
+                                {alertSummary}
                               </p>
                               <p className="mt-1 text-xs text-slate-500">
-                                {shortagePreview ||
-                                  select(
-                                    "يوجد صنف أو أكثر غير متغطى بالكامل.",
-                                    "One or more line items are not fully covered.",
-                                  )}
+                                {alertPreview}
                               </p>
                             </td>
                             <td className="px-4 py-4 align-top text-sm font-medium text-slate-700">
@@ -639,13 +725,14 @@ export default function MissingOrders() {
 
                 <div className="space-y-3 lg:hidden">
                   {paginatedOrders.map((order) => {
-                    const stateBadge = getStateBadge(order, locale);
-                    const shortageSummary = formatShortageSummary(
+                    const severityBadge = getSeverityBadge(order, locale);
+                    const reasonBadge = getReasonBadge(order, locale);
+                    const alertSummary = formatAlertSummary(
                       order,
                       select,
                       formatNumber,
                     );
-                    const shortagePreview = getShortageStats(order).preview;
+                    const alertPreview = formatAlertPreview(order, select);
                     const fulfillmentStatus = getLocalizedStatusLabel(
                       normalizeStatus(order?.fulfillment_status, "unfulfilled"),
                       locale,
@@ -676,14 +763,17 @@ export default function MissingOrders() {
                                 {select("طلب", "Order")} #
                                 {order.order_number || order.shopify_id}
                               </button>
-                              <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${stateBadge.className}`}>
-                                {stateBadge.label}
+                              <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${severityBadge.className}`}>
+                                {severityBadge.label}
+                              </span>
+                              <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${reasonBadge.className}`}>
+                                {reasonBadge.label}
                               </span>
                               <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
                                 {formatOrderAge(order, select, formatNumber)}
                               </span>
                               <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
-                                {shortageSummary}
+                                {alertSummary}
                               </span>
                             </div>
 
@@ -693,9 +783,9 @@ export default function MissingOrders() {
                                   select("عميل غير معروف", "Unknown customer")}
                               </p>
                               <p>{order.customer_email || "-"}</p>
-                              {shortagePreview ? (
+                              {alertPreview ? (
                                 <p className="text-xs text-slate-500">
-                                  {shortagePreview}
+                                  {alertPreview}
                                 </p>
                               ) : null}
                             </div>
@@ -703,8 +793,8 @@ export default function MissingOrders() {
 
                           <div className="grid min-w-0 grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:min-w-[32rem] xl:grid-cols-4">
                             <InfoBox
-                              label={select("العجز", "Stock Gap")}
-                              value={shortageSummary}
+                              label={select("سبب التنبيه", "Alert Reason")}
+                              value={alertSummary}
                             />
                             <InfoBox
                               label={select("عمر الطلب", "Order Age")}

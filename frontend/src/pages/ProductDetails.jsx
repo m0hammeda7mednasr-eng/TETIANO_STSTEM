@@ -45,7 +45,7 @@ const formatTextList = (values, fallback = "-") => {
 
 const PRODUCT_FIELD_LABELS = {
   price: "Price",
-  inventory: "Inventory",
+  inventory: "Shopify inventory",
   sku: "SKU",
   variants: "Variant changes",
   cost_price: "Cost price",
@@ -152,6 +152,14 @@ export default function ProductDetails() {
     hasMultipleVariants,
     product,
   ]);
+
+  const displayedWarehouseInventoryQuantity = useMemo(() => {
+    if (!product) return 0;
+
+    return toNumber(
+      product.total_warehouse_inventory ?? product.warehouse_inventory_quantity,
+    );
+  }, [product]);
 
   const profitabilitySnapshot = useMemo(
     () =>
@@ -817,8 +825,8 @@ export default function ProductDetails() {
                   </h2>
                   {hasMultipleVariants && (
                     <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                      تحكم في مخزون كل Variant من هنا، وإجمالي المخزون بيتحدث من
-                      مجموع كل الفاريانتس.
+                      تعديلات المخزون هنا تخص Shopify لكل Variant. مخزون
+                      المخزن/السكانر يظهر منفصلًا للمرجعية فقط.
                     </div>
                   )}
                   <div className="space-y-3">
@@ -838,6 +846,9 @@ export default function ProductDetails() {
                           ? (variantDraft.inventory_quantity ??
                               variant.inventory_quantity)
                           : variant.inventory_quantity,
+                      );
+                      const displayedVariantWarehouseInventory = toNumber(
+                        variant.warehouse_inventory_quantity,
                       );
 
                       return (
@@ -919,16 +930,17 @@ export default function ProductDetails() {
                                       : "text-red-600"
                                 }`}
                               >
-                                المخزون:{" "}
-                                {toNumber(
-                                  editing
-                                    ? (editedVariantsById.get(
-                                        String(variant.id || ""),
-                                      )?.inventory_quantity ??
-                                        variant.inventory_quantity)
-                                    : variant.inventory_quantity,
-                                )}
+                                Shopify: {displayedVariantInventory}
                               </p>
+                              <p className="text-sm text-slate-600">
+                                Warehouse: {displayedVariantWarehouseInventory}
+                              </p>
+                              {displayedVariantInventory !==
+                              displayedVariantWarehouseInventory ? (
+                                <p className="mt-1 text-xs text-amber-700">
+                                  فيه فرق بين Shopify والمخزن لهذا الـ Variant.
+                                </p>
+                              ) : null}
                               {(variant.barcode || displayedVariantSku) && (
                                 <button
                                   type="button"
@@ -1393,7 +1405,9 @@ export default function ProductDetails() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      {hasMultipleVariants ? "إجمالي المخزون" : "المخزون"}
+                      {hasMultipleVariants
+                        ? "إجمالي مخزون Shopify"
+                        : "مخزون Shopify"}
                     </label>
                     {editing && !hasMultipleVariants ? (
                       <input
@@ -1424,11 +1438,29 @@ export default function ProductDetails() {
                         </p>
                         {editing && hasMultipleVariants && (
                           <p className="mt-2 text-sm text-slate-600">
-                            عدل مخزون كل Variant من قسم الأشكال.
+                            عدل مخزون Shopify لكل Variant من قسم الأشكال.
                           </p>
                         )}
                       </>
                     )}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-sm font-medium text-slate-700">
+                      مخزون المخزن
+                    </p>
+                    <p
+                      className={`mt-2 text-2xl font-bold ${
+                        displayedWarehouseInventoryQuantity > 0
+                          ? "text-emerald-600"
+                          : "text-slate-500"
+                      }`}
+                    >
+                      {displayedWarehouseInventoryQuantity}
+                    </p>
+                    <p className="mt-2 text-xs text-slate-500">
+                      هذا الرصيد يأتي من الـ warehouse/scanner ولا يتعدل من هذه الصفحة.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1440,8 +1472,8 @@ export default function ProductDetails() {
                 </h2>
                 <div className="space-y-3">
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                    SKU syncs with Shopify. Supplier phone and location are
-                    saved on this product locally.
+                    SKU and inventory edits here sync to Shopify. Warehouse stock
+                    is tracked separately in Warehouse and Scanner pages.
                   </div>
                   {product.vendor && (
                     <div>
@@ -1570,11 +1602,19 @@ export default function ProductDetails() {
                         </p>
                       </div>
                     )}
-                  {product.total_inventory !== undefined && (
+                  {product.total_shopify_inventory !== undefined && (
                     <div>
-                      <p className="text-sm text-gray-600">إجمالي المخزون</p>
+                      <p className="text-sm text-gray-600">إجمالي مخزون Shopify</p>
                       <p className="font-semibold text-gray-800">
-                        {product.total_inventory} وحدة
+                        {product.total_shopify_inventory} وحدة
+                      </p>
+                    </div>
+                  )}
+                  {product.total_warehouse_inventory !== undefined && (
+                    <div>
+                      <p className="text-sm text-gray-600">إجمالي مخزون المخزن</p>
+                      <p className="font-semibold text-gray-800">
+                        {product.total_warehouse_inventory} وحدة
                       </p>
                     </div>
                   )}

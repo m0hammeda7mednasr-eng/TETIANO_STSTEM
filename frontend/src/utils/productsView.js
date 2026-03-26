@@ -147,6 +147,19 @@ export const buildVariantRows = (products, isAdmin) =>
       const inventoryQuantity = toNumber(
         variant?.inventory_quantity ?? product?.inventory_quantity ?? 0,
       );
+      const shopifyInventoryQuantity = toNumber(
+        variant?.shopify_inventory_quantity ??
+          variant?.inventory_quantity ??
+          product?.shopify_inventory_quantity ??
+          product?.inventory_quantity ??
+          0,
+      );
+      const warehouseInventoryQuantity = toNumber(
+        variant?.warehouse_inventory_quantity ??
+          product?.warehouse_inventory_quantity ??
+          product?.total_warehouse_inventory ??
+          0,
+      );
       const price = variant?.price ?? product?.price ?? 0;
       const costPrice = isAdmin
         ? (variant?.cost_price ?? variant?.cost ?? product?.cost_price ?? null)
@@ -190,8 +203,22 @@ export const buildVariantRows = (products, isAdmin) =>
           ? (variant?.shipping_cost ?? product?.shipping_cost ?? null)
           : undefined,
         inventory_quantity: inventoryQuantity,
+        shopify_inventory_quantity: shopifyInventoryQuantity,
+        warehouse_inventory_quantity: warehouseInventoryQuantity,
         total_inventory: toNumber(
           product?.total_inventory ?? product?.inventory_quantity ?? 0,
+        ),
+        total_shopify_inventory: toNumber(
+          product?.total_shopify_inventory ??
+            product?.shopify_inventory_quantity ??
+            product?.total_inventory ??
+            product?.inventory_quantity ??
+            0,
+        ),
+        total_warehouse_inventory: toNumber(
+          product?.total_warehouse_inventory ??
+            product?.warehouse_inventory_quantity ??
+            0,
         ),
         pending_sync: Boolean(product?.pending_sync),
         sync_error: product?.sync_error || "",

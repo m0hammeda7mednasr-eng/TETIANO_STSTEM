@@ -1,6 +1,10 @@
 import { describe, expect, it } from "@jest/globals";
 
-import { buildMissingOrdersFromStock } from "./missingOrders.js";
+import {
+  buildMissingOrdersFromStock,
+  MISSING_ORDER_REASON_NO_ACTION,
+  MISSING_ORDER_REASON_STOCK_SHORTAGE,
+} from "./missingOrders.js";
 
 const buildOrder = ({
   id,
@@ -130,6 +134,7 @@ describe("helpers/missingOrders", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       id: "order-short",
+      missing_reason: MISSING_ORDER_REASON_STOCK_SHORTAGE,
       missing_state: "missing",
       days_without_stock: 4,
       warehouse_required_quantity: 2,
@@ -144,6 +149,73 @@ describe("helpers/missingOrders", () => {
       missing_quantity: 1,
       matched_by: "variant_id",
     });
+  });
+
+  it("moves a fully coverable order after 3 days when no action was recorded", () => {
+    const orders = [
+      buildOrder({
+        id: "order-no-action",
+        createdAt: "2026-03-21T09:00:00.000Z",
+        lineItems: [
+          buildLineItem({
+            id: "line-stocked",
+            quantity: 2,
+            fulfillableQuantity: 2,
+          }),
+        ],
+      }),
+    ];
+
+    const result = buildMissingOrdersFromStock({
+      orders,
+      warehouseRowsByStoreId: new Map([
+        ["store-1", [buildWarehouseRow({ quantity: 2 })]],
+      ]),
+      buildOrderListItem,
+      nowTimestamp: new Date("2026-03-25T09:00:00.000Z").getTime(),
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: "order-no-action",
+      missing_reason: MISSING_ORDER_REASON_NO_ACTION,
+      missing_state: "missing",
+      warehouse_coverable: true,
+      warehouse_required_quantity: 2,
+      warehouse_reserved_quantity: 2,
+      warehouse_shortage_quantity: 0,
+      days_without_action: 4,
+    });
+  });
+
+  it("keeps fully coverable orders in the main list when an action was recorded", () => {
+    const orders = [
+      buildOrder({
+        id: "order-with-action",
+        createdAt: "2026-03-21T09:00:00.000Z",
+        lineItems: [
+          buildLineItem({
+            id: "line-acted",
+            quantity: 1,
+            fulfillableQuantity: 1,
+          }),
+        ],
+      }),
+    ];
+
+    const result = buildMissingOrdersFromStock({
+      orders,
+      warehouseRowsByStoreId: new Map([
+        ["store-1", [buildWarehouseRow({ quantity: 1 })]],
+      ]),
+      orderActionTimestampsByKey: new Map([
+        ["order-with-action", new Date("2026-03-24T12:00:00.000Z").getTime()],
+      ]),
+      buildOrderListItem,
+      nowTimestamp: new Date("2026-03-25T09:00:00.000Z").getTime(),
+    });
+
+    expect(result).toEqual([]);
   });
 
   it("allocates warehouse stock to older orders before newer ones", () => {
@@ -179,6 +251,9 @@ describe("helpers/missingOrders", () => {
       warehouseRowsByStoreId: new Map([
         ["store-1", [buildWarehouseRow({ quantity: 5 })]],
       ]),
+      orderActionTimestampsByKey: new Map([
+        ["order-oldest", new Date("2026-03-24T08:00:00.000Z").getTime()],
+      ]),
       buildOrderListItem,
       nowTimestamp: new Date("2026-03-26T10:00:00.000Z").getTime(),
     });
@@ -207,6 +282,9 @@ describe("helpers/missingOrders", () => {
       orders,
       warehouseRowsByStoreId: new Map([
         ["store-1", [buildWarehouseRow({ quantity: 1 })]],
+      ]),
+      orderActionTimestampsByKey: new Map([
+        ["order-partial", new Date("2026-03-24T08:00:00.000Z").getTime()],
       ]),
       buildOrderListItem,
       nowTimestamp: new Date("2026-03-25T09:00:00.000Z").getTime(),
@@ -305,6 +383,7 @@ describe("helpers/missingOrders", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       id: "order-escalated",
+      missing_reason: MISSING_ORDER_REASON_STOCK_SHORTAGE,
       missing_state: "escalated",
       warehouse_shortage_quantity: 1,
       warehouse_shortage_items_count: 1,
@@ -313,6 +392,41 @@ describe("helpers/missingOrders", () => {
       line_item_id: "line-escalated",
       matched_by: null,
       missing_quantity: 1,
+    });
+  });
+
+  it("escalates fully coverable orders when no action was recorded for 6 days", () => {
+    const orders = [
+      buildOrder({
+        id: "order-coverable-escalated",
+        createdAt: "2026-03-18T09:00:00.000Z",
+        lineItems: [
+          buildLineItem({
+            id: "line-coverable",
+            quantity: 1,
+            fulfillableQuantity: 1,
+          }),
+        ],
+      }),
+    ];
+
+    const result = buildMissingOrdersFromStock({
+      orders,
+      warehouseRowsByStoreId: new Map([
+        ["store-1", [buildWarehouseRow({ quantity: 1 })]],
+      ]),
+      buildOrderListItem,
+      nowTimestamp: new Date("2026-03-26T09:00:00.000Z").getTime(),
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: "order-coverable-escalated",
+      missing_reason: MISSING_ORDER_REASON_NO_ACTION,
+      missing_state: "escalated",
+      warehouse_coverable: true,
+      warehouse_shortage_quantity: 0,
+      days_without_action: 8,
     });
   });
 });

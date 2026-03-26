@@ -158,6 +158,14 @@ function App() {
                 }
               />
               <Route
+                path="/orders/in-stock-follow-up"
+                element={
+                  <ProtectedRoute permission="can_view_orders">
+                    <MissingOrders />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/orders/:id"
                 element={
                   <ProtectedRoute permission="can_view_orders">

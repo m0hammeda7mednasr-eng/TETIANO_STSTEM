@@ -48,6 +48,7 @@ const ORDERS_VISIBLE_LIMIT = 4500;
 const ORDERS_PER_PAGE = 50;
 const ORDERS_PAGINATION_WINDOW = 5;
 const ORDERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
+const MISSING_ORDER_REASON_NO_ACTION = "in_stock_without_action";
 
 const INITIAL_FILTERS = {
   searchTerm: "",
@@ -491,6 +492,11 @@ export default function Orders() {
   }, [cacheKey]);
   const [orders, setOrders] = useState(() => initialCachedSnapshot.rows);
   const [missingOrderIds, setMissingOrderIds] = useState([]);
+  const [missingOrdersSummary, setMissingOrdersSummary] = useState({
+    total: 0,
+    stockShortage: 0,
+    noAction: 0,
+  });
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
@@ -693,6 +699,19 @@ export default function Orders() {
             .map((order) => String(order?.id || "").trim())
             .filter(Boolean),
         );
+        setMissingOrdersSummary({
+          total: rows.length,
+          stockShortage: rows.filter(
+            (order) =>
+              String(order?.missing_reason || "").trim().toLowerCase() !==
+              MISSING_ORDER_REASON_NO_ACTION,
+          ).length,
+          noAction: rows.filter(
+            (order) =>
+              String(order?.missing_reason || "").trim().toLowerCase() ===
+              MISSING_ORDER_REASON_NO_ACTION,
+          ).length,
+        });
       } catch (missingError) {
         console.error("Error fetching missing orders:", missingError);
       }
@@ -1498,6 +1517,12 @@ export default function Orders() {
                       "These orders moved to the out-of-stock orders page because warehouse stock still does not fully cover them after 3 days, or because they are fully in stock but still have no recorded action after 3 days.",
                     )}
                   </p>
+                  <p className="mt-2 text-xs font-medium text-amber-900/80">
+                    {select(
+                      `${formatNumber(missingOrdersSummary.stockShortage, { maximumFractionDigits: 0 })} خارج المخزون + ${formatNumber(missingOrdersSummary.noAction, { maximumFractionDigits: 0 })} مخزون متاح بدون إجراء`,
+                      `${formatNumber(missingOrdersSummary.stockShortage, { maximumFractionDigits: 0 })} out-of-stock + ${formatNumber(missingOrdersSummary.noAction, { maximumFractionDigits: 0 })} in-stock follow-up`,
+                    )}
+                  </p>
                 </div>
               </div>
               <button
@@ -1509,6 +1534,17 @@ export default function Orders() {
                   "Open Out-of-Stock Orders",
                 )}
               </button>
+              {missingOrdersSummary.noAction > 0 ? (
+                <button
+                  onClick={() => navigate("/orders/in-stock-follow-up")}
+                  className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium"
+                >
+                  {select(
+                    "فتح طلبات المخزون المتاح",
+                    "Open In-Stock Follow-Up",
+                  )}
+                </button>
+              ) : null}
             </div>
           )}
 

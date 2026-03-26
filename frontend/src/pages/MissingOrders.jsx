@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   AlertTriangle,
@@ -18,6 +18,7 @@ import { extractArray, extractObject } from "../utils/response";
 const FETCH_PAGE_LIMIT = 100;
 const MISSING_ORDERS_PER_PAGE = 50;
 const MISSING_ORDERS_PAGINATION_WINDOW = 5;
+const MISSING_ORDER_REASON_NO_ACTION = "in_stock_without_action";
 
 const normalizeStatus = (value, fallback = "none") => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -76,7 +77,7 @@ const getMissingReason = (order) =>
   String(order?.missing_reason || "").trim().toLowerCase();
 
 const isInStockNoActionOrder = (order) =>
-  getMissingReason(order) === "in_stock_without_action";
+  getMissingReason(order) === MISSING_ORDER_REASON_NO_ACTION;
 
 const getSeverityBadge = (order, locale) =>
   order?.missing_state === "escalated"
@@ -226,6 +227,7 @@ function EmptyState({ text }) {
 }
 
 export default function MissingOrders() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { locale, isRTL, select, formatDateTime, formatNumber, formatTime } =
     useLocale();
@@ -235,6 +237,81 @@ export default function MissingOrders() {
   const [searchTerm, setSearchTerm] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const isInStockFollowUpView =
+    location.pathname === "/orders/in-stock-follow-up";
+
+  const pageConfig = useMemo(
+    () =>
+      isInStockFollowUpView
+        ? {
+            title: select(
+              "طلبات المخزون المتاح",
+              "In-Stock Follow-Up Orders",
+            ),
+            description: select(
+              "هذه الطلبات مغطاة بالكامل من مخزون المخزن، لكنها بقيت 3 أيام أو أكثر بدون أي إجراء أو comment مسجل، وبعد 6 أيام تتحول إلى حالة حرجة.",
+              "These orders are fully covered by warehouse stock, but they stayed for 3 days or more without any recorded action or comment. After 6 days they become critical.",
+            ),
+            loadingText: select(
+              "جاري تحميل طلبات المخزون المتاح...",
+              "Loading in-stock follow-up orders...",
+            ),
+            emptyText: select(
+              "لا توجد طلبات مخزون متاح بدون إجراء حاليًا.",
+              "There are no in-stock follow-up orders right now.",
+            ),
+            legendText: select(
+              "الأحمر = حالة حرجة، الأزرق = المخزون متاح لكن لا يوجد إجراء.",
+              "Red = critical, blue = in stock with no action.",
+            ),
+            totalCardTitle: select(
+              "إجمالي طلبات المخزون المتاح",
+              "Total In-Stock Follow-Up",
+            ),
+            activeCardTitle: select(
+              "بانتظار إجراء",
+              "Awaiting Action",
+            ),
+            activeCardTone: "blue",
+            activeCardIcon: Clock3,
+          }
+        : {
+            title: select(
+              "الطلبات الخارجة عن المخزون",
+              "Out-of-Stock Orders",
+            ),
+            description: select(
+              "أي طلب لا يغطيه مخزون المخزن بالكامل يبقى في قائمة الطلبات العادية أول 3 أيام، ثم ينتقل هنا تلقائيًا. وبعد 6 أيام يتحول إلى حالة حرجة.",
+              "Orders whose warehouse stock is still not fully covered stay in the main list for 3 days, then move here automatically. After 6 days they become critical.",
+            ),
+            loadingText: select(
+              "جاري تحميل الطلبات الخارجة عن المخزون...",
+              "Loading out-of-stock orders...",
+            ),
+            emptyText: select(
+              "لا توجد طلبات خارجة عن المخزون حاليًا.",
+              "There are no out-of-stock orders right now.",
+            ),
+            legendText: select(
+              "الأحمر = حالة حرجة، الأصفر = عجز مخزون.",
+              "Red = critical, amber = stock shortage.",
+            ),
+            totalCardTitle: select(
+              "إجمالي الطلبات الخارجة عن المخزون",
+              "Total Out-of-Stock Orders",
+            ),
+            activeCardTitle: select(
+              "تحتاج تغطية مخزون",
+              "Needs Stock Coverage",
+            ),
+            activeCardTone: "amber",
+            activeCardIcon: AlertTriangle,
+          },
+    [
+      isInStockFollowUpView,
+      select,
+    ],
+  );
 
   const formatDate = useCallback(
     (value) => {
@@ -323,28 +400,36 @@ export default function MissingOrders() {
     return () => unsubscribe();
   }, [fetchMissingOrders]);
 
+  const scopedOrders = useMemo(
+    () =>
+      orders.filter((order) =>
+        isInStockFollowUpView
+          ? isInStockNoActionOrder(order)
+          : !isInStockNoActionOrder(order),
+      ),
+    [isInStockFollowUpView, orders],
+  );
+
   const filteredOrders = useMemo(
-    () => orders.filter((order) => matchesSearch(order, searchTerm)),
-    [orders, searchTerm],
+    () => scopedOrders.filter((order) => matchesSearch(order, searchTerm)),
+    [scopedOrders, searchTerm],
   );
 
   const summary = useMemo(() => {
     const escalatedCount = filteredOrders.filter(
       (order) => order?.missing_state === "escalated",
     ).length;
-    const stockShortageCount = filteredOrders.filter(
-      (order) => !isInStockNoActionOrder(order),
-    ).length;
-    const noActionCount = filteredOrders.filter((order) =>
-      isInStockNoActionOrder(order),
-    ).length;
 
     return {
       total: filteredOrders.length,
-      missing: filteredOrders.length - escalatedCount,
+      active: filteredOrders.length - escalatedCount,
       escalated: escalatedCount,
-      stockShortage: stockShortageCount,
-      noAction: noActionCount,
+      stockShortage: filteredOrders.filter(
+        (order) => !isInStockNoActionOrder(order),
+      ).length,
+      noAction: filteredOrders.filter((order) =>
+        isInStockNoActionOrder(order),
+      ).length,
     };
   }, [filteredOrders]);
 
@@ -413,6 +498,27 @@ export default function MissingOrders() {
     setCurrentPage((page) => Math.min(Math.max(page, 1), totalPages));
   }, [totalPages]);
 
+  const rangeLabel = useMemo(
+    () =>
+      isInStockFollowUpView
+        ? select(
+            `عرض ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} من ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} طلب مخزون متاح`,
+            `Showing ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} of ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} in-stock follow-up orders`,
+          )
+        : select(
+            `عرض ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} من ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} طلب خارج المخزون`,
+            `Showing ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} of ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} out-of-stock orders`,
+          ),
+    [
+      filteredOrders.length,
+      formatNumber,
+      isInStockFollowUpView,
+      select,
+      visibleRange.end,
+      visibleRange.start,
+    ],
+  );
+
   const tableHeaderAlignClass = isRTL ? "text-right" : "text-left";
   const stickyTableHeaderClass =
     "sticky top-0 z-20 bg-slate-50/95 backdrop-blur supports-[backdrop-filter]:bg-slate-50/85";
@@ -457,6 +563,25 @@ export default function MissingOrders() {
               </button>
             </div>
           </div>
+
+          {isInStockFollowUpView ? (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5 shadow-sm sm:p-6">
+              <div className={isRTL ? "text-right" : "text-left"}>
+                <h2 className="text-2xl font-bold text-sky-950">
+                  {pageConfig.title}
+                </h2>
+                <p className="mt-1 text-sky-900/80">{pageConfig.description}</p>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-sky-900/80">
+                  <span className="rounded-full border border-sky-200 bg-white px-3 py-1">
+                    {rangeLabel}
+                  </span>
+                  <span className="rounded-full border border-sky-200 bg-white px-3 py-1">
+                    {pageConfig.legendText}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {error ? (
             <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">

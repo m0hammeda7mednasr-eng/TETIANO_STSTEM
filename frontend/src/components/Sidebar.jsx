@@ -6,6 +6,7 @@ import {
   BarChart3,
   ChevronDown,
   ClipboardList,
+  Clock3,
   DollarSign,
   FileText,
   Home,
@@ -54,6 +55,12 @@ const buildSharedNav = (t, select) => [
         icon: AlertTriangle,
         label: t("sidebar.missingOrders", "Out-of-Stock Orders"),
         path: "/orders/missing",
+        permission: "can_view_orders",
+      },
+      {
+        icon: Clock3,
+        label: t("sidebar.inStockFollowUp", "In-Stock Follow-Up"),
+        path: "/orders/in-stock-follow-up",
         permission: "can_view_orders",
       },
     ],
@@ -225,7 +232,9 @@ const isPathActive = (pathname, itemPath) => {
     case "/orders":
       return (
         pathname === "/orders" ||
-        (/^\/orders\/[^/]+$/.test(pathname) && pathname !== "/orders/missing")
+        (/^\/orders\/[^/]+$/.test(pathname) &&
+          pathname !== "/orders/missing" &&
+          pathname !== "/orders/in-stock-follow-up")
       );
     case "/products":
       return (

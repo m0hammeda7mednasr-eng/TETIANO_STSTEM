@@ -59,7 +59,26 @@ const isTemporaryConnectionIssue = (error) => {
   return !error?.response || status >= 500 || error?.code === "ECONNABORTED";
 };
 
+const getMissingOrdersRoute = (item) => {
+  const missingReason = String(item?.metadata?.missing_reason || "")
+    .trim()
+    .toLowerCase();
+
+  if (missingReason === "in_stock_without_action") {
+    return "/orders/in-stock-follow-up";
+  }
+
+  return "/orders/missing";
+};
+
 const getNotificationRoute = (item, isAdmin) => {
+  if (
+    item?.type === "order_missing" ||
+    item?.type === "order_missing_escalated"
+  ) {
+    return getMissingOrdersRoute(item);
+  }
+
   const metadataRoute = String(item?.metadata?.route || "").trim();
   if (metadataRoute) {
     return metadataRoute;
@@ -68,12 +87,6 @@ const getNotificationRoute = (item, isAdmin) => {
   const type = String(item?.entity_type || "").toLowerCase();
   const entityId = item?.entity_id;
 
-  if (
-    item?.type === "order_missing" ||
-    item?.type === "order_missing_escalated"
-  ) {
-    return "/orders/missing";
-  }
   if (type === "order" && entityId) return `/orders/${entityId}`;
   if (type === "task") return isAdmin ? "/tasks" : "/my-tasks";
   if (type === "daily_report" || type === "report") {

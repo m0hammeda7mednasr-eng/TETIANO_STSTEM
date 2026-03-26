@@ -52,7 +52,7 @@ const buildSharedNav = (t, select) => [
       },
       {
         icon: AlertTriangle,
-        label: t("sidebar.missingOrders", "Missing Orders"),
+        label: t("sidebar.missingOrders", "Out-of-Stock Orders"),
         path: "/orders/missing",
         permission: "can_view_orders",
       },

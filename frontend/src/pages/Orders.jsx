@@ -1494,8 +1494,8 @@ export default function Orders() {
                   </p>
                   <p className="text-sm text-amber-800">
                     {select(
-                      "هذه الطلبات انتقلت إلى صفحة الطلبات المفقودة لأنها لم تحصل على أي أكشن خلال آخر 3 أيام.",
-                      "These orders moved to the Missing Orders page because they had no real action during the last 3 days.",
+                      "هذه الطلبات انتقلت إلى صفحة الطلبات الخارجة عن المخزون لأن مخزون المخزن لا يغطيها بالكامل بعد مرور 3 أيام.",
+                      "These orders moved to the out-of-stock orders page because warehouse stock still does not fully cover them after 3 days.",
                     )}
                   </p>
                 </div>
@@ -1504,7 +1504,10 @@ export default function Orders() {
                 onClick={() => navigate("/orders/missing")}
                 className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium"
               >
-                {select("فتح الطلبات المفقودة", "Open Missing Orders")}
+                {select(
+                  "فتح الطلبات الخارجة عن المخزون",
+                  "Open Out-of-Stock Orders",
+                )}
               </button>
             </div>
           )}

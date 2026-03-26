@@ -19,8 +19,8 @@ const TYPE_LABELS = {
   access_request: "Access",
   comment: "Comment",
   order: "Order",
-  order_missing: "Order Alert",
-  order_missing_escalated: "Critical Order",
+  order_missing: "Stock-Out Order",
+  order_missing_escalated: "Critical Stock-Out",
   low_stock: "Low Stock",
 };
 

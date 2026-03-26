@@ -55,11 +55,11 @@ const getLocalizedStatusLabel = (status, locale, dictionary) => {
 const getStateBadge = (order, locale) =>
   order?.missing_state === "escalated"
     ? {
-        label: locale === "ar" ? "خطر" : "Critical",
+        label: locale === "ar" ? "حرج" : "Critical",
         className: "border-red-600 bg-red-600 text-white",
       }
     : {
-        label: locale === "ar" ? "مفقود" : "Missing",
+        label: locale === "ar" ? "خارج المخزون" : "Stock-Out",
         className: "border-amber-500 bg-amber-500 text-white",
       };
 
@@ -85,6 +85,39 @@ const matchesSearch = (order, keyword) => {
     String(value || "").toLowerCase().includes(normalized),
   );
 };
+
+const getDaysWithoutStock = (order) =>
+  Number(order?.days_without_stock || order?.days_without_action || 0);
+
+const getShortageStats = (order) => ({
+  shortageQuantity: Number(order?.warehouse_shortage_quantity || 0),
+  requiredQuantity: Number(order?.warehouse_required_quantity || 0),
+  blockedItemsCount: Number(order?.warehouse_shortage_items_count || 0),
+  preview:
+    order?.warehouse_shortage_preview ||
+    order?.warehouse_shortage_lines?.[0]?.display_title ||
+    "",
+});
+
+const formatShortageSummary = (order, select, formatNumber) => {
+  const { shortageQuantity, requiredQuantity, blockedItemsCount } =
+    getShortageStats(order);
+
+  return select(
+    `عجز ${formatNumber(shortageQuantity, { maximumFractionDigits: 0 })} من ${formatNumber(requiredQuantity, { maximumFractionDigits: 0 })} قطعة عبر ${formatNumber(blockedItemsCount, { maximumFractionDigits: 0 })} صنف`,
+    `Short ${formatNumber(shortageQuantity, { maximumFractionDigits: 0 })} of ${formatNumber(requiredQuantity, { maximumFractionDigits: 0 })} units across ${formatNumber(blockedItemsCount, { maximumFractionDigits: 0 })} item(s)`,
+  );
+};
+
+const formatOrderAge = (order, select, formatNumber) =>
+  select(
+    `منذ ${formatNumber(getDaysWithoutStock(order), {
+      maximumFractionDigits: 0,
+    })} يوم`,
+    `${formatNumber(getDaysWithoutStock(order), {
+      maximumFractionDigits: 0,
+    })} days old`,
+  );
 
 function SummaryCard({ title, value, tone, icon: Icon }) {
   const toneClassName = {
@@ -200,7 +233,10 @@ export default function MissingOrders() {
       console.error("Error fetching missing orders:", requestError);
       setError(
         requestError?.response?.data?.error ||
-          select("فشل تحميل الطلبات المفقودة", "Failed to load missing orders"),
+          select(
+            "فشل تحميل الطلبات الخارجة عن المخزون",
+            "Failed to load out-of-stock orders",
+          ),
       );
     } finally {
       setLoading(false);
@@ -318,12 +354,12 @@ export default function MissingOrders() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className={isRTL ? "text-right" : "text-left"}>
                 <h1 className="text-3xl font-bold text-slate-900">
-                  {select("الطلبات المفقودة", "Missing Orders")}
+                  {select("الطلبات الخارجة عن المخزون", "Out-of-Stock Orders")}
                 </h1>
                 <p className="mt-1 text-slate-600">
                   {select(
-                    "أي طلب لم يحصل على أكشن حقيقي لمدة 3 أيام يظهر هنا. وإذا وصل إلى 6 أيام بدون أكشن يتحول إلى حالة حرجة.",
-                    "Any order with no real action for 3 days appears here. If it reaches 6 days without action, it becomes critical.",
+                    "أي طلب لا يغطيه مخزون المخزن بالكامل يبقى في قائمة الطلبات العادية أول 3 أيام، ثم ينتقل هنا تلقائيًا. وإذا تجاوز 6 أيام يتحول إلى حالة حرجة.",
+                    "Any order that is not fully covered by warehouse stock stays in the main orders list for the first 3 days, then moves here automatically. If it passes 6 days, it becomes critical.",
                   )}
                 </p>
                 {lastUpdatedAt ? (
@@ -358,7 +394,10 @@ export default function MissingOrders() {
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <SummaryCard
-              title={select("إجمالي الطلبات المفقودة", "Total Missing Orders")}
+              title={select(
+                "إجمالي الطلبات الخارجة عن المخزون",
+                "Total Out-of-Stock Orders",
+              )}
               value={formatNumber(summary.total, {
                 maximumFractionDigits: 0,
               })}
@@ -366,7 +405,7 @@ export default function MissingOrders() {
               icon={Search}
             />
             <SummaryCard
-              title={select("تحتاج متابعة", "Need Follow-up")}
+              title={select("تحتاج تدخل", "Need Action")}
               value={formatNumber(summary.missing, {
                 maximumFractionDigits: 0,
               })}
@@ -422,15 +461,15 @@ export default function MissingOrders() {
             {loading ? (
               <EmptyState
                 text={select(
-                  "جاري تحميل الطلبات المفقودة...",
-                  "Loading missing orders...",
+                  "جاري تحميل الطلبات الخارجة عن المخزون...",
+                  "Loading out-of-stock orders...",
                 )}
               />
             ) : filteredOrders.length === 0 ? (
               <EmptyState
                 text={select(
-                  "لا توجد طلبات مفقودة حاليًا.",
-                  "There are no missing orders right now.",
+                  "لا توجد طلبات خارجة عن المخزون حاليًا.",
+                  "There are no out-of-stock orders right now.",
                 )}
               />
             ) : (
@@ -438,8 +477,8 @@ export default function MissingOrders() {
                 <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm font-medium text-slate-700">
                     {select(
-                      `عرض ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} من ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} طلب مفقود`,
-                      `Showing ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} of ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} missing orders`,
+                      `عرض ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} من ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} طلب خارج المخزون`,
+                      `Showing ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} of ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} out-of-stock orders`,
                     )}
                   </p>
                   <p className="text-xs text-slate-500">
@@ -474,13 +513,13 @@ export default function MissingOrders() {
                           {select("الحالة", "Status")}
                         </th>
                         <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}>
-                          {select("بدون أكشن", "No Action")}
+                          {select("العجز", "Stock Gap")}
                         </th>
                         <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}>
-                          {select("آخر أكشن", "Last Action")}
+                          {select("عمر الطلب", "Order Age")}
                         </th>
                         <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}>
-                          {select("دخل القائمة", "Entered Queue")}
+                          {select("دخل القائمة", "Moved Here")}
                         </th>
                         <th className={`px-4 py-3 text-sm font-semibold text-slate-700 ${tableHeaderAlignClass} ${stickyTableHeaderClass}`}>
                           {select("الدفع / التسليم", "Payment / Fulfillment")}
@@ -493,6 +532,12 @@ export default function MissingOrders() {
                     <tbody className="divide-y divide-slate-100">
                       {paginatedOrders.map((order) => {
                         const stateBadge = getStateBadge(order, locale);
+                        const shortageSummary = formatShortageSummary(
+                          order,
+                          select,
+                          formatNumber,
+                        );
+                        const shortagePreview = getShortageStats(order).preview;
                         const fulfillmentStatus = getLocalizedStatusLabel(
                           normalizeStatus(order?.fulfillment_status, "unfulfilled"),
                           locale,
@@ -544,15 +589,20 @@ export default function MissingOrders() {
                                 {stateBadge.label}
                               </span>
                             </td>
-                            <td className="px-4 py-4 align-top text-sm font-medium text-slate-700">
-                              {select("منذ", "For")}{" "}
-                              {formatNumber(order.days_without_action || 0, {
-                                maximumFractionDigits: 0,
-                              })}{" "}
-                              {select("يوم", "days")}
-                            </td>
                             <td className="px-4 py-4 align-top text-sm text-slate-700">
-                              {formatDate(order.last_action_at)}
+                              <p className="font-medium text-slate-900">
+                                {shortageSummary}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {shortagePreview ||
+                                  select(
+                                    "يوجد صنف أو أكثر غير متغطى بالكامل.",
+                                    "One or more line items are not fully covered.",
+                                  )}
+                              </p>
+                            </td>
+                            <td className="px-4 py-4 align-top text-sm font-medium text-slate-700">
+                              {formatOrderAge(order, select, formatNumber)}
                             </td>
                             <td className="px-4 py-4 align-top text-sm text-slate-700">
                               {formatDate(order.missing_since)}
@@ -590,6 +640,12 @@ export default function MissingOrders() {
                 <div className="space-y-3 lg:hidden">
                   {paginatedOrders.map((order) => {
                     const stateBadge = getStateBadge(order, locale);
+                    const shortageSummary = formatShortageSummary(
+                      order,
+                      select,
+                      formatNumber,
+                    );
+                    const shortagePreview = getShortageStats(order).preview;
                     const fulfillmentStatus = getLocalizedStatusLabel(
                       normalizeStatus(order?.fulfillment_status, "unfulfilled"),
                       locale,
@@ -624,11 +680,10 @@ export default function MissingOrders() {
                                 {stateBadge.label}
                               </span>
                               <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
-                                {select("بدون أكشن", "No action for")}{" "}
-                                {formatNumber(order.days_without_action || 0, {
-                                  maximumFractionDigits: 0,
-                                })}{" "}
-                                {select("يوم", "days")}
+                                {formatOrderAge(order, select, formatNumber)}
+                              </span>
+                              <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
+                                {shortageSummary}
                               </span>
                             </div>
 
@@ -638,25 +693,30 @@ export default function MissingOrders() {
                                   select("عميل غير معروف", "Unknown customer")}
                               </p>
                               <p>{order.customer_email || "-"}</p>
+                              {shortagePreview ? (
+                                <p className="text-xs text-slate-500">
+                                  {shortagePreview}
+                                </p>
+                              ) : null}
                             </div>
                           </div>
 
                           <div className="grid min-w-0 grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:min-w-[32rem] xl:grid-cols-4">
                             <InfoBox
-                              label={select("آخر أكشن", "Last Action")}
-                              value={formatDate(order.last_action_at)}
+                              label={select("العجز", "Stock Gap")}
+                              value={shortageSummary}
                             />
                             <InfoBox
-                              label={select("دخل القائمة", "Entered Queue")}
+                              label={select("عمر الطلب", "Order Age")}
+                              value={formatOrderAge(order, select, formatNumber)}
+                            />
+                            <InfoBox
+                              label={select("دخل القائمة", "Moved Here")}
                               value={formatDate(order.missing_since)}
                             />
                             <InfoBox
-                              label={select("الحالة المالية", "Payment Status")}
-                              value={paymentStatus}
-                            />
-                            <InfoBox
-                              label={select("حالة التسليم", "Fulfillment")}
-                              value={fulfillmentStatus}
+                              label={select("الدفع / التسليم", "Payment / Fulfillment")}
+                              value={`${paymentStatus} / ${fulfillmentStatus}`}
                             />
                           </div>
                         </div>

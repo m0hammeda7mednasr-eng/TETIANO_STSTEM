@@ -28,6 +28,11 @@ import { extractCustomerPhone } from "../helpers/customerContact.js";
 import { buildProductsSummaryExportPayload } from "../helpers/orderExport.js";
 import { hasActiveOrderScopeFilters } from "../helpers/orderScope.js";
 import { buildProductSourcingDetail } from "../helpers/suppliers.js";
+import {
+  DAY_MS,
+  buildMissingOrdersFromStock,
+} from "../helpers/missingOrders.js";
+import { loadWarehouseAvailabilityByStoreIds } from "../services/warehouseAvailabilityService.js";
 
 const router = express.Router();
 
@@ -40,17 +45,7 @@ const MAX_LIST_LIMIT = 200;
 const ORDER_LIST_PAGE_LIMIT = 4500;
 const ORDER_LIST_MAX_VISIBLE = 4500;
 const ORDER_SEARCH_SHOPIFY_FALLBACK_LIMIT = 10;
-const DAY_MS = 24 * 60 * 60 * 1000;
-const MISSING_ORDER_GRACE_MS = 3 * DAY_MS;
-const MISSING_ORDER_ESCALATION_MS = 6 * DAY_MS;
 const MISSING_ORDER_NOTIFICATION_WINDOW_MS = DAY_MS;
-const MISSING_ORDER_ACTION_TYPES = new Set([
-  "order_note_add",
-  "order_status_update",
-  "update_fulfillment_status",
-  "order_payment_method_update",
-  "order_contact_update",
-]);
 const MISSING_ORDER_NOTIFICATION_TYPES = new Set([
   "order_missing",
   "order_missing_escalated",
@@ -2164,137 +2159,6 @@ const parseTimestampValue = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const chunkValues = (values, size = 100) => {
-  const items = Array.isArray(values) ? values.filter(Boolean) : [];
-  if (items.length === 0) {
-    return [];
-  }
-
-  const chunks = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
-};
-
-const getLatestLegacyNoteTimestamp = (order) => {
-  const notes = parseJsonField(order?.notes);
-  if (!Array.isArray(notes)) {
-    return 0;
-  }
-
-  return notes.reduce((maxValue, note) => {
-    const candidate = parseTimestampValue(note?.created_at);
-    return candidate > maxValue ? candidate : maxValue;
-  }, 0);
-};
-
-const getLatestOrderActionMap = async (orderIds = []) => {
-  const latestActionMap = new Map();
-  const uniqueOrderIds = Array.from(
-    new Set(
-      (orderIds || [])
-        .map((value) => String(value || "").trim())
-        .filter(Boolean),
-    ),
-  );
-
-  for (const chunk of chunkValues(uniqueOrderIds, 100)) {
-    const { data, error } = await db
-      .from("sync_operations")
-      .select("entity_id, created_at, operation_type")
-      .eq("entity_type", "order")
-      .in("entity_id", chunk)
-      .in("operation_type", Array.from(MISSING_ORDER_ACTION_TYPES))
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      if (isSchemaCompatibilityError(error)) {
-        return latestActionMap;
-      }
-      throw error;
-    }
-
-    for (const operation of data || []) {
-      const entityId = String(operation?.entity_id || "").trim();
-      if (!entityId || latestActionMap.has(entityId)) {
-        continue;
-      }
-      latestActionMap.set(entityId, operation.created_at || null);
-    }
-  }
-
-  return latestActionMap;
-};
-
-const isOrderOperationallyHandled = (order) => {
-  const financialStatus = getOrderFinancialStatus(order);
-  const fulfillmentStatus = String(
-    order?.fulfillment_status ||
-      parseJsonField(order?.data)?.fulfillment_status ||
-      "",
-  )
-    .toLowerCase()
-    .trim();
-
-  return (
-    isCancelledOrder(order) ||
-    fulfillmentStatus === "fulfilled" ||
-    financialStatus === "refunded" ||
-    financialStatus === "voided" ||
-    financialStatus === "cancelled"
-  );
-};
-
-const buildMissingOrderRecord = (
-  order,
-  latestActionMap,
-  nowTimestamp = Date.now(),
-) => {
-  if (!order || isOrderOperationallyHandled(order)) {
-    return null;
-  }
-
-  const orderId = String(order.id || "").trim();
-  if (!orderId) {
-    return null;
-  }
-
-  const lastActionTimestamp = Math.max(
-    parseTimestampValue(order.created_at),
-    parseTimestampValue(order.local_updated_at),
-    getLatestLegacyNoteTimestamp(order),
-    parseTimestampValue(latestActionMap.get(orderId)),
-  );
-
-  if (!lastActionTimestamp) {
-    return null;
-  }
-
-  const elapsedMs = nowTimestamp - lastActionTimestamp;
-  if (elapsedMs < MISSING_ORDER_GRACE_MS) {
-    return null;
-  }
-
-  const isEscalated = elapsedMs >= MISSING_ORDER_ESCALATION_MS;
-  const missingSince = new Date(
-    lastActionTimestamp + MISSING_ORDER_GRACE_MS,
-  ).toISOString();
-  const escalatedSince = isEscalated
-    ? new Date(lastActionTimestamp + MISSING_ORDER_ESCALATION_MS).toISOString()
-    : null;
-
-  return {
-    ...buildOrderListItem(order),
-    last_action_at: new Date(lastActionTimestamp).toISOString(),
-    missing_since: missingSince,
-    escalated_since: escalatedSince,
-    missing_state: isEscalated ? "escalated" : "missing",
-    days_without_action: Math.max(3, Math.floor(elapsedMs / DAY_MS)),
-    requires_attention: true,
-  };
-};
-
 const buildCustomerListItem = (
   customer,
   { includeData = false, includeDetails = false } = {},
@@ -2427,37 +2291,22 @@ const enrichCustomersWithOrderPhones = async (req, customers = []) => {
   }
 };
 
-const sortMissingOrders = (orders = []) =>
-  [...(orders || [])].sort((left, right) => {
-    const leftRank = left?.missing_state === "escalated" ? 0 : 1;
-    const rightRank = right?.missing_state === "escalated" ? 0 : 1;
-    if (leftRank !== rightRank) {
-      return leftRank - rightRank;
-    }
-
-    const dayGap =
-      toNumber(right?.days_without_action) -
-      toNumber(left?.days_without_action);
-    if (dayGap !== 0) {
-      return dayGap;
-    }
-
-    return (
-      parseTimestampValue(left?.created_at) -
-      parseTimestampValue(right?.created_at)
-    );
-  });
-
 const getMissingOrdersForRows = async (rows = []) => {
   const rawRows = Array.isArray(rows) ? rows : [];
-  const latestActionMap = await getLatestOrderActionMap(
-    rawRows.map((order) => order?.id),
+  const storeIds = Array.from(
+    new Set(
+      rawRows
+        .map((order) => String(order?.store_id || "").trim())
+        .filter(Boolean),
+    ),
   );
-  return sortMissingOrders(
-    rawRows
-      .map((order) => buildMissingOrderRecord(order, latestActionMap))
-      .filter(Boolean),
-  );
+
+  const warehouseRowsByStoreId = await loadWarehouseAvailabilityByStoreIds(storeIds);
+  return buildMissingOrdersFromStock({
+    orders: rawRows,
+    warehouseRowsByStoreId,
+    buildOrderListItem,
+  });
 };
 
 const getMissingOrdersForRequest = async (req) => {
@@ -2539,25 +2388,27 @@ const shouldNotifyForMissingStage = (order, nowTimestamp = Date.now()) => {
   );
 };
 
-const buildMissingOrderNotificationDraft = (order, userId) => {
+const buildWarehouseMissingOrderNotificationDraft = (order, userId) => {
   const isEscalated = order?.missing_state === "escalated";
   const notificationType = isEscalated
     ? "order_missing_escalated"
     : "order_missing";
   const orderLabel =
     order?.order_number || order?.shopify_id || order?.id || "Unknown";
-  const title = isEscalated
-    ? `طلب #${orderLabel} متأخر بشكل خطير`
-    : `طلب #${orderLabel} دخل الطلبات المفقودة`;
-  const message = isEscalated
-    ? `لا يوجد أي أكشن على الطلب منذ ${order?.days_without_action || 6} أيام.`
-    : `لم يتم اتخاذ أي أكشن على الطلب منذ ${order?.days_without_action || 3} أيام وتم نقله إلى صفحة الطلبات المفقودة.`;
+  const daysWithoutStock =
+    order?.days_without_stock || order?.days_without_action || 0;
+  const shortageQuantity = toNumber(order?.warehouse_shortage_quantity);
+  const shortageItemsCount = toNumber(order?.warehouse_shortage_items_count);
 
   return {
     user_id: userId,
     type: notificationType,
-    title,
-    message,
+    title: isEscalated
+      ? `طلب #${orderLabel} خارج المخزون بشكل حرج`
+      : `طلب #${orderLabel} دخل قائمة الطلبات الخارجة عن المخزون`,
+    message: isEscalated
+      ? `الطلب غير متغطى من مخزون المخزن منذ ${daysWithoutStock || 6} أيام، والعجز الحالي ${shortageQuantity} قطعة عبر ${shortageItemsCount || 1} صنف.`
+      : `الطلب غير متغطى بالكامل من مخزون المخزن منذ ${daysWithoutStock || 3} أيام وتم نقله إلى صفحة الطلبات الخارجة عن المخزون.`,
     entity_type: "order",
     entity_id: order?.id || null,
     metadata: {
@@ -2565,7 +2416,10 @@ const buildMissingOrderNotificationDraft = (order, userId) => {
       order_id: order?.id || null,
       order_number: order?.order_number || null,
       missing_state: order?.missing_state || "missing",
-      days_without_action: order?.days_without_action || 0,
+      days_without_stock: daysWithoutStock,
+      days_without_action: daysWithoutStock,
+      warehouse_shortage_quantity: shortageQuantity,
+      warehouse_shortage_items_count: shortageItemsCount,
     },
   };
 };
@@ -2612,7 +2466,7 @@ const ensureMissingOrderNotifications = async (missingOrders = []) => {
   const drafts = [];
   for (const order of recentOrders) {
     for (const userId of recipientIds) {
-      const draft = buildMissingOrderNotificationDraft(order, userId);
+      const draft = buildWarehouseMissingOrderNotificationDraft(order, userId);
       const key = `${draft.user_id}::${draft.entity_id}::${draft.type}`;
       if (existingKeys.has(key)) {
         continue;

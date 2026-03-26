@@ -63,6 +63,8 @@ const getStateBadge = (order, locale) =>
         className: "border-amber-500 bg-amber-500 text-white",
       };
 
+void getStateBadge;
+
 const getCardClassName = (order) =>
   order?.missing_state === "escalated"
     ? "border-red-200 bg-red-50"

@@ -984,6 +984,7 @@ router.get("/status", async (req, res) => {
       });
     }
 
+    // Test schema availability by trying to access meta_integrations table
     const integration = await loadIntegration(storeId);
 
     return res.json({
@@ -998,6 +999,15 @@ router.get("/status", async (req, res) => {
         store_id: storeId,
         integration: null,
         ...META_SCHEMA_ERROR,
+      });
+    }
+
+    console.error("Meta analytics status error:", error);
+    return res.status(500).json({
+      error: "Failed to check Meta analytics status",
+    });
+  }
+});
       });
     }
 

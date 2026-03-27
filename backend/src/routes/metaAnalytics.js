@@ -270,22 +270,31 @@ const loadIntegration = async (storeId) => {
   return data || null;
 };
 
-const saveIntegration = async ({ storeId, userId, updates }) => {
-  const { data, error } = await supabase
-    .from("meta_integrations")
-    .upsert(
-      {
+const saveIntegration = async ({
+  storeId,
+  userId,
+  updates,
+  existingIntegration = undefined,
+}) => {
+  const currentIntegration =
+    existingIntegration === undefined
+      ? await loadIntegration(storeId)
+      : existingIntegration;
+  const query = currentIntegration?.id
+    ? supabase
+        .from("meta_integrations")
+        .update({
+          updated_by: userId,
+          ...updates,
+        })
+        .eq("id", currentIntegration.id)
+    : supabase.from("meta_integrations").insert({
         store_id: storeId,
-        updated_by: userId,
         created_by: userId,
+        updated_by: userId,
         ...updates,
-      },
-      {
-        onConflict: "store_id",
-      },
-    )
-    .select()
-    .single();
+      });
+  const { data, error } = await query.select().single();
 
   if (error) {
     throw error;
@@ -1008,16 +1017,6 @@ router.get("/status", async (req, res) => {
     });
   }
 });
-      });
-    }
-
-    return handleSchemaAwareError(
-      res,
-      error,
-      "Failed to load Meta & Analytics status",
-    );
-  }
-});
 
 router.put("/config/meta", async (req, res) => {
   try {
@@ -1036,6 +1035,7 @@ router.put("/config/meta", async (req, res) => {
     const nextIntegration = await saveIntegration({
       storeId,
       userId: req.user.id,
+      existingIntegration,
       updates: {
         meta_access_token: nextAccessToken,
         meta_business_id: normalizeText(req.body?.business_id),
@@ -1092,6 +1092,7 @@ router.put("/config/openrouter", async (req, res) => {
     const nextIntegration = await saveIntegration({
       storeId,
       userId: req.user.id,
+      existingIntegration,
       updates: {
         openrouter_api_key: nextApiKey,
         openrouter_model:
@@ -1149,6 +1150,7 @@ router.get("/models", async (req, res) => {
       await saveIntegration({
         storeId,
         userId: req.user.id,
+        existingIntegration: integration,
         updates: {
           is_openrouter_connected: true,
         },

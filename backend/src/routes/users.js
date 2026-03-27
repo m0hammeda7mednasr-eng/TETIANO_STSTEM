@@ -22,6 +22,88 @@ const MAX_USERS_LIST_LIMIT = 200;
 const FAST_AUTH_QUERY_RETRY_OPTIONS = {
   attempts: 1,
 };
+const unsupportedPermissionColumns = new Set();
+
+const buildPermissionsPayload = (input = {}, { includeUpdatedAt = false } = {}) => {
+  const normalized = normalizePermissions(input);
+  const payload = {};
+
+  for (const key of PERMISSION_KEYS) {
+    if (!unsupportedPermissionColumns.has(key)) {
+      payload[key] = normalized[key];
+    }
+  }
+
+  if (includeUpdatedAt && !unsupportedPermissionColumns.has("updated_at")) {
+    payload.updated_at = new Date().toISOString();
+  }
+
+  return payload;
+};
+
+const extractMissingColumnName = (error) => {
+  const text = String(
+    error?.message || error?.details || error?.hint || error?.error_description || "",
+  );
+
+  const patterns = [
+    /Could not find the '([^']+)' column/i,
+    /column "([^"]+)" of relation/i,
+    /column "([^"]+)" does not exist/i,
+    /schema cache.*column[^']*'([^']+)'/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return "";
+};
+
+const executePermissionsMutation = async ({
+  userId,
+  payload = {},
+  operation = "update",
+}) => {
+  let nextPayload = { ...payload };
+
+  while (true) {
+    if (operation === "update" && Object.keys(nextPayload).length === 0) {
+      return { data: null, error: null, skipped: true };
+    }
+
+    const query =
+      operation === "insert"
+        ? supabase.from("permissions").insert([
+            {
+              user_id: userId,
+              ...nextPayload,
+            },
+          ])
+        : supabase.from("permissions").update(nextPayload).eq("user_id", userId);
+
+    const { data, error } = await query;
+
+    if (!error) {
+      return { data, error: null, skipped: false };
+    }
+
+    const missingColumn = extractMissingColumnName(error);
+    if (
+      missingColumn &&
+      Object.prototype.hasOwnProperty.call(nextPayload, missingColumn)
+    ) {
+      unsupportedPermissionColumns.add(missingColumn);
+      delete nextPayload[missingColumn];
+      continue;
+    }
+
+    throw error;
+  }
+};
 
 const parseListLimit = (value) => {
   const parsed = parseInt(value, 10);
@@ -300,12 +382,12 @@ router.post(
       if (userError) throw userError;
 
       // Create permissions
-      const { error: permError } = await supabase.from("permissions").insert([
-        {
-          user_id: newUser.id,
-          ...permissions,
-        },
-      ]);
+      const normalizedPermissions = buildPermissionsPayload(permissions);
+      const { error: permError } = await executePermissionsMutation({
+        userId: newUser.id,
+        payload: normalizedPermissions,
+        operation: "insert",
+      });
 
       if (permError) throw permError;
 
@@ -347,32 +429,36 @@ router.put(
 
       // Update permissions
       if (permissions) {
+        const normalizedPermissions = buildPermissionsPayload(permissions, {
+          includeUpdatedAt: true,
+        });
         // Check if permissions exist
-        const { data: existing } = await supabase
+        const { data: existing, error: existingError } = await supabase
           .from("permissions")
           .select("id")
           .eq("user_id", userId)
-          .single();
+          .maybeSingle();
+
+        if (existingError && existingError.code !== "PGRST116") {
+          throw existingError;
+        }
 
         if (existing) {
           // Update existing permissions
-          const { error } = await supabase
-            .from("permissions")
-            .update({
-              ...permissions,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("user_id", userId);
+          const { error } = await executePermissionsMutation({
+            userId,
+            payload: normalizedPermissions,
+            operation: "update",
+          });
 
           if (error) throw error;
         } else {
           // Create new permissions if they don't exist
-          const { error } = await supabase.from("permissions").insert([
-            {
-              user_id: userId,
-              ...permissions,
-            },
-          ]);
+          const { error } = await executePermissionsMutation({
+            userId,
+            payload: normalizedPermissions,
+            operation: "insert",
+          });
 
           if (error) throw error;
         }

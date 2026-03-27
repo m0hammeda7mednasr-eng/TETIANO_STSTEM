@@ -2480,6 +2480,22 @@ export const buildAssistantContextSnapshot = ({
     decisionBoard,
   });
   const useFocusedScope = focusedContext.scope === "targeted";
+  const topCampaigns = buildAssistantCampaignRows(
+    useFocusedScope ? focusedContext.matchedCampaigns : metaOverview?.campaigns,
+    useFocusedScope ? 4 : 6,
+  );
+  const topAds = buildAssistantCreativeRows(
+    useFocusedScope ? focusedContext.matchedCreatives : metaOverview?.ads,
+    useFocusedScope ? 4 : 6,
+  );
+  const focusedCampaigns = buildAssistantCampaignRows(
+    focusedContext.matchedCampaigns,
+    4,
+  );
+  const focusedCreatives = buildAssistantCreativeRows(
+    focusedContext.matchedCreatives,
+    4,
+  );
 
   return {
     context_scope: focusedContext.scope,
@@ -2487,38 +2503,34 @@ export const buildAssistantContextSnapshot = ({
       financial: storeSnapshot?.financial || {},
       orders: storeSnapshot?.orders || {},
       catalog: storeSnapshot?.catalog || {},
-      top_products: normalizeArray(storeSnapshot?.top_products).slice(0, 4),
+      top_products: normalizeArray(storeSnapshot?.top_products).slice(0, 5),
       low_stock_products: normalizeArray(storeSnapshot?.low_stock_products).slice(
         0,
-        4,
+        5,
       ),
     },
     meta_summary: metaOverview?.summary || {},
     decision_summary: decisionBoard?.summary || {},
     roas_framework: decisionBoard?.roas_framework || {},
-    focused_campaigns: buildAssistantCampaignRows(
-      focusedContext.matchedCampaigns,
-      4,
-    ),
-    focused_creatives: buildAssistantCreativeRows(
-      focusedContext.matchedCreatives,
-      4,
-    ),
+    top_campaigns: topCampaigns,
+    top_ads: topAds,
+    focused_campaigns: focusedCampaigns,
+    focused_creatives: focusedCreatives,
     decisions: buildAssistantCampaignRows(
       useFocusedScope ? [] : decisionBoard?.campaigns,
-      4,
+      useFocusedScope ? 0 : 6,
     ),
     creative_diagnostics: buildAssistantCreativeRows(
       useFocusedScope ? [] : decisionBoard?.creative_diagnostics,
-      4,
+      useFocusedScope ? 0 : 5,
     ),
     recommendations: normalizeArray(recommendations).slice(
       0,
-      useFocusedScope ? 3 : 4,
+      useFocusedScope ? 3 : 6,
     ),
     assistant_questions: normalizeArray(assistantQuestions).slice(
       0,
-      useFocusedScope ? 0 : 4,
+      useFocusedScope ? 0 : 6,
     ),
     meta_playbook_notes: useFocusedScope
       ? []

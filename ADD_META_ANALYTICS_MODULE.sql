@@ -122,18 +122,24 @@ create table if not exists public.meta_ai_analyses (
 
 create unique index if not exists idx_meta_integrations_store_unique
   on public.meta_integrations(store_id);
+create unique index if not exists idx_meta_integrations_id_store_unique
+  on public.meta_integrations(id, store_id);
 create index if not exists idx_meta_sync_runs_store_id
   on public.meta_sync_runs(store_id);
 create index if not exists idx_meta_sync_runs_integration_id
   on public.meta_sync_runs(integration_id);
 create index if not exists idx_meta_sync_runs_started_at
   on public.meta_sync_runs(started_at desc);
+create index if not exists idx_meta_sync_runs_store_started_at
+  on public.meta_sync_runs(store_id, started_at desc);
 create index if not exists idx_meta_insight_snapshots_store_id
   on public.meta_insight_snapshots(store_id);
 create index if not exists idx_meta_insight_snapshots_integration_id
   on public.meta_insight_snapshots(integration_id);
 create index if not exists idx_meta_insight_snapshots_date_start
   on public.meta_insight_snapshots(date_start desc);
+create index if not exists idx_meta_insight_snapshots_store_date_start
+  on public.meta_insight_snapshots(store_id, date_start desc);
 create index if not exists idx_meta_insight_snapshots_campaign_id
   on public.meta_insight_snapshots(campaign_id);
 create index if not exists idx_meta_insight_snapshots_ad_id
@@ -160,6 +166,8 @@ create index if not exists idx_meta_entities_adset_id
   on public.meta_entities(adset_id);
 create index if not exists idx_meta_entities_updated_time
   on public.meta_entities(updated_time desc);
+create index if not exists idx_meta_entities_store_active_updated_time
+  on public.meta_entities(store_id, is_active desc, updated_time desc);
 create unique index if not exists idx_meta_entities_unique
   on public.meta_entities(integration_id, object_type, object_id);
 create index if not exists idx_meta_ai_analyses_store_id
@@ -168,6 +176,8 @@ create index if not exists idx_meta_ai_analyses_integration_id
   on public.meta_ai_analyses(integration_id);
 create index if not exists idx_meta_ai_analyses_created_at
   on public.meta_ai_analyses(created_at desc);
+create index if not exists idx_meta_ai_analyses_store_created_at
+  on public.meta_ai_analyses(store_id, created_at desc);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -185,6 +195,80 @@ before update on public.meta_integrations
 for each row
 execute function public.set_updated_at();
 
+do $$
+begin
+  if to_regclass('public.stores') is not null
+    and not exists (
+      select 1
+      from pg_constraint
+      where conname = 'meta_integrations_store_id_fkey'
+    ) then
+    alter table public.meta_integrations
+      add constraint meta_integrations_store_id_fkey
+      foreign key (store_id)
+      references public.stores(id)
+      on delete cascade
+      not valid;
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'meta_sync_runs_integration_store_fkey'
+  ) then
+    alter table public.meta_sync_runs
+      add constraint meta_sync_runs_integration_store_fkey
+      foreign key (integration_id, store_id)
+      references public.meta_integrations(id, store_id)
+      on delete cascade
+      not valid;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'meta_insight_snapshots_integration_store_fkey'
+  ) then
+    alter table public.meta_insight_snapshots
+      add constraint meta_insight_snapshots_integration_store_fkey
+      foreign key (integration_id, store_id)
+      references public.meta_integrations(id, store_id)
+      on delete cascade
+      not valid;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'meta_entities_integration_store_fkey'
+  ) then
+    alter table public.meta_entities
+      add constraint meta_entities_integration_store_fkey
+      foreign key (integration_id, store_id)
+      references public.meta_integrations(id, store_id)
+      on delete cascade
+      not valid;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'meta_ai_analyses_integration_store_fkey'
+  ) then
+    alter table public.meta_ai_analyses
+      add constraint meta_ai_analyses_integration_store_fkey
+      foreign key (integration_id, store_id)
+      references public.meta_integrations(id, store_id)
+      on delete cascade
+      not valid;
+  end if;
+end;
+$$;
+
 alter table public.meta_integrations enable row level security;
 alter table public.meta_sync_runs enable row level security;
 alter table public.meta_insight_snapshots enable row level security;
@@ -195,33 +279,33 @@ drop policy if exists meta_integrations_service_access on public.meta_integratio
 create policy meta_integrations_service_access
 on public.meta_integrations
 for all
-using (auth.role() in ('service_role', 'authenticated'))
-with check (auth.role() in ('service_role', 'authenticated'));
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
 
 drop policy if exists meta_sync_runs_service_access on public.meta_sync_runs;
 create policy meta_sync_runs_service_access
 on public.meta_sync_runs
 for all
-using (auth.role() in ('service_role', 'authenticated'))
-with check (auth.role() in ('service_role', 'authenticated'));
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
 
 drop policy if exists meta_insight_snapshots_service_access on public.meta_insight_snapshots;
 create policy meta_insight_snapshots_service_access
 on public.meta_insight_snapshots
 for all
-using (auth.role() in ('service_role', 'authenticated'))
-with check (auth.role() in ('service_role', 'authenticated'));
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
 
 drop policy if exists meta_entities_service_access on public.meta_entities;
 create policy meta_entities_service_access
 on public.meta_entities
 for all
-using (auth.role() in ('service_role', 'authenticated'))
-with check (auth.role() in ('service_role', 'authenticated'));
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
 
 drop policy if exists meta_ai_analyses_service_access on public.meta_ai_analyses;
 create policy meta_ai_analyses_service_access
 on public.meta_ai_analyses
 for all
-using (auth.role() in ('service_role', 'authenticated'))
-with check (auth.role() in ('service_role', 'authenticated'));
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');

@@ -33,10 +33,6 @@ const GROWTH_CENTER_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const DEFAULT_LOOKBACK_DAYS = 30;
 
 const toArray = (value) => (Array.isArray(value) ? value : []);
-const toNumber = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
 
 const STATUS_STYLES = {
   good: "border-emerald-200 bg-emerald-50 text-emerald-700",

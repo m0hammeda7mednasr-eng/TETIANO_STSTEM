@@ -234,6 +234,26 @@ export default function NetProfit() {
     return nextMap;
   }, [operationalCosts]);
 
+  const trackedEntriesCount = useMemo(
+    () =>
+      operationalCosts.reduce(
+        (count, cost) =>
+          cost?.product_id && cost.is_active !== false ? count + 1 : count,
+        0,
+      ),
+    [operationalCosts],
+  );
+
+  const missingSavedCostCount = useMemo(
+    () =>
+      products.reduce(
+        (count, product) =>
+          hasCostPrice(product?.cost_price) ? count : count + 1,
+        0,
+      ),
+    [products],
+  );
+
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === selectedProductId) || null,
     [products, selectedProductId],
@@ -539,16 +559,43 @@ export default function NetProfit() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex h-screen bg-[linear-gradient(180deg,_#f8fafc_0%,_#eef4ff_42%,_#f8fafc_100%)]">
       <Sidebar />
       <main className="flex-1 overflow-auto">
-        <div className="p-8 space-y-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">Net Profit</h1>
-            <p className="text-gray-600 mt-1">
-              Sales revenue stays raw. Gross profit removes saved product costs,
-              and net profit removes both saved product costs and tracked extras.
-            </p>
+        <div className="p-6 md:p-8 space-y-6">
+          <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-[linear-gradient(135deg,_rgba(255,255,255,0.98)_0%,_rgba(239,246,255,0.96)_52%,_rgba(248,250,252,0.98)_100%)] p-6 shadow-sm shadow-slate-200/70">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+              <div className="max-w-3xl">
+                <div className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-700">
+                  Profitability workspace
+                </div>
+                <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-950 md:text-4xl">
+                  Net Profit
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 md:text-[15px]">
+                  Review revenue, saved unit costs, and tracked extras in one
+                  calmer view. The layout below keeps product economics readable
+                  without forcing a giant spreadsheet across the page.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
+                <OverviewPill
+                  label="Visible Products"
+                  value={formatCount(filteredProducts.length)}
+                  tone="sky"
+                />
+                <OverviewPill
+                  label="Tracked Entries"
+                  value={formatCount(trackedEntriesCount)}
+                  tone="emerald"
+                />
+                <OverviewPill
+                  label="Missing Saved Cost"
+                  value={formatCount(missingSavedCostCount)}
+                  tone={missingSavedCostCount > 0 ? "amber" : "slate"}
+                />
+              </div>
+            </div>
           </div>
 
           {message.text && (
@@ -563,44 +610,51 @@ export default function NetProfit() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-7">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-12">
             <SummaryCard
+              className="xl:col-span-4"
               label="Sales Revenue"
               value={formatAmount(summary.total_revenue)}
               icon={DollarSign}
               color="bg-sky-100 text-sky-700"
             />
             <SummaryCard
+              className="xl:col-span-4"
               label="Saved Product Costs"
               value={formatAmount(summary.total_cost)}
               icon={Package}
               color="bg-amber-100 text-amber-700"
             />
             <SummaryCard
+              className="xl:col-span-4"
               label="Gross Profit"
               value={formatAmount(summary.total_gross_profit)}
               icon={TrendingUp}
               color="bg-teal-100 text-teal-700"
             />
             <SummaryCard
+              className="xl:col-span-3"
               label="Tracked Extra Costs"
               value={formatAmount(summary.total_operational_costs)}
               icon={TrendingUp}
               color="bg-orange-100 text-orange-700"
             />
             <SummaryCard
+              className="xl:col-span-3"
               label="Total Net Profit"
               value={formatAmount(summary.total_net_profit)}
               icon={TrendingUp}
               color="bg-emerald-100 text-emerald-700"
             />
             <SummaryCard
+              className="xl:col-span-3"
               label="Sold Units"
               value={formatCount(summary.total_sold_units)}
               icon={Package}
               color="bg-indigo-100 text-indigo-700"
             />
             <SummaryCard
+              className="xl:col-span-3"
               label="Profit Margin"
               value={formatPercent(summary.profit_margin)}
               icon={TrendingUp}
@@ -609,41 +663,51 @@ export default function NetProfit() {
           </div>
 
           <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex flex-1 items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <Search className="text-slate-500" size={18} />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search by product name or ID..."
-                  className="w-full border-0 bg-transparent px-0 py-0 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:ring-0"
-                />
-              </div>
-              <div className="flex flex-col gap-2 xl:items-end">
-                <button
-                  onClick={exportNetProfitView}
-                  className="inline-flex items-center gap-2 self-start rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-950 xl:self-end"
-                >
-                  <Download size={16} />
-                  Export CSV
-                </button>
-                <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                  Costs stay attached to each product. Use Manage to edit saved
-                  unit costs and track any extra ads, shipping, workshop, or
-                  packaging expenses.
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-1 items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <Search className="text-slate-500" size={18} />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search by product name, product ID, or Shopify ID..."
+                    className="w-full border-0 bg-transparent px-0 py-0 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:ring-0"
+                  />
                 </div>
-                <div className="text-xs font-medium text-slate-500">
-                  Showing {formatCount(filteredProducts.length)} of{" "}
-                  {formatCount(products.length)} products
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-600">
+                    Showing {formatCount(filteredProducts.length)} of{" "}
+                    {formatCount(products.length)} products
+                  </div>
+                  <button
+                    onClick={exportNetProfitView}
+                    className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-900"
+                  >
+                    <Download size={16} />
+                    Export CSV
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-3 xl:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded-2xl border border-sky-100 bg-[linear-gradient(135deg,_#f0f9ff_0%,_#eff6ff_100%)] px-4 py-4 text-sm leading-6 text-sky-950">
+                  Costs stay attached to each product. Use Manage to edit saved
+                  unit costs, then track any extra ads, shipping, workshop, or
+                  packaging expenses without losing the clean revenue picture.
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                  The view is tuned to reduce crowding, keep the economics
+                  block readable, and make actions easier to reach without
+                  staring at a giant spreadsheet wall.
                 </div>
               </div>
             </div>
           </div>
 
           <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
-            <div className="overflow-x-auto" dir="ltr">
-              <table className="data-table table-fixed w-full min-w-[2060px]">
+            <div className="overflow-x-auto pb-2" dir="ltr">
+              <table className="data-table table-fixed w-full min-w-[1880px]">
                 <colgroup>
                   <col className="w-[340px]" />
                   <col className="w-[110px]" />
@@ -651,7 +715,7 @@ export default function NetProfit() {
                   <col className="w-[160px]" />
                   <col className="w-[170px]" />
                   <col className="w-[170px]" />
-                  <col className="w-[620px]" />
+                  <col className="w-[500px]" />
                   <col className="w-[170px]" />
                   <col className="w-[180px]" />
                   <col className="w-[140px]" />
@@ -697,6 +761,11 @@ export default function NetProfit() {
                 <tbody className="divide-y divide-slate-200 bg-white">
                   {filteredProducts.map((product) => {
                     const opCosts = getProductCosts(product.id);
+                    const previewTrackedCosts = opCosts.slice(0, 2);
+                    const remainingTrackedCosts = Math.max(
+                      opCosts.length - previewTrackedCosts.length,
+                      0,
+                    );
                     const breakdown = buildProductCostBreakdown(
                       product,
                       opCosts,
@@ -754,16 +823,16 @@ export default function NetProfit() {
                               <img
                                 src={product.image_url}
                                 alt={product.title}
-                                className="h-16 w-16 flex-none rounded-2xl border border-slate-200 object-cover shadow-sm shadow-slate-200/60"
+                                className="h-[72px] w-[72px] flex-none rounded-[22px] border border-slate-200 object-cover shadow-sm shadow-slate-200/60"
                               />
                             ) : (
-                              <div className="flex h-16 w-16 flex-none items-center justify-center rounded-2xl border border-slate-200 bg-slate-100">
+                              <div className="flex h-[72px] w-[72px] flex-none items-center justify-center rounded-[22px] border border-slate-200 bg-slate-100">
                                 <Package size={22} className="text-slate-400" />
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
                               <p
-                                className="break-words text-sm font-semibold leading-6 text-slate-900"
+                                className="break-words text-[15px] font-semibold leading-7 tracking-tight text-slate-900"
                                 dir="auto"
                               >
                                 {product.title}
@@ -884,14 +953,21 @@ export default function NetProfit() {
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                                   Tracked Entries
                                 </p>
-                                <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-                                  {formatCount(opCosts.length)}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  {remainingTrackedCosts > 0 ? (
+                                    <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+                                      +{formatCount(remainingTrackedCosts)} more
+                                    </span>
+                                  ) : null}
+                                  <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                                    {formatCount(opCosts.length)}
+                                  </span>
+                                </div>
                               </div>
 
                               {opCosts.length > 0 ? (
-                                <div className="max-h-[240px] space-y-2 overflow-y-auto pr-1">
-                                  {opCosts.map((cost) => (
+                                <div className="space-y-2">
+                                  {previewTrackedCosts.map((cost) => (
                                     <div
                                       key={cost.id}
                                       className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm shadow-slate-100/70"
@@ -949,6 +1025,12 @@ export default function NetProfit() {
                                       </div>
                                     </div>
                                   ))}
+                                  {remainingTrackedCosts > 0 ? (
+                                    <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-xs font-medium text-slate-500">
+                                      Open Manage to review the remaining tracked
+                                      cost entries for this product.
+                                    </div>
+                                  ) : null}
                                 </div>
                               ) : (
                                 <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-4 text-center text-xs text-slate-500">
@@ -1401,7 +1483,7 @@ function DataMetric({
   return (
     <div className={alignmentClass}>
       <div
-        className={`whitespace-nowrap text-lg font-semibold tracking-tight tabular-nums ${valueClassName}`}
+        className={`break-words text-lg font-semibold leading-7 tracking-tight tabular-nums ${valueClassName}`}
       >
         {value}
       </div>
@@ -1422,7 +1504,7 @@ function BreakdownMetric({
         {label}
       </p>
       <div
-        className={`mt-2 whitespace-nowrap text-sm font-semibold tabular-nums ${valueClassName}`}
+        className={`mt-2 break-words text-sm font-semibold leading-6 tabular-nums ${valueClassName}`}
       >
         {value}
       </div>
@@ -1455,29 +1537,63 @@ function InfoBadge({ label, value }) {
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
-      <p className="mt-2 whitespace-nowrap text-lg font-semibold tabular-nums text-slate-900">
+      <p className="mt-2 break-words text-lg font-semibold leading-7 tabular-nums text-slate-900">
         {value}
       </p>
     </div>
   );
 }
 
-function SummaryCard({ label, value, icon: Icon, color }) {
+function SummaryCard({ label, value, icon: Icon, color, className = "" }) {
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70">
+    <div
+      className={`rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 ${className}`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
             {label}
           </p>
-          <p className="mt-3 whitespace-nowrap text-2xl font-semibold tracking-tight tabular-nums text-slate-900">
+          <p className="mt-3 break-words text-[28px] font-semibold leading-9 tracking-tight tabular-nums text-slate-950">
             {value}
           </p>
         </div>
-        <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${color}`}>
+        <div
+          className={`flex h-11 w-11 items-center justify-center rounded-2xl shadow-sm shadow-slate-200/60 ${color}`}
+        >
           <Icon size={20} />
         </div>
       </div>
+    </div>
+  );
+}
+
+function MetricPanel({ children }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm shadow-slate-100/60">
+      {children}
+    </div>
+  );
+}
+
+function OverviewPill({ label, value, tone = "slate" }) {
+  const toneClass =
+    tone === "sky"
+      ? "border-sky-200 bg-sky-50 text-sky-800"
+      : tone === "emerald"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+        : tone === "amber"
+          ? "border-amber-200 bg-amber-50 text-amber-800"
+          : "border-slate-200 bg-white text-slate-800";
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 shadow-sm shadow-slate-200/50 ${toneClass}`}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-70">
+        {label}
+      </p>
+      <p className="mt-2 break-words text-xl font-semibold tracking-tight tabular-nums">
+        {value}
+      </p>
     </div>
   );
 }

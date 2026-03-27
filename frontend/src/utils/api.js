@@ -238,6 +238,7 @@ export const getErrorMessage = (error) => {
 export const dashboardAPI = {
   getStats: () => api.get("/dashboard/stats"),
   getAnalytics: (params = {}) => api.get("/dashboard/analytics", { params }),
+  getGrowthCenter: (params = {}) => api.get("/dashboard/growth-center", { params }),
   getProducts: (limit, offset) =>
     api.get(`/dashboard/products?limit=${limit}&offset=${offset}`),
   getOrders: (limit, offset) =>

@@ -36,6 +36,7 @@ const MyTasks = lazy(() => import("./pages/MyTasks"));
 const ActivityLog = lazy(() => import("./pages/ActivityLog"));
 const NetProfit = lazy(() => import("./pages/NetProfit"));
 const Analytics = lazy(() => import("./pages/Analytics"));
+const GrowthCenter = lazy(() => import("./pages/GrowthCenter"));
 const MetaAnalytics = lazy(() => import("./pages/MetaCommandCenter"));
 const AdminPage = lazy(() => import("./pages/Admin"));
 
@@ -250,6 +251,14 @@ function App() {
                 element={
                   <ProtectedRoute permission="can_manage_settings">
                     <MetaAnalytics />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/growth-center"
+                element={
+                  <ProtectedRoute permission="can_manage_settings">
+                    <GrowthCenter />
                   </ProtectedRoute>
                 }
               />

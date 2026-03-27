@@ -429,18 +429,27 @@ export default function Dashboard() {
         visible: hasPermission("can_view_orders"),
         className: "from-sky-500 to-sky-700",
       },
-      {
-        id: "customers",
-        label: "Customers",
-        description: "Customer profiles, spend, and history",
-        icon: Users,
-        path: "/customers",
-        visible: hasPermission("can_view_customers"),
-        className: "from-emerald-500 to-emerald-700",
-      },
-      {
-        id: "my-tasks",
-        label: "My Tasks",
+        {
+          id: "customers",
+          label: "Customers",
+          description: "Customer profiles, spend, and history",
+          icon: Users,
+          path: "/customers",
+          visible: hasPermission("can_view_customers"),
+          className: "from-emerald-500 to-emerald-700",
+        },
+        {
+          id: "growth-center",
+          label: "Growth Center",
+          description: "Restock, retention, and margin actions in one view",
+          icon: TrendingUp,
+          path: "/growth-center",
+          visible: isAdmin || canManageSettings,
+          className: "from-cyan-500 to-sky-700",
+        },
+        {
+          id: "my-tasks",
+          label: "My Tasks",
         description: "Your assigned work and follow-ups",
         icon: FileText,
         path: "/my-tasks",
@@ -468,7 +477,7 @@ export default function Dashboard() {
     ];
 
     return items.filter((item) => item.visible);
-  }, [canManageUsers, hasPermission, isAdmin, pendingRequestsCount]);
+  }, [canManageSettings, canManageUsers, hasPermission, isAdmin, pendingRequestsCount]);
 
   const initialDashboardLoad = useMemo(
     () =>

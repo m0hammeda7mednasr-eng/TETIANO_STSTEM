@@ -19,6 +19,7 @@ import {
   Settings,
   Shield,
   ShoppingCart,
+  TrendingUp,
   Truck,
   UserPlus,
   Users,
@@ -181,6 +182,12 @@ const buildAdminNav = (t) => [
     permission: "can_manage_settings",
   },
   {
+    icon: TrendingUp,
+    label: t("sidebar.growthCenter", "Growth Center"),
+    path: "/growth-center",
+    permission: "can_manage_settings",
+  },
+  {
     icon: BarChart3,
     label: t("sidebar.analytics", "Analytics"),
     path: "/analytics",
@@ -317,8 +324,8 @@ export default function Sidebar() {
   );
 
   const visibleAdminItems = useMemo(
-    () => (isAdmin ? adminNav.filter(canSeeItem) : []),
-    [adminNav, canSeeItem, isAdmin],
+    () => adminNav.filter(canSeeItem),
+    [adminNav, canSeeItem],
   );
 
   const handleLogout = () => {

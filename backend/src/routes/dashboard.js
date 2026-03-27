@@ -51,6 +51,7 @@ const QUERY_RETRYABLE_ERROR_CODES = new Set(["57014"]);
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const dashboardStatsCache = new Map();
 const dashboardAnalyticsCache = new Map();
+const dashboardGrowthCenterCache = new Map();
 const DASHBOARD_PRODUCT_COUNT_SELECT = [
   "id",
   "store_id",
@@ -274,6 +275,110 @@ const DASHBOARD_ORDER_FULFILLED_PROFIT_SELECTS = [
 const DASHBOARD_OPERATIONAL_COST_SELECT = ["product_id", "amount", "apply_to"].join(
   ",",
 );
+const GROWTH_CENTER_DEFAULT_LOOKBACK_DAYS = 30;
+const GROWTH_CENTER_ORDERS_HISTORY_DAYS = 365;
+const GROWTH_CENTER_REORDER_TARGET_DAYS = 30;
+const GROWTH_CENTER_REPEAT_ACTIVE_WINDOW_DAYS = 90;
+const GROWTH_CENTER_SECOND_ORDER_WINDOW_DAYS = 45;
+const GROWTH_CENTER_WIN_BACK_WINDOW_DAYS = 90;
+const GROWTH_CENTER_DORMANT_WINDOW_DAYS = 120;
+const GROWTH_CENTER_SCALE_MARGIN_THRESHOLD = 28;
+const GROWTH_CENTER_LEAK_MARGIN_THRESHOLD = 12;
+const GROWTH_CENTER_PRODUCT_SELECT = [
+  "id",
+  "store_id",
+  "user_id",
+  "title",
+  "image_url",
+  "shopify_id",
+  "sku",
+  "price",
+  "cost_price",
+  "ads_cost",
+  "operation_cost",
+  "shipping_cost",
+  "inventory_quantity",
+  "updated_at",
+  "data",
+].join(",");
+const GROWTH_CENTER_PRODUCT_SELECTS = [
+  GROWTH_CENTER_PRODUCT_SELECT,
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "title",
+    "shopify_id",
+    "sku",
+    "price",
+    "cost_price",
+    "ads_cost",
+    "operation_cost",
+    "shipping_cost",
+    "inventory_quantity",
+    "updated_at",
+  ].join(","),
+  ["id", "store_id", "user_id", "title", "inventory_quantity", "updated_at"].join(
+    ",",
+  ),
+  ["id", "store_id", "user_id", "title", "inventory_quantity"].join(","),
+];
+const GROWTH_CENTER_ORDER_SELECT = [
+  "id",
+  "store_id",
+  "user_id",
+  "customer_id",
+  "customer_name",
+  "customer_email",
+  "fulfillment_status",
+  "total_price",
+  "current_total_price",
+  "total_refunded",
+  "financial_status",
+  "status",
+  "cancelled_at",
+  "created_at",
+  "updated_at",
+  "line_items",
+  "data",
+].join(",");
+const GROWTH_CENTER_ORDER_SELECTS = [
+  GROWTH_CENTER_ORDER_SELECT,
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "customer_name",
+    "customer_email",
+    "fulfillment_status",
+    "total_price",
+    "total_refunded",
+    "financial_status",
+    "status",
+    "cancelled_at",
+    "created_at",
+    "line_items",
+    "data",
+  ].join(","),
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "customer_name",
+    "customer_email",
+    "fulfillment_status",
+    "total_price",
+    "status",
+    "created_at",
+    "line_items",
+    "data",
+  ].join(","),
+];
+const GROWTH_CENTER_CUSTOMER_SELECTS = [
+  ["id", "store_id", "user_id", "created_at", "updated_at"].join(","),
+  ["id", "store_id", "user_id", "created_at"].join(","),
+  "id,store_id,user_id",
+];
 
 const toNumber = (value) => {
   if (value === null || value === undefined || value === "") {
@@ -1196,6 +1301,1117 @@ const getOrderBookedNetAmount = (order) => {
   return Math.max(0, grossAmount - getOrderRefundedAmount(order));
 };
 
+const roundMetric = (value, digits = 2) =>
+  parseFloat(toNumber(value).toFixed(digits));
+
+const clampNumber = (value, min = 0, max = 100) =>
+  Math.min(max, Math.max(min, toNumber(value)));
+
+const getParsedDate = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getIsoStringOrNull = (value) => {
+  const parsedDate = getParsedDate(value);
+  return parsedDate ? parsedDate.toISOString() : null;
+};
+
+const getDaysSince = (value, referenceDate = new Date()) => {
+  const parsedDate = getParsedDate(value);
+  if (!parsedDate) {
+    return null;
+  }
+
+  return Math.max(
+    0,
+    Math.floor((referenceDate.getTime() - parsedDate.getTime()) / DAY_IN_MS),
+  );
+};
+
+const isWithinDays = (value, days, referenceDate = new Date()) => {
+  const ageInDays = getDaysSince(value, referenceDate);
+  return ageInDays !== null && ageInDays <= days;
+};
+
+const normalizeGrowthLookbackDays = (value) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return GROWTH_CENTER_DEFAULT_LOOKBACK_DAYS;
+  }
+
+  return Math.min(120, Math.max(7, parsed));
+};
+
+const getFreshestTimestamp = (...sources) => {
+  let freshestDate = null;
+
+  for (const source of sources) {
+    for (const value of source || []) {
+      const parsedDate = getParsedDate(value);
+      if (!parsedDate) {
+        continue;
+      }
+
+      if (!freshestDate || parsedDate.getTime() > freshestDate.getTime()) {
+        freshestDate = parsedDate;
+      }
+    }
+  }
+
+  return freshestDate ? freshestDate.toISOString() : null;
+};
+
+const getPriorityRank = (priority) => {
+  switch (String(priority || "").trim().toLowerCase()) {
+    case "critical":
+      return 0;
+    case "high":
+      return 1;
+    case "medium":
+      return 2;
+    case "growth":
+      return 3;
+    default:
+      return 4;
+  }
+};
+
+const getScoreStatus = (score) => {
+  const normalizedScore = clampNumber(score);
+  if (normalizedScore >= 80) {
+    return "good";
+  }
+  if (normalizedScore >= 60) {
+    return "watch";
+  }
+  return "critical";
+};
+
+const buildGrowthCustomerProfiles = (orders = [], referenceDate = new Date()) => {
+  const profileByCustomerKey = new Map();
+
+  for (const order of orders || []) {
+    const customerKey = getOrderCustomerKey(order);
+    if (!customerKey) {
+      continue;
+    }
+
+    const parsedOrderDate = getParsedDate(order?.created_at);
+    const orderAmount = getOrderNetSalesAmount(order);
+    const orderData = parseOrderData(order);
+    const existingProfile = profileByCustomerKey.get(customerKey) || {
+      id: customerKey,
+      customer_key: customerKey,
+      name: String(
+        order?.customer_name ||
+          orderData?.customer?.name ||
+          orderData?.shipping_address?.name ||
+          "",
+      ).trim(),
+      email: String(
+        order?.customer_email || orderData?.customer?.email || orderData?.email || "",
+      )
+        .trim()
+        .toLowerCase(),
+      first_order_at: null,
+      last_order_at: null,
+      orders_count: 0,
+      total_spent: 0,
+      revenue_30d: 0,
+      paid_orders_count: 0,
+    };
+
+    existingProfile.orders_count += 1;
+    existingProfile.total_spent += orderAmount;
+    if (orderAmount > 0) {
+      existingProfile.paid_orders_count += 1;
+    }
+
+    if (parsedOrderDate && isWithinDays(parsedOrderDate, 30, referenceDate)) {
+      existingProfile.revenue_30d += orderAmount;
+    }
+
+    const orderTimestamp = parsedOrderDate?.getTime() || null;
+    const firstTimestamp = getParsedDate(existingProfile.first_order_at)?.getTime();
+    const lastTimestamp = getParsedDate(existingProfile.last_order_at)?.getTime();
+
+    if (orderTimestamp && (!firstTimestamp || orderTimestamp < firstTimestamp)) {
+      existingProfile.first_order_at = parsedOrderDate.toISOString();
+    }
+
+    if (orderTimestamp && (!lastTimestamp || orderTimestamp > lastTimestamp)) {
+      existingProfile.last_order_at = parsedOrderDate.toISOString();
+    }
+
+    if (!existingProfile.name) {
+      existingProfile.name = String(
+        order?.customer_name ||
+          orderData?.customer?.name ||
+          orderData?.shipping_address?.name ||
+          "",
+      ).trim();
+    }
+
+    if (!existingProfile.email) {
+      existingProfile.email = String(
+        order?.customer_email || orderData?.customer?.email || orderData?.email || "",
+      )
+        .trim()
+        .toLowerCase();
+    }
+
+    profileByCustomerKey.set(customerKey, existingProfile);
+  }
+
+  return Array.from(profileByCustomerKey.values())
+    .map((profile) => ({
+      ...profile,
+      total_spent: roundMetric(profile.total_spent),
+      revenue_30d: roundMetric(profile.revenue_30d),
+      average_order_value:
+        profile.orders_count > 0
+          ? roundMetric(profile.total_spent / profile.orders_count)
+          : 0,
+      days_since_first_order: getDaysSince(profile.first_order_at, referenceDate),
+      days_since_last_order: getDaysSince(profile.last_order_at, referenceDate),
+    }))
+    .sort((left, right) => right.total_spent - left.total_spent);
+};
+
+const getVipSpendThreshold = (profiles = []) => {
+  const spendValues = (profiles || [])
+    .filter((profile) => toNumber(profile?.total_spent) > 0)
+    .map((profile) => toNumber(profile.total_spent))
+    .sort((left, right) => left - right);
+
+  if (spendValues.length === 0) {
+    return 0;
+  }
+
+  const thresholdIndex = Math.max(
+    0,
+    Math.ceil(spendValues.length * 0.8) - 1,
+  );
+  return spendValues[thresholdIndex] || 0;
+};
+
+const buildGrowthRetentionSnapshot = (
+  customerProfiles = [],
+  referenceDate = new Date(),
+) => {
+  const profiles = Array.isArray(customerProfiles) ? customerProfiles : [];
+  const vipSpendThreshold = getVipSpendThreshold(
+    profiles.filter((profile) => toNumber(profile?.orders_count) >= 2),
+  );
+  const trackedRevenue = profiles.reduce(
+    (sum, profile) => sum + toNumber(profile?.total_spent),
+    0,
+  );
+
+  const newCustomers = profiles.filter(
+    (profile) =>
+      toNumber(profile?.orders_count) === 1 &&
+      toNumber(profile?.days_since_first_order) <= 30,
+  );
+  const needsSecondOrder = profiles.filter((profile) => {
+    const lastOrderAge = toNumber(profile?.days_since_last_order);
+    return (
+      toNumber(profile?.orders_count) === 1 &&
+      lastOrderAge > 30 &&
+      lastOrderAge <= GROWTH_CENTER_WIN_BACK_WINDOW_DAYS
+    );
+  });
+  const repeatCustomers = profiles.filter((profile) => {
+    const lastOrderAge = toNumber(profile?.days_since_last_order);
+    return (
+      toNumber(profile?.orders_count) >= 2 &&
+      lastOrderAge <= GROWTH_CENTER_REPEAT_ACTIVE_WINDOW_DAYS
+    );
+  });
+  const vipCustomers = profiles.filter((profile) => {
+    const lastOrderAge = toNumber(profile?.days_since_last_order);
+    return (
+      toNumber(profile?.orders_count) >= 3 &&
+      toNumber(profile?.total_spent) >= vipSpendThreshold &&
+      lastOrderAge <= GROWTH_CENTER_REPEAT_ACTIVE_WINDOW_DAYS
+    );
+  });
+  const winBackReady = profiles.filter((profile) => {
+    const lastOrderAge = toNumber(profile?.days_since_last_order);
+    return (
+      lastOrderAge > GROWTH_CENTER_SECOND_ORDER_WINDOW_DAYS &&
+      lastOrderAge <= GROWTH_CENTER_DORMANT_WINDOW_DAYS
+    );
+  });
+  const dormantCustomers = profiles.filter(
+    (profile) =>
+      toNumber(profile?.days_since_last_order) > GROWTH_CENTER_DORMANT_WINDOW_DAYS,
+  );
+  const activeCustomers = profiles.filter(
+    (profile) =>
+      toNumber(profile?.days_since_last_order) <= GROWTH_CENTER_REPEAT_ACTIVE_WINDOW_DAYS,
+  );
+
+  const buildSegmentRow = (id, title, rows, note, action, tone = "slate") => {
+    const revenue = rows.reduce(
+      (sum, profile) => sum + toNumber(profile?.total_spent),
+      0,
+    );
+
+    return {
+      id,
+      title,
+      count: rows.length,
+      revenue: roundMetric(revenue),
+      share_of_customers:
+        profiles.length > 0 ? roundMetric((rows.length / profiles.length) * 100) : 0,
+      note,
+      action,
+      tone,
+      route: "/customers",
+    };
+  };
+
+  const repeatCustomerRate =
+    activeCustomers.length > 0
+      ? roundMetric((repeatCustomers.length / activeCustomers.length) * 100)
+      : 0;
+  const vipRevenue =
+    vipCustomers.reduce(
+      (sum, profile) => sum + toNumber(profile?.total_spent),
+      0,
+    ) || 0;
+
+  const winBackCandidates = [...winBackReady, ...dormantCustomers]
+    .sort((left, right) => {
+      const spendDiff = toNumber(right?.total_spent) - toNumber(left?.total_spent);
+      if (spendDiff !== 0) {
+        return spendDiff;
+      }
+      return toNumber(right?.orders_count) - toNumber(left?.orders_count);
+    })
+    .slice(0, 6)
+    .map((profile) => {
+      const lastOrderAge = toNumber(profile?.days_since_last_order);
+      const isDormant = lastOrderAge > GROWTH_CENTER_DORMANT_WINDOW_DAYS;
+      const isVipProfile =
+        toNumber(profile?.orders_count) >= 3 &&
+        toNumber(profile?.total_spent) >= vipSpendThreshold;
+
+      return {
+        id: profile.id,
+        name: profile.name || profile.email || "Customer",
+        email: profile.email || "",
+        orders_count: toNumber(profile.orders_count),
+        total_spent: roundMetric(profile.total_spent),
+        last_order_at: profile.last_order_at,
+        last_order_days_ago: lastOrderAge,
+        segment: isDormant ? "dormant" : "win_back",
+        priority: isDormant || isVipProfile ? "high" : "medium",
+        suggested_action: isVipProfile
+          ? "Reach out with a VIP recovery offer and manual follow-up."
+          : isDormant
+            ? "Bring this customer back with a stronger comeback campaign."
+            : "Use a timed reminder or bundle to restart the buying cycle.",
+      };
+    });
+
+  return {
+    summary: {
+      tracked_customers: profiles.length,
+      active_customers: activeCustomers.length,
+      repeat_customer_rate: repeatCustomerRate,
+      vip_customer_count: vipCustomers.length,
+      vip_revenue_share:
+        trackedRevenue > 0 ? roundMetric((vipRevenue / trackedRevenue) * 100) : 0,
+      win_back_count: winBackReady.length,
+      dormant_count: dormantCustomers.length,
+      one_time_customer_count: profiles.filter(
+        (profile) => toNumber(profile?.orders_count) === 1,
+      ).length,
+      vip_spend_threshold: roundMetric(vipSpendThreshold),
+      generated_at: referenceDate.toISOString(),
+    },
+    segments: [
+      buildSegmentRow(
+        "new_customers",
+        "New customers",
+        newCustomers,
+        "First-order customers from the last 30 days.",
+        "Protect the first experience and move them quickly to order two.",
+        "sky",
+      ),
+      buildSegmentRow(
+        "needs_second_order",
+        "Needs second order",
+        needsSecondOrder,
+        "One-time buyers who are cooling off after the first purchase.",
+        "Send a second-order incentive or a simple bundle reminder.",
+        "amber",
+      ),
+      buildSegmentRow(
+        "repeat_customers",
+        "Repeat customers",
+        repeatCustomers,
+        "Customers with 2+ orders and activity in the last 90 days.",
+        "Feed them with restock timing, bundles, and loyalty messaging.",
+        "emerald",
+      ),
+      buildSegmentRow(
+        "vip_customers",
+        "VIP customers",
+        vipCustomers,
+        "High-value buyers worth special retention treatment.",
+        "Give them priority service and exclusive launches.",
+        "violet",
+      ),
+      buildSegmentRow(
+        "win_back_ready",
+        "Win-back ready",
+        winBackReady,
+        "Customers who have been quiet for 45 to 120 days.",
+        "Launch a comeback sequence before they fully churn.",
+        "rose",
+      ),
+      buildSegmentRow(
+        "dormant_customers",
+        "Dormant customers",
+        dormantCustomers,
+        "Customers inactive for more than 120 days.",
+        "Use stronger offers or suppress them from high-frequency spend.",
+        "slate",
+      ),
+    ],
+    win_back_candidates: winBackCandidates,
+  };
+};
+
+const createSalesAccumulator = () => ({
+  sold_units: 0,
+  revenue: 0,
+  orders_count: 0,
+  last_sold_at: null,
+});
+
+const getSalesAccumulator = (salesByKey, key) => {
+  const normalizedKey = String(key || "").trim();
+  if (!normalizedKey) {
+    return null;
+  }
+
+  const existing = salesByKey.get(normalizedKey) || createSalesAccumulator();
+  salesByKey.set(normalizedKey, existing);
+  return existing;
+};
+
+const addSalesToAccumulators = ({
+  order,
+  salesAllTimeByKey,
+  salesPrimaryWindowByKey,
+  salesSecondaryWindowByKey,
+  primaryWindowDays,
+  secondaryWindowDays,
+  referenceDate,
+}) => {
+  const orderGrossAmount = getOrderBookedGrossAmount(order);
+  const orderNetAmount = getOrderBookedNetAmount(order);
+  const parsedOrderDate = getParsedDate(order?.created_at);
+  const netRatio =
+    orderGrossAmount > 0
+      ? Math.min(1, Math.max(0, orderNetAmount / orderGrossAmount))
+      : 0;
+
+  if (!parsedOrderDate || netRatio <= 0) {
+    return;
+  }
+
+  const orderAgeInDays = getDaysSince(parsedOrderDate, referenceDate);
+  const primaryOrderKeys = new Set();
+  const secondaryOrderKeys = new Set();
+  const allOrderKeys = new Set();
+
+  parseLineItems(order).forEach((item) => {
+    const quantity = toNumber(item?.quantity) * netRatio;
+    const revenue = quantity * toNumber(item?.price);
+    if (quantity <= 0 && revenue <= 0) {
+      return;
+    }
+
+    const itemKeys = [item?.product_id, item?.variant_id, item?.sku, item?.id]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+
+    for (const key of itemKeys) {
+      const allTimeAccumulator = getSalesAccumulator(salesAllTimeByKey, key);
+      if (allTimeAccumulator) {
+        allTimeAccumulator.sold_units += quantity;
+        allTimeAccumulator.revenue += revenue;
+        allTimeAccumulator.last_sold_at = parsedOrderDate.toISOString();
+        allOrderKeys.add(key);
+      }
+
+      if (orderAgeInDays !== null && orderAgeInDays <= primaryWindowDays) {
+        const primaryAccumulator = getSalesAccumulator(salesPrimaryWindowByKey, key);
+        if (primaryAccumulator) {
+          primaryAccumulator.sold_units += quantity;
+          primaryAccumulator.revenue += revenue;
+          primaryAccumulator.last_sold_at = parsedOrderDate.toISOString();
+          primaryOrderKeys.add(key);
+        }
+      }
+
+      if (orderAgeInDays !== null && orderAgeInDays <= secondaryWindowDays) {
+        const secondaryAccumulator = getSalesAccumulator(
+          salesSecondaryWindowByKey,
+          key,
+        );
+        if (secondaryAccumulator) {
+          secondaryAccumulator.sold_units += quantity;
+          secondaryAccumulator.revenue += revenue;
+          secondaryAccumulator.last_sold_at = parsedOrderDate.toISOString();
+          secondaryOrderKeys.add(key);
+        }
+      }
+    }
+  });
+
+  for (const key of allOrderKeys) {
+    const accumulator = salesAllTimeByKey.get(key);
+    if (accumulator) {
+      accumulator.orders_count += 1;
+    }
+  }
+
+  for (const key of primaryOrderKeys) {
+    const accumulator = salesPrimaryWindowByKey.get(key);
+    if (accumulator) {
+      accumulator.orders_count += 1;
+    }
+  }
+
+  for (const key of secondaryOrderKeys) {
+    const accumulator = salesSecondaryWindowByKey.get(key);
+    if (accumulator) {
+      accumulator.orders_count += 1;
+    }
+  }
+};
+
+const mergeSalesSnapshots = (...snapshots) =>
+  snapshots.reduce(
+    (merged, snapshot) => {
+      if (!snapshot) {
+        return merged;
+      }
+
+      merged.sold_units += toNumber(snapshot?.sold_units);
+      merged.revenue += toNumber(snapshot?.revenue);
+      merged.orders_count += toNumber(snapshot?.orders_count);
+
+      const currentLastSoldAt = getParsedDate(merged.last_sold_at)?.getTime() || 0;
+      const snapshotLastSoldAt = getParsedDate(snapshot?.last_sold_at)?.getTime() || 0;
+      if (snapshotLastSoldAt > currentLastSoldAt) {
+        merged.last_sold_at = snapshot.last_sold_at;
+      }
+
+      return merged;
+    },
+    createSalesAccumulator(),
+  );
+
+const readSalesSnapshotForProduct = (product, salesByKey) => {
+  const directKeys = [product?.shopify_id, product?.id]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  for (const key of directKeys) {
+    const snapshot = salesByKey.get(key);
+    if (snapshot) {
+      return {
+        sold_units: roundMetric(snapshot.sold_units),
+        revenue: roundMetric(snapshot.revenue),
+        orders_count: toNumber(snapshot.orders_count),
+        last_sold_at: snapshot.last_sold_at,
+      };
+    }
+  }
+
+  const parsedProductData = parseProductData(product?.data);
+  const variantKeys = new Set();
+  const addVariantKey = (value) => {
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      variantKeys.add(normalized);
+    }
+  };
+
+  addVariantKey(product?.sku);
+  for (const variant of Array.isArray(parsedProductData?.variants)
+    ? parsedProductData.variants
+    : []) {
+    addVariantKey(variant?.id);
+    addVariantKey(variant?.sku);
+  }
+
+  const merged = mergeSalesSnapshots(
+    ...Array.from(variantKeys).map((key) => salesByKey.get(key)),
+  );
+
+  return {
+    sold_units: roundMetric(merged.sold_units),
+    revenue: roundMetric(merged.revenue),
+    orders_count: toNumber(merged.orders_count),
+    last_sold_at: merged.last_sold_at,
+  };
+};
+
+const buildGrowthProductMetrics = ({
+  products = [],
+  orders = [],
+  referenceDate = new Date(),
+  primaryWindowDays = GROWTH_CENTER_DEFAULT_LOOKBACK_DAYS,
+}) => {
+  const secondaryWindowDays = Math.max(90, primaryWindowDays * 2);
+  const salesAllTimeByKey = new Map();
+  const salesPrimaryWindowByKey = new Map();
+  const salesSecondaryWindowByKey = new Map();
+
+  for (const order of orders || []) {
+    if (isCancelledOrder(order)) {
+      continue;
+    }
+
+    addSalesToAccumulators({
+      order,
+      salesAllTimeByKey,
+      salesPrimaryWindowByKey,
+      salesSecondaryWindowByKey,
+      primaryWindowDays,
+      secondaryWindowDays,
+      referenceDate,
+    });
+  }
+
+  return dedupeRowsById(products).map((product) => {
+    const allTimeSnapshot = readSalesSnapshotForProduct(product, salesAllTimeByKey);
+    const primarySnapshot = readSalesSnapshotForProduct(
+      product,
+      salesPrimaryWindowByKey,
+    );
+    const secondarySnapshot = readSalesSnapshotForProduct(
+      product,
+      salesSecondaryWindowByKey,
+    );
+    const inventoryQuantity = Math.max(0, toNumber(product?.inventory_quantity));
+    const costPrice = toNumber(product?.cost_price);
+    const adsCost = toNumber(product?.ads_cost);
+    const operationCost = toNumber(product?.operation_cost);
+    const shippingCost = toNumber(product?.shipping_cost);
+    const totalUnitCost = costPrice + adsCost + operationCost + shippingCost;
+    const primaryDailyVelocity =
+      primarySnapshot.sold_units > 0
+        ? primarySnapshot.sold_units / primaryWindowDays
+        : secondarySnapshot.sold_units > 0
+          ? secondarySnapshot.sold_units / secondaryWindowDays
+          : 0;
+    const daysOfCover =
+      primaryDailyVelocity > 0 ? inventoryQuantity / primaryDailyVelocity : null;
+    const suggestedReorderUnits =
+      primaryDailyVelocity > 0
+        ? Math.max(
+            0,
+            Math.ceil(
+              primaryDailyVelocity * GROWTH_CENTER_REORDER_TARGET_DAYS -
+                inventoryQuantity,
+            ),
+          )
+        : 0;
+    const recentProfit = primarySnapshot.revenue - totalUnitCost * primarySnapshot.sold_units;
+    const recentMargin =
+      primarySnapshot.revenue > 0
+        ? (recentProfit / primarySnapshot.revenue) * 100
+        : 0;
+
+    let stockStatus = "healthy";
+    if (inventoryQuantity <= 0) {
+      stockStatus = "out_of_stock";
+    } else if (daysOfCover !== null && daysOfCover < 7) {
+      stockStatus = "critical";
+    } else if (
+      inventoryQuantity < LOW_STOCK_THRESHOLD ||
+      (daysOfCover !== null && daysOfCover < 14)
+    ) {
+      stockStatus = "warning";
+    } else if (daysOfCover !== null && daysOfCover < 30) {
+      stockStatus = "watch";
+    }
+
+    return {
+      id: product?.id || null,
+      route: product?.id ? `/products/${product.id}` : "/products",
+      title: String(product?.title || "Untitled product").trim(),
+      image_url: product?.image_url || null,
+      inventory_quantity: inventoryQuantity,
+      cost_price: roundMetric(costPrice),
+      total_unit_cost: roundMetric(totalUnitCost),
+      sold_units_lookback: roundMetric(primarySnapshot.sold_units),
+      sold_units_secondary_window: roundMetric(secondarySnapshot.sold_units),
+      sold_units_total: roundMetric(allTimeSnapshot.sold_units),
+      recent_revenue: roundMetric(primarySnapshot.revenue),
+      recent_profit: roundMetric(recentProfit),
+      recent_margin: roundMetric(recentMargin),
+      recent_orders_count: toNumber(primarySnapshot.orders_count),
+      total_orders_count: toNumber(allTimeSnapshot.orders_count),
+      last_sold_at:
+        primarySnapshot.last_sold_at ||
+        secondarySnapshot.last_sold_at ||
+        allTimeSnapshot.last_sold_at,
+      daily_velocity: roundMetric(primaryDailyVelocity, 3),
+      days_of_cover: daysOfCover === null ? null : roundMetric(daysOfCover, 1),
+      suggested_reorder_units: suggestedReorderUnits,
+      stock_status: stockStatus,
+      missing_saved_costs:
+        primarySnapshot.sold_units > 0 && (costPrice <= 0 || totalUnitCost <= 0),
+      has_margin_leak:
+        primarySnapshot.revenue > 0 &&
+        recentMargin < GROWTH_CENTER_LEAK_MARGIN_THRESHOLD,
+      can_scale_now:
+        primarySnapshot.sold_units >= 2 &&
+        recentMargin >= GROWTH_CENTER_SCALE_MARGIN_THRESHOLD &&
+        inventoryQuantity >= Math.max(8, Math.ceil(primarySnapshot.sold_units * 1.4)) &&
+        (daysOfCover === null || daysOfCover >= 14),
+      updated_at: getIsoStringOrNull(product?.updated_at),
+    };
+  });
+};
+
+const buildGrowthReplenishmentSnapshot = (productMetrics = []) => {
+  const priorities = (productMetrics || [])
+    .filter(
+      (product) =>
+        product?.stock_status !== "healthy" ||
+        toNumber(product?.sold_units_lookback) > 0,
+    )
+    .sort((left, right) => {
+      const leftUrgency =
+        left?.stock_status === "out_of_stock"
+          ? 0
+          : left?.stock_status === "critical"
+            ? 1
+            : left?.stock_status === "warning"
+              ? 2
+              : 3;
+      const rightUrgency =
+        right?.stock_status === "out_of_stock"
+          ? 0
+          : right?.stock_status === "critical"
+            ? 1
+            : right?.stock_status === "warning"
+              ? 2
+              : 3;
+
+      if (leftUrgency !== rightUrgency) {
+        return leftUrgency - rightUrgency;
+      }
+
+      const leftCover = left?.days_of_cover ?? Number.POSITIVE_INFINITY;
+      const rightCover = right?.days_of_cover ?? Number.POSITIVE_INFINITY;
+      if (leftCover !== rightCover) {
+        return leftCover - rightCover;
+      }
+
+      return toNumber(right?.recent_revenue) - toNumber(left?.recent_revenue);
+    })
+    .slice(0, 8)
+    .map((product) => ({
+      id: product.id,
+      title: product.title,
+      route: product.route,
+      inventory_quantity: product.inventory_quantity,
+      sold_units_lookback: product.sold_units_lookback,
+      daily_velocity: product.daily_velocity,
+      days_of_cover: product.days_of_cover,
+      suggested_reorder_units: product.suggested_reorder_units,
+      recent_revenue: product.recent_revenue,
+      stock_status: product.stock_status,
+      note:
+        product.stock_status === "out_of_stock"
+          ? "Already out of stock while demand exists."
+          : product.stock_status === "critical"
+            ? "Likely to run out within days at the current sell-through pace."
+            : product.stock_status === "warning"
+              ? "Stock is low relative to recent demand."
+              : "Demand exists; keep an eye on this SKU.",
+    }));
+
+  return {
+    summary: {
+      tracked_products: productMetrics.length,
+      out_of_stock_count: productMetrics.filter(
+        (product) => product?.stock_status === "out_of_stock",
+      ).length,
+      urgent_replenishment_count: productMetrics.filter((product) =>
+        ["out_of_stock", "critical"].includes(product?.stock_status),
+      ).length,
+      low_stock_count: productMetrics.filter((product) =>
+        ["out_of_stock", "critical", "warning"].includes(product?.stock_status),
+      ).length,
+      estimated_reorder_units: priorities.reduce(
+        (sum, product) => sum + toNumber(product?.suggested_reorder_units),
+        0,
+      ),
+    },
+    priorities,
+  };
+};
+
+const buildGrowthProfitabilitySnapshot = (productMetrics = []) => {
+  const productsWithDemand = (productMetrics || []).filter(
+    (product) => toNumber(product?.sold_units_lookback) > 0,
+  );
+
+  return {
+    summary: {
+      tracked_products: productMetrics.length,
+      active_products: productsWithDemand.length,
+      scale_now_count: productsWithDemand.filter((product) => product?.can_scale_now)
+        .length,
+      margin_leak_count: productsWithDemand.filter((product) => product?.has_margin_leak)
+        .length,
+      missing_cost_count: productsWithDemand.filter(
+        (product) => product?.missing_saved_costs,
+      ).length,
+      profitable_product_count: productsWithDemand.filter(
+        (product) => toNumber(product?.recent_profit) > 0,
+      ).length,
+    },
+    scale_now: productsWithDemand
+      .filter((product) => product?.can_scale_now)
+      .sort(
+        (left, right) => toNumber(right?.recent_profit) - toNumber(left?.recent_profit),
+      )
+      .slice(0, 5),
+    margin_leaks: productsWithDemand
+      .filter((product) => product?.has_margin_leak)
+      .sort(
+        (left, right) => toNumber(right?.recent_revenue) - toNumber(left?.recent_revenue),
+      )
+      .slice(0, 5),
+    missing_cost_products: productsWithDemand
+      .filter((product) => product?.missing_saved_costs)
+      .sort(
+        (left, right) => toNumber(right?.recent_revenue) - toNumber(left?.recent_revenue),
+      )
+      .slice(0, 5),
+  };
+};
+
+const buildGrowthOrderSummary = (
+  orders = [],
+  referenceDate = new Date(),
+  lookbackDays = GROWTH_CENTER_DEFAULT_LOOKBACK_DAYS,
+) => {
+  const recentOrders = (orders || []).filter((order) =>
+    isWithinDays(order?.created_at, lookbackDays, referenceDate),
+  );
+  const netRevenue = recentOrders.reduce(
+    (sum, order) => sum + getOrderNetSalesAmount(order),
+    0,
+  );
+  const paidOrders = recentOrders.filter((order) => getOrderNetSalesAmount(order) > 0);
+  const cancelledOrders = recentOrders.filter((order) => isCancelledOrder(order));
+  const refundedOrders = recentOrders.filter((order) => isRefundedOrder(order));
+  const pendingOrders = recentOrders.filter((order) => isPendingOrder(order));
+  const unfulfilledOrders = recentOrders.filter(
+    (order) => getOrderFulfillmentStatus(order) !== "fulfilled",
+  );
+
+  return {
+    lookback_days: lookbackDays,
+    orders_count: recentOrders.length,
+    paid_orders_count: paidOrders.length,
+    cancelled_orders_count: cancelledOrders.length,
+    refunded_orders_count: refundedOrders.length,
+    pending_orders_count: pendingOrders.length,
+    unfulfilled_orders_count: unfulfilledOrders.length,
+    recent_revenue: roundMetric(netRevenue),
+    average_order_value:
+      paidOrders.length > 0 ? roundMetric(netRevenue / paidOrders.length) : 0,
+    cancellation_rate:
+      recentOrders.length > 0
+        ? roundMetric((cancelledOrders.length / recentOrders.length) * 100)
+        : 0,
+    refund_rate:
+      recentOrders.length > 0
+        ? roundMetric((refundedOrders.length / recentOrders.length) * 100)
+        : 0,
+    pending_order_share:
+      recentOrders.length > 0
+        ? roundMetric((pendingOrders.length / recentOrders.length) * 100)
+        : 0,
+  };
+};
+
+const buildGrowthHealthSnapshot = ({
+  products = [],
+  customers = [],
+  productMetrics = [],
+  replenishment = {},
+  retention = {},
+  profitability = {},
+  orderSummary = {},
+  freshestActivityAt = null,
+  referenceDate = new Date(),
+}) => {
+  const trackedProducts = productMetrics.length || dedupeRowsById(products).length;
+  const trackedCustomers = Math.max(
+    dedupeRowsById(customers).length,
+    toNumber(retention?.summary?.tracked_customers),
+  );
+  const costReadyProducts = productMetrics.filter(
+    (product) => toNumber(product?.total_unit_cost) > 0,
+  ).length;
+  const costCoverageRate =
+    trackedProducts > 0 ? roundMetric((costReadyProducts / trackedProducts) * 100) : 100;
+  const freshnessDays = getDaysSince(freshestActivityAt, referenceDate);
+  const inventoryScore = clampNumber(
+    100 -
+      toNumber(replenishment?.summary?.urgent_replenishment_count) * 18 -
+      toNumber(replenishment?.summary?.low_stock_count) * 4,
+  );
+  const costScore = clampNumber(
+    costCoverageRate -
+      toNumber(profitability?.summary?.missing_cost_count) * 8 -
+      Math.max(0, toNumber(profitability?.summary?.margin_leak_count) - 1) * 4,
+  );
+  const retentionScore = clampNumber(
+    toNumber(retention?.summary?.repeat_customer_rate) * 1.45 -
+      toNumber(retention?.summary?.dormant_count) * 0.8,
+  );
+  const orderScore = clampNumber(
+    100 -
+      toNumber(orderSummary?.cancellation_rate) * 1.8 -
+      toNumber(orderSummary?.refund_rate) * 1.25 -
+      toNumber(orderSummary?.pending_order_share) * 0.8,
+  );
+  const freshnessScore =
+    freshnessDays === null
+      ? 45
+      : freshnessDays <= 1
+        ? 100
+        : freshnessDays <= 3
+          ? 82
+          : freshnessDays <= 7
+            ? 62
+            : 35;
+  const healthScore = roundMetric(
+    inventoryScore * 0.25 +
+      costScore * 0.2 +
+      retentionScore * 0.2 +
+      orderScore * 0.2 +
+      freshnessScore * 0.15,
+    0,
+  );
+  const healthLabel =
+    healthScore >= 85
+      ? "Excellent"
+      : healthScore >= 72
+        ? "Strong"
+        : healthScore >= 58
+          ? "Watch"
+          : "Critical";
+
+  return {
+    summary: {
+      health_score: healthScore,
+      health_label: healthLabel,
+      tracked_products: trackedProducts,
+      tracked_customers: trackedCustomers,
+      recent_revenue: toNumber(orderSummary?.recent_revenue),
+      repeat_customer_rate: toNumber(retention?.summary?.repeat_customer_rate),
+      cost_coverage_rate: costCoverageRate,
+      low_stock_count: toNumber(replenishment?.summary?.low_stock_count),
+      urgent_actions_count:
+        toNumber(replenishment?.summary?.urgent_replenishment_count) +
+        toNumber(profitability?.summary?.missing_cost_count) +
+        Math.min(3, toNumber(retention?.summary?.win_back_count)),
+      freshness_days: freshnessDays,
+      freshest_activity_at: freshestActivityAt,
+    },
+    health_checks: [
+      {
+        id: "inventory",
+        title: "Inventory pressure",
+        score: roundMetric(inventoryScore, 0),
+        status: getScoreStatus(inventoryScore),
+        metric: `${toNumber(replenishment?.summary?.urgent_replenishment_count)} urgent / ${toNumber(replenishment?.summary?.low_stock_count)} low`,
+        detail:
+          "Measures whether the current stock can support the SKUs already selling.",
+        route: "/products?stockStatus=low_stock",
+      },
+      {
+        id: "costs",
+        title: "Cost coverage",
+        score: roundMetric(costScore, 0),
+        status: getScoreStatus(costScore),
+        metric: `${costCoverageRate}% covered`,
+        detail:
+          "Checks whether saved unit costs are filled in well enough to trust margin decisions.",
+        route: "/net-profit",
+      },
+      {
+        id: "retention",
+        title: "Retention engine",
+        score: roundMetric(retentionScore, 0),
+        status: getScoreStatus(retentionScore),
+        metric: `${toNumber(retention?.summary?.repeat_customer_rate)}% repeat`,
+        detail:
+          "Tracks whether current buyers are becoming repeat and high-value customers.",
+        route: "/customers",
+      },
+      {
+        id: "orders",
+        title: "Order quality",
+        score: roundMetric(orderScore, 0),
+        status: getScoreStatus(orderScore),
+        metric: `${toNumber(orderSummary?.cancellation_rate)}% cancelled / ${toNumber(orderSummary?.refund_rate)}% refunded`,
+        detail:
+          "Highlights whether the sales coming in are clean enough to scale confidently.",
+        route: "/orders",
+      },
+      {
+        id: "freshness",
+        title: "Data freshness",
+        score: roundMetric(freshnessScore, 0),
+        status: getScoreStatus(freshnessScore),
+        metric:
+          freshnessDays === null
+            ? "No recent activity"
+            : freshnessDays === 0
+              ? "Updated today"
+              : `${freshnessDays} day(s) old`,
+        detail:
+          "Checks how fresh the store activity is before the system issues growth recommendations.",
+        route: "/dashboard",
+      },
+    ],
+  };
+};
+
+const buildGrowthActions = ({
+  replenishment = {},
+  profitability = {},
+  retention = {},
+  orderSummary = {},
+}) => {
+  const actions = [];
+  const urgentReplenishmentCount = toNumber(
+    replenishment?.summary?.urgent_replenishment_count,
+  );
+  const missingCostCount = toNumber(profitability?.summary?.missing_cost_count);
+  const marginLeakCount = toNumber(profitability?.summary?.margin_leak_count);
+  const scaleNowCount = toNumber(profitability?.summary?.scale_now_count);
+  const winBackCount = toNumber(retention?.summary?.win_back_count);
+  const dormantCount = toNumber(retention?.summary?.dormant_count);
+  const pendingOrderShare = toNumber(orderSummary?.pending_order_share);
+
+  if (urgentReplenishmentCount > 0) {
+    actions.push({
+      id: "restock-critical-skus",
+      priority: "critical",
+      title: "Restock fast-moving SKUs before they block growth",
+      reason: `${urgentReplenishmentCount} products are already out of stock or close to running out.`,
+      action:
+        "Approve replenishment quantities for the urgent list and protect best sellers before pushing more traffic.",
+      route: "/products?stockStatus=low_stock",
+      metric: urgentReplenishmentCount,
+    });
+  }
+
+  if (missingCostCount > 0) {
+    actions.push({
+      id: "fill-missing-costs",
+      priority: "high",
+      title: "Complete saved product costs before trusting margin decisions",
+      reason: `${missingCostCount} active products are selling without complete saved cost coverage.`,
+      action:
+        "Update saved product costs so the system can separate true winners from fake winners.",
+      route: "/net-profit",
+      metric: missingCostCount,
+    });
+  }
+
+  if (marginLeakCount > 0) {
+    actions.push({
+      id: "fix-margin-leaks",
+      priority: "high",
+      title: "Fix products that are converting but leaking margin",
+      reason: `${marginLeakCount} recent products have weak or negative saved margin.`,
+      action:
+        "Review pricing, saved costs, bundle structure, or fulfillment leakage before scaling them further.",
+      route: "/net-profit",
+      metric: marginLeakCount,
+    });
+  }
+
+  if (winBackCount > 0 || dormantCount > 0) {
+    actions.push({
+      id: "launch-win-back",
+      priority: dormantCount > 0 ? "high" : "medium",
+      title: "Start a win-back cycle from the existing customer base",
+      reason: `${winBackCount} customers are ready for win-back and ${dormantCount} are already dormant.`,
+      action:
+        "Build a comeback campaign for quiet customers instead of relying only on acquisition spend.",
+      route: "/customers",
+      metric: winBackCount + dormantCount,
+    });
+  }
+
+  if (pendingOrderShare >= 20) {
+    actions.push({
+      id: "reduce-pending-load",
+      priority: "medium",
+      title: "Reduce pending order exposure",
+      reason: `${pendingOrderShare}% of recent orders are still pending.`,
+      action:
+        "Tighten follow-up and payment confirmation before those orders turn into cancellations.",
+      route: "/orders",
+      metric: pendingOrderShare,
+    });
+  }
+
+  if (scaleNowCount > 0) {
+    actions.push({
+      id: "scale-healthy-skus",
+      priority: "growth",
+      title: "Push the products that already have margin and stock room",
+      reason: `${scaleNowCount} products have healthy saved margin and enough stock to support more demand.`,
+      action:
+        "Use them in campaigns, bundles, or homepage placement before testing colder ideas.",
+      route: "/products",
+      metric: scaleNowCount,
+    });
+  }
+
+  if (actions.length === 0) {
+    actions.push({
+      id: "system-healthy",
+      priority: "growth",
+      title: "The current store loop is stable",
+      reason: "No major growth blockers were detected in stock, retention, or saved margin coverage.",
+      action:
+        "Use the scale candidates and retention segments to push controlled growth.",
+      route: "/dashboard",
+      metric: 0,
+    });
+  }
+
+  return actions
+    .sort((left, right) => getPriorityRank(left.priority) - getPriorityRank(right.priority))
+    .slice(0, 6);
+};
+
 const getRequestedStoreId = (req) => {
   const value = req.headers["x-store-id"] || req.query.store_id;
   if (!value) return null;
@@ -1546,6 +2762,133 @@ router.get("/stats", authenticateToken, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch dashboard stats" });
   }
 });
+
+router.get(
+  "/growth-center",
+  authenticateToken,
+  requirePermission("can_manage_settings"),
+  async (req, res) => {
+    const lookbackDays = normalizeGrowthLookbackDays(req.query?.days);
+    const cacheKey = `${getDashboardCacheKey(req)}::growth-center::${lookbackDays}`;
+    const profiler = getRequestProfiler();
+    const cachedEntry = getFreshCacheEntry(dashboardGrowthCenterCache, cacheKey);
+    if (cachedEntry) {
+      profiler.setMeta("dashboard.growth-center.cache", "hit");
+      res.setHeader("X-Dashboard-Cache", "hit");
+      return res.json(cachedEntry.payload);
+    }
+
+    try {
+      profiler.setMeta("dashboard.growth-center.cache", "miss");
+
+      const referenceDate = new Date();
+      const historyWindowStart = addDays(
+        referenceDate,
+        -GROWTH_CENTER_ORDERS_HISTORY_DAYS,
+      );
+      const orderScopeFilters = {
+        date_from: historyWindowStart.toISOString().slice(0, 10),
+        date_to: referenceDate.toISOString().slice(0, 10),
+      };
+
+      const [products, orders, customers] = await Promise.all([
+        getScopedRowsBatched(req, Product, {
+          selects: GROWTH_CENTER_PRODUCT_SELECTS,
+          allowUnorderedFallback: true,
+        }),
+        getScopedRowsBatched(req, Order, {
+          selects: GROWTH_CENTER_ORDER_SELECTS,
+          allowUnorderedFallback: true,
+          scopeFilters: orderScopeFilters,
+        }),
+        getScopedRowsBatched(req, Customer, {
+          selects: GROWTH_CENTER_CUSTOMER_SELECTS,
+          allowUnorderedFallback: true,
+        }),
+      ]);
+
+      const payload = measureSync(
+        "dashboard.growth-center.compute",
+        () => {
+          const customerProfiles = buildGrowthCustomerProfiles(orders, referenceDate);
+          const retention = buildGrowthRetentionSnapshot(
+            customerProfiles,
+            referenceDate,
+          );
+          const productMetrics = buildGrowthProductMetrics({
+            products,
+            orders,
+            referenceDate,
+            primaryWindowDays: lookbackDays,
+          });
+          const replenishment = buildGrowthReplenishmentSnapshot(productMetrics);
+          const profitability = buildGrowthProfitabilitySnapshot(productMetrics);
+          const orderSummary = buildGrowthOrderSummary(
+            orders,
+            referenceDate,
+            lookbackDays,
+          );
+          const freshestActivityAt = getFreshestTimestamp(
+            products.map((product) => product?.updated_at),
+            customers.flatMap((customer) => [customer?.updated_at, customer?.created_at]),
+            orders.flatMap((order) => [order?.updated_at, order?.created_at]),
+          );
+          const health = buildGrowthHealthSnapshot({
+            products,
+            customers,
+            productMetrics,
+            replenishment,
+            retention,
+            profitability,
+            orderSummary,
+            freshestActivityAt,
+            referenceDate,
+          });
+          const recommendedActions = buildGrowthActions({
+            replenishment,
+            profitability,
+            retention,
+            orderSummary,
+          });
+
+          return {
+            generated_at: referenceDate.toISOString(),
+            lookback_days: lookbackDays,
+            summary: {
+              ...health.summary,
+              recent_revenue: roundMetric(orderSummary.recent_revenue),
+              active_customers: toNumber(retention?.summary?.active_customers),
+              scale_now_count: toNumber(profitability?.summary?.scale_now_count),
+              win_back_count: toNumber(retention?.summary?.win_back_count),
+            },
+            health_checks: health.health_checks,
+            recommended_actions: recommendedActions,
+            replenishment,
+            retention,
+            profitability,
+            order_summary: orderSummary,
+          };
+        },
+        {
+          category: "app",
+          serverTimingKey: "app",
+          serverTimingDescription: "Server processing",
+        },
+      );
+
+      rememberCacheEntry(dashboardGrowthCenterCache, cacheKey, payload);
+      res.json(payload);
+    } catch (error) {
+      console.error("Growth center error:", error);
+      const staleEntry = dashboardGrowthCenterCache.get(cacheKey);
+      if (staleEntry?.payload) {
+        res.setHeader("X-Dashboard-Cache", "stale");
+        return res.json(staleEntry.payload);
+      }
+      res.status(500).json({ error: "Failed to build growth center" });
+    }
+  },
+);
 
 // Advanced analytics (admin only)
 router.get(

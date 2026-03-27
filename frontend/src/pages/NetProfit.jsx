@@ -1568,14 +1568,6 @@ function SummaryCard({ label, value, icon: Icon, color, className = "" }) {
   );
 }
 
-function MetricPanel({ children }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm shadow-slate-100/60">
-      {children}
-    </div>
-  );
-}
-
 function OverviewPill({ label, value, tone = "slate" }) {
   const toneClass =
     tone === "sky"

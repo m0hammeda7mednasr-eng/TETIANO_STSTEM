@@ -6,6 +6,7 @@ import {
   preserveProductLocalMetadata,
   preserveProductWarehouseData,
 } from "../helpers/productLocalMetadata.js";
+import { insertActivityLog } from "./activityLogService.js";
 
 const SHOPIFY_API_VERSION = "2024-01";
 
@@ -1029,17 +1030,14 @@ export class ProductUpdateService {
 
   static async logActivity(userId, action, entityId, entityName, details) {
     try {
-      const { supabase } = await import("../supabaseClient.js");
-      await supabase.from("activity_log").insert([
-        {
-          user_id: userId,
-          action: action,
-          entity_type: "product",
-          entity_id: entityId,
-          entity_name: entityName,
-          details: details,
-        },
-      ]);
+      await insertActivityLog({
+        user_id: userId,
+        action,
+        entity_type: "product",
+        entity_id: entityId,
+        entity_name: entityName,
+        details,
+      });
     } catch (error) {
       console.error("Failed to log activity:", error);
     }

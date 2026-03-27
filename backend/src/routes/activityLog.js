@@ -2,6 +2,7 @@ import express from "express";
 import { supabase } from "../supabaseClient.js";
 import { authenticateToken } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/permissions.js";
+import { insertActivityLog } from "../services/activityLogService.js";
 
 const router = express.Router();
 
@@ -143,9 +144,8 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const { data, error } = await supabase
-      .from("activity_log")
-      .insert({
+    const { data, error } = await insertActivityLog(
+      {
         user_id: req.user.id,
         action,
         entity_type,
@@ -154,9 +154,11 @@ router.post("/", async (req, res) => {
         details,
         ip_address: req.ip,
         user_agent: req.headers["user-agent"],
-      })
-      .select()
-      .single();
+      },
+      {
+        returnRow: true,
+      },
+    );
 
     if (error) {
       console.error("Database error creating activity log:", error);

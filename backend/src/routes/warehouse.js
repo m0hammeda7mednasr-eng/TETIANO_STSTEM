@@ -18,6 +18,7 @@ import {
   applyProductWarehouseInventorySnapshot,
   getProductWarehouseInventorySnapshot,
 } from "../helpers/productLocalMetadata.js";
+import { insertActivityLog } from "../services/activityLogService.js";
 
 const router = express.Router();
 
@@ -1170,7 +1171,7 @@ const writeActivityLog = async ({
   trackingMode,
 }) => {
   try {
-    const { error } = await db.from("activity_log").insert({
+    const { error } = await insertActivityLog({
       user_id: userId,
       action: movementType === "in" ? "warehouse_scan_in" : "warehouse_scan_out",
       entity_type: "warehouse_variant",

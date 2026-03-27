@@ -697,6 +697,49 @@ const buildStoreSnapshot = async ({ storeId, days = STORE_CONTEXT_LOOKBACK_DAYS 
   };
 };
 
+const safeBuildStoreSnapshot = async ({ storeId, days = STORE_CONTEXT_LOOKBACK_DAYS }) => {
+  try {
+    return await buildStoreSnapshot({ storeId, days });
+  } catch (error) {
+    console.warn("Meta analytics store snapshot fallback activated", error);
+    return {
+      lookback_days: Math.max(30, toNumber(days) || STORE_CONTEXT_LOOKBACK_DAYS),
+      since: null,
+      financial: {
+        total_revenue: 0,
+        refunded_amount: 0,
+        pending_amount: 0,
+        net_revenue: 0,
+        average_order_value: 0,
+      },
+      orders: {
+        total: 0,
+        paid: 0,
+        pending: 0,
+        refunded: 0,
+        cancelled: 0,
+        fulfilled: 0,
+        unfulfilled: 0,
+        success_rate: 0,
+        cancellation_rate: 0,
+        refund_rate: 0,
+      },
+      catalog: {
+        total_products: 0,
+        low_stock_count: 0,
+        out_of_stock_count: 0,
+      },
+      customers: {
+        total_customers: 0,
+        active_customers_lookback: 0,
+      },
+      top_products: [],
+      top_customers: [],
+      low_stock_products: [],
+    };
+  }
+};
+
 const buildOperationalRecommendations = ({
   storeSnapshot = {},
   metaOverview = {},
@@ -1325,17 +1368,9 @@ router.post("/sync", async (req, res) => {
           : adsets,
       ads: entityCollections.ads.length > 0 ? entityCollections.ads : ads,
     });
-    let storeSnapshot = {};
-    try {
-      storeSnapshot = await buildStoreSnapshot({
-        storeId,
-      });
-    } catch (storeSnapshotError) {
-      console.warn(
-        "Meta sync completed without store snapshot context",
-        storeSnapshotError,
-      );
-    }
+    const storeSnapshot = await safeBuildStoreSnapshot({
+      storeId,
+    });
     const decisionBoard = buildMetaDecisionBoard({
       overview,
       storeSnapshot,
@@ -1451,7 +1486,7 @@ router.get("/overview", async (req, res) => {
         storeId,
         days: req.query?.days,
       }),
-      buildStoreSnapshot({
+      safeBuildStoreSnapshot({
         storeId,
       }),
     ]);
@@ -1531,7 +1566,7 @@ router.post("/analyze", async (req, res) => {
         storeId,
         days: req.body?.days || req.query?.days,
       }),
-      buildStoreSnapshot({
+      safeBuildStoreSnapshot({
         storeId,
       }),
     ]);
@@ -1659,7 +1694,7 @@ router.post("/assistant/chat", async (req, res) => {
         storeId,
         days: req.body?.days || req.query?.days,
       }),
-      buildStoreSnapshot({
+      safeBuildStoreSnapshot({
         storeId,
       }),
     ]);

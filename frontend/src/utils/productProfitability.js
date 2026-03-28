@@ -92,6 +92,7 @@ export const getAppliedCostTotal = (cost, soldQuantity, ordersCount) => {
 export const buildProductCostBreakdown = (product, costs = []) => {
   const soldQuantity = toAmount(product?.sold_quantity);
   const ordersCount = toAmount(product?.orders_count);
+  const returnedQuantity = toAmount(product?.returned_quantity);
   const savedSnapshot = buildSavedUnitCostSnapshot(product, {
     quantity: soldQuantity,
     sellingPrice: product?.avg_selling_price,
@@ -128,18 +129,46 @@ export const buildProductCostBreakdown = (product, costs = []) => {
     operations: roundAmount(tracked.operations),
     other: roundAmount(tracked.other),
   };
+  const perUnitTrackedTotal = roundAmount(
+    costs
+      .filter((cost) => String(cost?.apply_to || "") === "per_unit")
+      .reduce((sum, cost) => sum + toAmount(cost?.amount), 0),
+  );
   const trackedTotal = roundAmount(
     trackedTotals.ads +
       trackedTotals.shipping +
       trackedTotals.operations +
       trackedTotals.other,
   );
+  const returnSavedPerUnit = roundAmount(
+    saved.adsUnit + saved.operationsUnit + saved.shippingUnit,
+  );
+  const returnSavedTotal =
+    product?.return_cost_saved_total !== undefined
+      ? roundAmount(product.return_cost_saved_total)
+      : roundAmount(returnSavedPerUnit * returnedQuantity);
+  const returnTrackedTotal =
+    product?.return_cost_tracked_total !== undefined
+      ? roundAmount(product.return_cost_tracked_total)
+      : roundAmount(perUnitTrackedTotal * returnedQuantity);
+  const returnCostTotal =
+    product?.return_cost_total !== undefined
+      ? roundAmount(product.return_cost_total)
+      : roundAmount(returnSavedTotal + returnTrackedTotal);
 
   return {
     saved,
     tracked: {
       ...trackedTotals,
       total: trackedTotal,
+    },
+    returns: {
+      quantity: roundAmount(returnedQuantity),
+      savedPerUnit: returnSavedPerUnit,
+      savedTotal: returnSavedTotal,
+      trackedPerUnit: perUnitTrackedTotal,
+      trackedTotal: returnTrackedTotal,
+      total: returnCostTotal,
     },
     combined: {
       ads: roundAmount(saved.adsTotal + trackedTotals.ads),
@@ -149,7 +178,7 @@ export const buildProductCostBreakdown = (product, costs = []) => {
       ),
       other: trackedTotals.other,
     },
-    totalCosts: roundAmount(saved.total + trackedTotal),
+    totalCosts: roundAmount(saved.total + trackedTotal + returnCostTotal),
   };
 };
 

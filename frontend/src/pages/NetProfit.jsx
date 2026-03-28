@@ -3,6 +3,7 @@ import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
 import { extractArray, extractObject } from "../utils/response";
 import {
+  CalendarRange,
   DollarSign,
   Download,
   Edit,
@@ -36,8 +37,11 @@ const SUMMARY_DEFAULT = {
   total_cost: 0,
   total_gross_profit: 0,
   total_operational_costs: 0,
+  total_return_cost: 0,
   total_net_profit: 0,
   total_sold_units: 0,
+  total_returned_units: 0,
+  total_returned_orders: 0,
   profit_margin: 0,
 };
 
@@ -70,6 +74,14 @@ const COST_TYPE_DEFAULT_NAMES = {
   packaging: "Packaging Cost",
   other: "Other Cost",
 };
+const DATE_PRESET_OPTIONS = [
+  { id: "today", label: "Today" },
+  { id: "yesterday", label: "Yesterday" },
+  { id: "week", label: "Week" },
+  { id: "month", label: "Month" },
+  { id: "quarter", label: "3 Months" },
+  { id: "custom", label: "Custom Date" },
+];
 const formatAmount = (value) => formatLocaleCurrency(value);
 const formatCount = (value) =>
   formatNumber(Math.round(toAmount(value)), { maximumFractionDigits: 0 });
@@ -78,6 +90,138 @@ const formatPercent = (value) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+const formatArabicNumber = (value, options = {}) =>
+  new Intl.NumberFormat("ar-EG", options).format(toAmount(value));
+const formatArabicCompactNumber = (value) =>
+  new Intl.NumberFormat("ar-EG", {
+    notation: "compact",
+    compactDisplay: "long",
+    maximumFractionDigits: 2,
+  }).format(toAmount(value));
+const buildArabicHoverText = (value, kind = "number") => {
+  const numericValue = toAmount(value);
+  const absoluteValue = Math.abs(numericValue);
+  const fullValue =
+    kind === "currency"
+      ? `${formatArabicNumber(numericValue, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })} جنيه مصري`
+      : kind === "percent"
+        ? `${formatArabicNumber(numericValue, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}%`
+        : formatArabicNumber(numericValue, {
+            maximumFractionDigits: 0,
+          });
+
+  if (kind === "percent" || absoluteValue < 1000) {
+    return fullValue;
+  }
+
+  return `${fullValue} • تقريبًا ${formatArabicCompactNumber(numericValue)}`;
+};
+const formatDateInputValue = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+const shiftDateByDays = (date, amount) => {
+  const next = new Date(date.getTime());
+  next.setDate(next.getDate() + amount);
+  return next;
+};
+const getDatePresetRange = (presetId, now = new Date()) => {
+  const today = new Date(now.getTime());
+  today.setHours(0, 0, 0, 0);
+
+  switch (presetId) {
+    case "today":
+      return {
+        dateFrom: formatDateInputValue(today),
+        dateTo: formatDateInputValue(today),
+      };
+    case "yesterday": {
+      const yesterday = shiftDateByDays(today, -1);
+      return {
+        dateFrom: formatDateInputValue(yesterday),
+        dateTo: formatDateInputValue(yesterday),
+      };
+    }
+    case "week":
+      return {
+        dateFrom: formatDateInputValue(shiftDateByDays(today, -6)),
+        dateTo: formatDateInputValue(today),
+      };
+    case "month":
+      return {
+        dateFrom: formatDateInputValue(shiftDateByDays(today, -29)),
+        dateTo: formatDateInputValue(today),
+      };
+    case "quarter":
+      return {
+        dateFrom: formatDateInputValue(shiftDateByDays(today, -89)),
+        dateTo: formatDateInputValue(today),
+      };
+    default:
+      return {
+        dateFrom: "",
+        dateTo: "",
+      };
+  }
+};
+const normalizeDateRange = (range = {}) => {
+  const dateFrom = String(range?.dateFrom || "").trim();
+  const dateTo = String(range?.dateTo || "").trim();
+
+  if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
+    return {
+      dateFrom: dateTo,
+      dateTo: dateFrom,
+      wasSwapped: true,
+    };
+  }
+
+  return {
+    dateFrom,
+    dateTo,
+    wasSwapped: false,
+  };
+};
+const resolveDatePreset = (range = {}, now = new Date()) => {
+  const normalizedDateFrom = String(range?.dateFrom || "").trim();
+  const normalizedDateTo = String(range?.dateTo || "").trim();
+
+  for (const option of DATE_PRESET_OPTIONS) {
+    if (option.id === "custom") {
+      continue;
+    }
+
+    const presetRange = getDatePresetRange(option.id, now);
+    if (
+      presetRange.dateFrom === normalizedDateFrom &&
+      presetRange.dateTo === normalizedDateTo
+    ) {
+      return option.id;
+    }
+  }
+
+  return "custom";
+};
+const buildDateScopeParams = (range = {}) => {
+  const params = {};
+
+  if (range.dateFrom) {
+    params.date_from = range.dateFrom;
+  }
+  if (range.dateTo) {
+    params.date_to = range.dateTo;
+  }
+
+  return params;
+};
 const createProductCostDraft = (product = null) => ({
   cost_price: toDraftAmount(product?.cost_price, { allowBlank: true }),
   ads_cost: toDraftAmount(product?.ads_cost),
@@ -149,6 +293,7 @@ export default function NetProfit() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState({ type: "", text: "" });
   const [searchTerm, setSearchTerm] = useState("");
+  const [dateRange, setDateRange] = useState(() => getDatePresetRange("month"));
 
   const [showCostModal, setShowCostModal] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState(null);
@@ -158,10 +303,26 @@ export default function NetProfit() {
   const [editingOperationalCostId, setEditingOperationalCostId] =
     useState(null);
   const [newCost, setNewCost] = useState(EMPTY_COST_FORM);
+  const normalizedDateRange = useMemo(
+    () => normalizeDateRange(dateRange),
+    [dateRange],
+  );
+  const activeDatePreset = useMemo(
+    () => resolveDatePreset(normalizedDateRange),
+    [normalizedDateRange],
+  );
+  const activeDatePresetLabel = useMemo(
+    () =>
+      DATE_PRESET_OPTIONS.find((option) => option.id === activeDatePreset)
+        ?.label || "Custom Date",
+    [activeDatePreset],
+  );
 
   const fetchProfitability = useCallback(async () => {
     try {
-      const { data } = await api.get("/dashboard/products");
+      const { data } = await api.get("/dashboard/products", {
+        params: buildDateScopeParams(normalizedDateRange),
+      });
       const list = extractArray(data);
       setProducts(list);
       setSummary({
@@ -173,7 +334,7 @@ export default function NetProfit() {
       setSummary(SUMMARY_DEFAULT);
       setMessage({ type: "error", text: "Failed to load net profit data" });
     }
-  }, []);
+  }, [normalizedDateRange]);
 
   const fetchOperationalCosts = useCallback(async () => {
     try {
@@ -217,6 +378,22 @@ export default function NetProfit() {
           .includes(keyword),
     );
   }, [products, searchTerm]);
+  const applyDatePreset = (presetId) => {
+    if (presetId === "custom") {
+      return;
+    }
+
+    setDateRange(getDatePresetRange(presetId));
+  };
+  const handleDateInputChange = (key, value) => {
+    setDateRange((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  };
+  const resetDateFilters = () => {
+    setDateRange(getDatePresetRange("month"));
+  };
 
   const operationalCostsByProduct = useMemo(() => {
     const nextMap = new Map();
@@ -438,6 +615,7 @@ export default function NetProfit() {
         product.title || "Untitled product",
         toAmount(product.sold_quantity),
         toAmount(product.orders_count),
+        toAmount(product.returned_quantity),
         toAmount(product.avg_selling_price),
         toAmount(product.total_revenue),
         toAmount(product.gross_profit),
@@ -451,6 +629,7 @@ export default function NetProfit() {
         breakdown.tracked.operations,
         breakdown.tracked.other,
         breakdown.tracked.total,
+        toAmount(product.return_cost_total),
         breakdown.totalCosts,
         toAmount(product.net_profit),
         toAmount(product.profit_margin),
@@ -485,6 +664,15 @@ export default function NetProfit() {
           headers: ["Field", "Value"],
           rows: [
             ["Search", searchTerm.trim() || "-"],
+            [
+              "Date range",
+              normalizedDateRange.dateFrom || normalizedDateRange.dateTo
+                ? `${normalizedDateRange.dateFrom || "-"} -> ${
+                    normalizedDateRange.dateTo || "-"
+                  }`
+                : "Preset only",
+            ],
+            ["Date preset", activeDatePresetLabel],
             ["Visible products", filteredProducts.length],
             ["Exported at", new Date().toISOString()],
           ],
@@ -497,8 +685,10 @@ export default function NetProfit() {
             ["Saved product costs", toAmount(summary.total_cost)],
             ["Gross profit", toAmount(summary.total_gross_profit)],
             ["Tracked extra costs", toAmount(summary.total_operational_costs)],
+            ["Return costs", toAmount(summary.total_return_cost)],
             ["Total net profit", toAmount(summary.total_net_profit)],
             ["Sold units", toAmount(summary.total_sold_units)],
+            ["Returned units", toAmount(summary.total_returned_units)],
             ["Profit margin", toAmount(summary.profit_margin)],
           ],
         },
@@ -509,6 +699,7 @@ export default function NetProfit() {
             "Title",
             "Sold Qty",
             "Orders",
+            "Returned Qty",
             "Avg Sell",
             "Sales Revenue",
             "Gross Profit",
@@ -522,6 +713,7 @@ export default function NetProfit() {
             "Tracked Operations",
             "Tracked Other",
             "Tracked Total",
+            "Return Cost",
             "Grand Total Costs",
             "Net Profit",
             "Profit Margin %",
@@ -545,7 +737,15 @@ export default function NetProfit() {
         },
       ],
     });
-  }, [filteredProducts, operationalCostsByProduct, searchTerm, summary]);
+  }, [
+    activeDatePresetLabel,
+    filteredProducts,
+    normalizedDateRange.dateFrom,
+    normalizedDateRange.dateTo,
+    operationalCostsByProduct,
+    searchTerm,
+    summary,
+  ]);
 
   if (loading) {
     return (
@@ -578,21 +778,29 @@ export default function NetProfit() {
                   without forcing a giant spreadsheet across the page.
                 </p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
+              <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[680px] xl:grid-cols-4">
                 <OverviewPill
                   label="Visible Products"
                   value={formatCount(filteredProducts.length)}
                   tone="sky"
+                  hoverText={buildArabicHoverText(filteredProducts.length)}
                 />
                 <OverviewPill
                   label="Tracked Entries"
                   value={formatCount(trackedEntriesCount)}
                   tone="emerald"
+                  hoverText={buildArabicHoverText(trackedEntriesCount)}
                 />
                 <OverviewPill
                   label="Missing Saved Cost"
                   value={formatCount(missingSavedCostCount)}
                   tone={missingSavedCostCount > 0 ? "amber" : "slate"}
+                  hoverText={buildArabicHoverText(missingSavedCostCount)}
+                />
+                <OverviewPill
+                  label="Active Period"
+                  value={activeDatePresetLabel}
+                  tone="slate"
                 />
               </div>
             </div>
@@ -610,53 +818,63 @@ export default function NetProfit() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-12">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <SummaryCard
-              className="xl:col-span-4"
               label="Sales Revenue"
               value={formatAmount(summary.total_revenue)}
+              hoverText={buildArabicHoverText(summary.total_revenue, "currency")}
               icon={DollarSign}
               color="bg-sky-100 text-sky-700"
             />
             <SummaryCard
-              className="xl:col-span-4"
               label="Saved Product Costs"
               value={formatAmount(summary.total_cost)}
+              hoverText={buildArabicHoverText(summary.total_cost, "currency")}
               icon={Package}
               color="bg-amber-100 text-amber-700"
             />
             <SummaryCard
-              className="xl:col-span-4"
+              label="Return Costs"
+              value={formatAmount(summary.total_return_cost)}
+              hoverText={buildArabicHoverText(summary.total_return_cost, "currency")}
+              icon={CalendarRange}
+              color="bg-rose-100 text-rose-700"
+            />
+            <SummaryCard
               label="Gross Profit"
               value={formatAmount(summary.total_gross_profit)}
+              hoverText={buildArabicHoverText(summary.total_gross_profit, "currency")}
               icon={TrendingUp}
               color="bg-teal-100 text-teal-700"
             />
             <SummaryCard
-              className="xl:col-span-3"
               label="Tracked Extra Costs"
               value={formatAmount(summary.total_operational_costs)}
+              hoverText={buildArabicHoverText(
+                summary.total_operational_costs,
+                "currency",
+              )}
               icon={TrendingUp}
               color="bg-orange-100 text-orange-700"
             />
             <SummaryCard
-              className="xl:col-span-3"
               label="Total Net Profit"
               value={formatAmount(summary.total_net_profit)}
+              hoverText={buildArabicHoverText(summary.total_net_profit, "currency")}
               icon={TrendingUp}
               color="bg-emerald-100 text-emerald-700"
             />
             <SummaryCard
-              className="xl:col-span-3"
               label="Sold Units"
               value={formatCount(summary.total_sold_units)}
+              hoverText={buildArabicHoverText(summary.total_sold_units)}
               icon={Package}
               color="bg-indigo-100 text-indigo-700"
             />
             <SummaryCard
-              className="xl:col-span-3"
               label="Profit Margin"
               value={formatPercent(summary.profit_margin)}
+              hoverText={buildArabicHoverText(summary.profit_margin, "percent")}
               icon={TrendingUp}
               color="bg-rose-100 text-rose-700"
             />
@@ -687,6 +905,78 @@ export default function NetProfit() {
                     <Download size={16} />
                     Export CSV
                   </button>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-4">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {DATE_PRESET_OPTIONS.map((option) => {
+                        const isActive = activeDatePreset === option.id;
+                        return (
+                          <button
+                            key={option.id}
+                            onClick={() => applyDatePreset(option.id)}
+                            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                              isActive
+                                ? "bg-slate-950 text-white shadow-sm"
+                                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-sm text-slate-500">
+                      Filter the profit view by order date, and keep the return
+                      losses visible inside the same period.
+                    </p>
+                    {normalizedDateRange.wasSwapped ? (
+                      <p className="text-xs font-medium text-amber-700">
+                        The selected range was auto-corrected because the start
+                        date was later than the end date.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        From
+                      </span>
+                      <input
+                        type="date"
+                        value={dateRange.dateFrom}
+                        onChange={(event) =>
+                          handleDateInputChange("dateFrom", event.target.value)
+                        }
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        To
+                      </span>
+                      <input
+                        type="date"
+                        value={dateRange.dateTo}
+                        onChange={(event) =>
+                          handleDateInputChange("dateTo", event.target.value)
+                        }
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800"
+                      />
+                    </label>
+                    <div className="flex items-end">
+                      <button
+                        onClick={resetDateFilters}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                      >
+                        Reset To Month
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -862,6 +1152,7 @@ export default function NetProfit() {
                             value={formatCount(product.sold_quantity)}
                             note="units sold"
                             align="center"
+                            hoverText={buildArabicHoverText(product.sold_quantity)}
                           />
                         </td>
                         <td className="px-4 py-5">
@@ -869,12 +1160,17 @@ export default function NetProfit() {
                             value={formatCount(product.orders_count)}
                             note="orders"
                             align="center"
+                            hoverText={buildArabicHoverText(product.orders_count)}
                           />
                         </td>
                         <td className="px-4 py-5">
                           <DataMetric
                             value={formatAmount(product.avg_selling_price)}
                             note="per unit"
+                            hoverText={buildArabicHoverText(
+                              product.avg_selling_price,
+                              "currency",
+                            )}
                           />
                         </td>
                         <td className="px-4 py-5">
@@ -882,6 +1178,10 @@ export default function NetProfit() {
                             value={formatAmount(product.total_revenue)}
                             note="sales before any costs"
                             valueClassName="text-sky-700"
+                            hoverText={buildArabicHoverText(
+                              product.total_revenue,
+                              "currency",
+                            )}
                           />
                         </td>
                         <td className="px-4 py-5">
@@ -893,6 +1193,10 @@ export default function NetProfit() {
                               breakdown.saved.total,
                             )}`}
                             valueClassName={getProfitToneClass(product.gross_profit)}
+                            hoverText={buildArabicHoverText(
+                              product.gross_profit,
+                              "currency",
+                            )}
                           />
                         </td>
                         <td className="px-4 py-5">
@@ -919,18 +1223,34 @@ export default function NetProfit() {
                                     ? "text-amber-700"
                                     : "text-slate-900"
                                 }
+                                hoverText={
+                                  productCostMissing
+                                    ? ""
+                                    : buildArabicHoverText(
+                                        breakdown.saved.productUnit,
+                                        "currency",
+                                      )
+                                }
                               />
                               <BreakdownMetric
                                 label="Ads"
                                 value={formatAmount(breakdown.combined.ads)}
                                 note={adsNote}
                                 valueClassName="text-rose-700"
+                                hoverText={buildArabicHoverText(
+                                  breakdown.combined.ads,
+                                  "currency",
+                                )}
                               />
                               <BreakdownMetric
                                 label="Shipping"
                                 value={formatAmount(breakdown.combined.shipping)}
                                 note={shippingNote}
                                 valueClassName="text-sky-700"
+                                hoverText={buildArabicHoverText(
+                                  breakdown.combined.shipping,
+                                  "currency",
+                                )}
                               />
                               <BreakdownMetric
                                 label="Operations"
@@ -939,12 +1259,36 @@ export default function NetProfit() {
                                 )}
                                 note={operationsNote}
                                 valueClassName="text-amber-700"
+                                hoverText={buildArabicHoverText(
+                                  breakdown.combined.operations,
+                                  "currency",
+                                )}
                               />
                               <BreakdownMetric
                                 label="Other"
                                 value={formatAmount(breakdown.combined.other)}
                                 note={formatEntryCount(costGroupsCount.other)}
                                 valueClassName="text-slate-700"
+                                hoverText={buildArabicHoverText(
+                                  breakdown.combined.other,
+                                  "currency",
+                                )}
+                              />
+                              <BreakdownMetric
+                                label="Returns"
+                                value={formatAmount(breakdown.returns.total)}
+                                note={
+                                  breakdown.returns.quantity > 0
+                                    ? `${formatCount(
+                                        breakdown.returns.quantity,
+                                      )} returned units`
+                                    : "No returned units"
+                                }
+                                valueClassName="text-rose-700"
+                                hoverText={buildArabicHoverText(
+                                  breakdown.returns.total,
+                                  "currency",
+                                )}
                               />
                             </div>
 
@@ -1047,7 +1391,13 @@ export default function NetProfit() {
                               breakdown.saved.total,
                             )} + tracked extras ${formatAmount(
                               breakdown.tracked.total,
+                            )} + returns ${formatAmount(
+                              breakdown.returns.total,
                             )}`}
+                            hoverText={buildArabicHoverText(
+                              breakdown.totalCosts,
+                              "currency",
+                            )}
                           />
                         </td>
                         <td className="px-4 py-5">
@@ -1057,8 +1407,14 @@ export default function NetProfit() {
                               product.gross_profit,
                             )} - tracked extras ${formatAmount(
                               breakdown.tracked.total,
+                            )} - returns ${formatAmount(
+                              breakdown.returns.total,
                             )}`}
                             valueClassName={getProfitToneClass(product.net_profit)}
+                            hoverText={buildArabicHoverText(
+                              product.net_profit,
+                              "currency",
+                            )}
                           />
                         </td>
                         <td className="px-4 py-5">
@@ -1066,7 +1422,14 @@ export default function NetProfit() {
                             <div
                               className={`rounded-full px-3 py-2 text-center text-sm font-semibold ring-1 ${marginTone.badge}`}
                             >
-                              {formatPercent(product.profit_margin)}
+                              <MetricValue
+                                display={formatPercent(product.profit_margin)}
+                                hoverText={buildArabicHoverText(
+                                  product.profit_margin,
+                                  "percent",
+                                )}
+                                className="justify-center"
+                              />
                             </div>
                             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                               <div
@@ -1228,34 +1591,72 @@ export default function NetProfit() {
                       <InfoBadge
                         label="Avg Sell"
                         value={formatAmount(selectedProduct.avg_selling_price)}
+                        hoverText={buildArabicHoverText(
+                          selectedProduct.avg_selling_price,
+                          "currency",
+                        )}
                       />
                       <InfoBadge
                         label="Saved / Unit"
                         value={formatAmount(draftProductCostPreview.totalPerUnit)}
+                        hoverText={buildArabicHoverText(
+                          draftProductCostPreview.totalPerUnit,
+                          "currency",
+                        )}
                       />
                       <InfoBadge
                         label="Saved Total"
                         value={formatAmount(draftProductCostPreview.savedTotal)}
+                        hoverText={buildArabicHoverText(
+                          draftProductCostPreview.savedTotal,
+                          "currency",
+                        )}
                       />
                       <InfoBadge
                         label="Unit Margin"
                         value={formatPercent(draftProductCostPreview.margin)}
+                        hoverText={buildArabicHoverText(
+                          draftProductCostPreview.margin,
+                          "percent",
+                        )}
                       />
                       <InfoBadge
                         label="Unit Profit"
                         value={formatAmount(draftProductCostPreview.unitProfit)}
+                        hoverText={buildArabicHoverText(
+                          draftProductCostPreview.unitProfit,
+                          "currency",
+                        )}
                       />
                       <InfoBadge
                         label="Sold Qty"
                         value={formatCount(selectedProduct.sold_quantity)}
+                        hoverText={buildArabicHoverText(
+                          selectedProduct.sold_quantity,
+                        )}
                       />
                       <InfoBadge
                         label="Tracked Extras"
                         value={formatAmount(selectedProductBreakdown.tracked.total)}
+                        hoverText={buildArabicHoverText(
+                          selectedProductBreakdown.tracked.total,
+                          "currency",
+                        )}
                       />
                       <InfoBadge
                         label="Orders"
                         value={formatCount(selectedProduct.orders_count)}
+                        hoverText={buildArabicHoverText(
+                          selectedProduct.orders_count,
+                        )}
+                      />
+                      <InfoBadge
+                        label="Return Cost"
+                        value={formatAmount(selectedProduct.return_cost_total)}
+                        hoverText={buildArabicHoverText(
+                          selectedProduct.return_cost_total,
+                          "currency",
+                        )}
                       />
                     </div>
                   )}
@@ -1477,16 +1878,18 @@ function DataMetric({
   note,
   valueClassName = "text-slate-900",
   align = "left",
+  hoverText = "",
 }) {
   const alignmentClass = align === "center" ? "text-center" : "text-left";
 
   return (
     <div className={alignmentClass}>
-      <div
+      <MetricValue
+        display={value}
+        hoverText={hoverText}
         className={`break-words text-lg font-semibold leading-7 tracking-tight tabular-nums ${valueClassName}`}
-      >
-        {value}
-      </div>
+        align={align}
+      />
       <p className="mt-1 text-xs font-medium text-slate-500">{note}</p>
     </div>
   );
@@ -1497,16 +1900,19 @@ function BreakdownMetric({
   value,
   note,
   valueClassName = "text-slate-900",
+  hoverText = "",
 }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3 shadow-sm shadow-slate-100/70">
       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
-      <div
-        className={`mt-2 break-words text-sm font-semibold leading-6 tabular-nums ${valueClassName}`}
-      >
-        {value}
+      <div className="mt-2">
+        <MetricValue
+          display={value}
+          hoverText={hoverText}
+          className={`break-words text-sm font-semibold leading-6 tabular-nums ${valueClassName}`}
+        />
       </div>
       <p className="mt-1 text-[11px] text-slate-500">{note}</p>
     </div>
@@ -1531,20 +1937,31 @@ function CostField({ label, value, onChange }) {
   );
 }
 
-function InfoBadge({ label, value }) {
+function InfoBadge({ label, value, hoverText = "" }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-100/60">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
-      <p className="mt-2 break-words text-lg font-semibold leading-7 tabular-nums text-slate-900">
-        {value}
-      </p>
+      <div className="mt-2">
+        <MetricValue
+          display={value}
+          hoverText={hoverText}
+          className="break-words text-lg font-semibold leading-7 tabular-nums text-slate-900"
+        />
+      </div>
     </div>
   );
 }
 
-function SummaryCard({ label, value, icon: Icon, color, className = "" }) {
+function SummaryCard({
+  label,
+  value,
+  icon: Icon,
+  color,
+  className = "",
+  hoverText = "",
+}) {
   return (
     <div
       className={`rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 ${className}`}
@@ -1554,9 +1971,13 @@ function SummaryCard({ label, value, icon: Icon, color, className = "" }) {
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
             {label}
           </p>
-          <p className="mt-3 break-words text-[28px] font-semibold leading-9 tracking-tight tabular-nums text-slate-950">
-            {value}
-          </p>
+          <div className="mt-3">
+            <MetricValue
+              display={value}
+              hoverText={hoverText}
+              className="break-words text-[28px] font-semibold leading-9 tracking-tight tabular-nums text-slate-950"
+            />
+          </div>
         </div>
         <div
           className={`flex h-11 w-11 items-center justify-center rounded-2xl shadow-sm shadow-slate-200/60 ${color}`}
@@ -1568,7 +1989,7 @@ function SummaryCard({ label, value, icon: Icon, color, className = "" }) {
   );
 }
 
-function OverviewPill({ label, value, tone = "slate" }) {
+function OverviewPill({ label, value, tone = "slate", hoverText = "" }) {
   const toneClass =
     tone === "sky"
       ? "border-sky-200 bg-sky-50 text-sky-800"
@@ -1583,9 +2004,38 @@ function OverviewPill({ label, value, tone = "slate" }) {
       <p className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-70">
         {label}
       </p>
-      <p className="mt-2 break-words text-xl font-semibold tracking-tight tabular-nums">
-        {value}
-      </p>
+      <div className="mt-2">
+        <MetricValue
+          display={value}
+          hoverText={hoverText}
+          className="break-words text-xl font-semibold tracking-tight tabular-nums"
+        />
+      </div>
     </div>
+  );
+}
+
+function MetricValue({
+  display,
+  hoverText = "",
+  className = "",
+  align = "left",
+}) {
+  const tooltipAlignmentClass =
+    align === "center"
+      ? "left-1/2 -translate-x-1/2"
+      : "left-0";
+
+  return (
+    <span className={`group/metric relative inline-flex max-w-full ${className}`}>
+      <span>{display}</span>
+      {hoverText ? (
+        <span
+          className={`pointer-events-none absolute bottom-full z-20 mb-2 w-max max-w-[260px] rounded-2xl bg-slate-950 px-3 py-2 text-[11px] font-medium leading-5 text-white opacity-0 shadow-xl transition duration-150 group-hover/metric:opacity-100 ${tooltipAlignmentClass}`}
+        >
+          {hoverText}
+        </span>
+      ) : null}
+    </span>
   );
 }

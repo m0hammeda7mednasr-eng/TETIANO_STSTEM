@@ -25,6 +25,7 @@ import {
   measureAsync,
   measureSync,
 } from "../helpers/requestProfiler.js";
+import { computeNetProfitMetrics } from "../helpers/netProfit.js";
 
 const router = express.Router();
 const UUID_REGEX =
@@ -3150,6 +3151,7 @@ router.get(
         getScopedRowsBatched(req, Order, {
           selects: DASHBOARD_ORDER_PROFITABILITY_SELECTS,
           allowUnorderedFallback: true,
+          scopeFilters: req.query,
         }),
       ]);
 
@@ -3162,172 +3164,14 @@ router.get(
 
       const { paginated, total, summary } = measureSync(
         "dashboard.products.compute",
-        () => {
-          const profitabilityOrders = orders.filter(
-            (order) => getOrderBookedNetAmount(order) > 0,
-          );
-          const salesByProduct = new Map();
-          const ordersByProduct = new Map();
-
-          profitabilityOrders.forEach((order) => {
-            const grossOrderAmount = getOrderBookedGrossAmount(order);
-            const netOrderAmount = getOrderBookedNetAmount(order);
-            const netRatio =
-              grossOrderAmount > 0
-                ? Math.min(1, Math.max(0, netOrderAmount / grossOrderAmount))
-                : 0;
-            if (netRatio <= 0) {
-              return;
-            }
-
-            const orderProductSet = new Set();
-            parseLineItems(order).forEach((item) => {
-              const qty = toNumber(item.quantity || 0) * netRatio;
-              const unitPrice = toNumber(item.price || 0);
-              const revenue = qty * unitPrice;
-              const keys = [
-                String(item.product_id || ""),
-                String(item.id || ""),
-                String(item.sku || ""),
-              ].filter(Boolean);
-
-              keys.forEach((key) => {
-                const current = salesByProduct.get(key) || {
-                  soldQuantity: 0,
-                  totalRevenue: 0,
-                };
-                current.soldQuantity += qty;
-                current.totalRevenue += revenue;
-                salesByProduct.set(key, current);
-                orderProductSet.add(key);
-              });
-            });
-
-            orderProductSet.forEach((key) => {
-              ordersByProduct.set(key, (ordersByProduct.get(key) || 0) + 1);
-            });
-          });
-
-          const costsByProductId = new Map();
-          productCosts.forEach((cost) => {
-            const list = costsByProductId.get(cost.product_id) || [];
-            list.push(cost);
-            costsByProductId.set(cost.product_id, list);
-          });
-
-          const metrics = products.map((product) => {
-            const productKeys = [
-              String(product.id),
-              String(product.shopify_id || ""),
-              String(product.sku || ""),
-            ].filter(Boolean);
-
-            let soldQuantity = 0;
-            let totalRevenue = 0;
-            let ordersCount = 0;
-            productKeys.forEach((key) => {
-              const sales = salesByProduct.get(key);
-              if (sales) {
-                soldQuantity = Math.max(soldQuantity, sales.soldQuantity);
-                totalRevenue = Math.max(totalRevenue, sales.totalRevenue);
-              }
-              const cnt = ordersByProduct.get(key) || 0;
-              ordersCount = Math.max(ordersCount, cnt);
-            });
-
-            const unitCost = toNumber(product.cost_price);
-            const adsCost = toNumber(product.ads_cost || 0);
-            const operationCost = toNumber(product.operation_cost || 0);
-            const shippingCost = toNumber(product.shipping_cost || 0);
-            const totalUnitCost =
-              unitCost + adsCost + operationCost + shippingCost;
-            const totalCost = totalUnitCost * soldQuantity;
-            const grossProfit = totalRevenue - totalCost;
-
-            const operationalCosts = costsByProductId.get(product.id) || [];
-            const perUnitCosts = operationalCosts
-              .filter((c) => String(c.apply_to || "") === "per_unit")
-              .reduce((sum, c) => sum + toNumber(c.amount), 0);
-            const perOrderCosts = operationalCosts
-              .filter((c) => String(c.apply_to || "") === "per_order")
-              .reduce((sum, c) => sum + toNumber(c.amount), 0);
-            const fixedProductCosts = operationalCosts
-              .filter((c) => String(c.apply_to || "") === "fixed")
-              .reduce((sum, c) => sum + toNumber(c.amount), 0);
-
-            const operationalCostsTotal =
-              perUnitCosts * soldQuantity +
-              perOrderCosts * ordersCount +
-              fixedProductCosts;
-            const netProfit = grossProfit - operationalCostsTotal;
-            const profitPerUnit =
-              soldQuantity > 0 ? netProfit / soldQuantity : 0;
-            const avgSellingPrice =
-              soldQuantity > 0
-                ? totalRevenue / soldQuantity
-                : toNumber(product.price);
-            const profitMargin =
-              totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
-
-            return {
-              ...product,
-              sold_quantity: soldQuantity,
-              orders_count: ordersCount,
-              total_revenue: parseFloat(totalRevenue.toFixed(2)),
-              total_cost: parseFloat(totalCost.toFixed(2)),
-              gross_profit: parseFloat(grossProfit.toFixed(2)),
-              operational_costs_total: parseFloat(
-                operationalCostsTotal.toFixed(2),
-              ),
-              fixed_cost_share: 0,
-              net_profit: parseFloat(netProfit.toFixed(2)),
-              profit_per_unit: parseFloat(profitPerUnit.toFixed(2)),
-              avg_selling_price: parseFloat(avgSellingPrice.toFixed(2)),
-              profit_margin: parseFloat(profitMargin.toFixed(2)),
-            };
-          });
-
-          const sorted = metrics.sort(
-            (left, right) => right.total_revenue - left.total_revenue,
-          );
-          const summary = sorted.reduce(
-            (acc, item) => {
-              acc.total_revenue += toNumber(item.total_revenue);
-              acc.total_cost += toNumber(item.total_cost);
-              acc.total_gross_profit += toNumber(item.gross_profit);
-              acc.total_operational_costs += toNumber(
-                item.operational_costs_total,
-              );
-              acc.total_net_profit += toNumber(item.net_profit);
-              acc.total_sold_units += toNumber(item.sold_quantity);
-              return acc;
-            },
-            {
-              total_revenue: 0,
-              total_cost: 0,
-              total_gross_profit: 0,
-              total_operational_costs: 0,
-              total_net_profit: 0,
-              total_sold_units: 0,
-            },
-          );
-
-          summary.profit_margin =
-            summary.total_revenue > 0
-              ? parseFloat(
-                  (
-                    (summary.total_net_profit / summary.total_revenue) *
-                    100
-                  ).toFixed(2),
-                )
-              : 0;
-
-          return {
-            paginated: sorted.slice(offset, offset + limit),
-            total: sorted.length,
-            summary,
-          };
-        },
+        () =>
+          computeNetProfitMetrics({
+            products,
+            orders,
+            productCosts,
+            limit,
+            offset,
+          }),
         {
           category: "app",
           serverTimingKey: "app",
@@ -3347,8 +3191,15 @@ router.get(
           total_operational_costs: parseFloat(
             summary.total_operational_costs.toFixed(2),
           ),
+          total_return_cost: parseFloat(summary.total_return_cost.toFixed(2)),
           total_net_profit: parseFloat(summary.total_net_profit.toFixed(2)),
           total_sold_units: parseFloat(summary.total_sold_units.toFixed(2)),
+          total_returned_units: parseFloat(
+            summary.total_returned_units.toFixed(2),
+          ),
+          total_returned_orders: parseFloat(
+            summary.total_returned_orders.toFixed(2),
+          ),
           profit_margin: summary.profit_margin,
         },
       });

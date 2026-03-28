@@ -174,7 +174,7 @@ const buildEmployeeNav = (t) => [
   },
 ];
 
-const buildAdminNav = (t) => [
+const buildAdminNav = (t, select) => [
   {
     icon: Megaphone,
     label: t("sidebar.metaAnalytics", "Meta وتحليلات"),
@@ -183,7 +183,7 @@ const buildAdminNav = (t) => [
   },
   {
     icon: TrendingUp,
-    label: t("sidebar.growthCenter", "Growth Center"),
+    label: select("مركز النمو", "Growth Center"),
     path: "/growth-center",
     permission: "can_manage_settings",
   },
@@ -271,7 +271,7 @@ export default function Sidebar() {
 
   const sharedNav = useMemo(() => buildSharedNav(t, select), [select, t]);
   const employeeNav = useMemo(() => buildEmployeeNav(t), [t]);
-  const adminNav = useMemo(() => buildAdminNav(t), [t]);
+  const adminNav = useMemo(() => buildAdminNav(t, select), [select, t]);
 
   useEffect(() => {
     setExpandedGroups((current) => {

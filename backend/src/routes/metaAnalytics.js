@@ -458,6 +458,90 @@ const getLineItems = (order) => {
   return Array.isArray(parsed?.line_items) ? parsed.line_items : [];
 };
 
+const normalizeLocationLabel = (value) =>
+  normalizeText(value).replace(/\s+/g, " ").slice(0, 80);
+
+const resolveOrderLocation = (order) => {
+  const parsed = parseOrderData(order);
+  const shippingAddress = parsed?.shipping_address || order?.shipping_address || {};
+  const billingAddress = parsed?.billing_address || order?.billing_address || {};
+
+  return {
+    city: normalizeLocationLabel(
+      shippingAddress?.city || billingAddress?.city,
+    ),
+    province: normalizeLocationLabel(
+      shippingAddress?.province ||
+        shippingAddress?.province_code ||
+        billingAddress?.province ||
+        billingAddress?.province_code,
+    ),
+    country: normalizeLocationLabel(
+      shippingAddress?.country ||
+        shippingAddress?.country_code ||
+        billingAddress?.country ||
+        billingAddress?.country_code,
+    ),
+  };
+};
+
+const incrementLocationMetrics = (map, labelKey, label, revenue) => {
+  const normalizedLabel = normalizeLocationLabel(label);
+  if (!normalizedLabel) {
+    return;
+  }
+
+  const current = map.get(normalizedLabel) || {
+    [labelKey]: normalizedLabel,
+    orders_count: 0,
+    revenue: 0,
+  };
+  current.orders_count += 1;
+  current.revenue += Math.max(0, toNumber(revenue));
+  map.set(normalizedLabel, current);
+};
+
+const buildTopLocationRows = (map, labelKey, limit = 5) => {
+  const rows = Array.from(map.values());
+  const totalOrders = rows.reduce(
+    (sum, row) => sum + toNumber(row?.orders_count),
+    0,
+  );
+  const totalRevenue = rows.reduce((sum, row) => sum + toNumber(row?.revenue), 0);
+
+  return rows
+    .sort((left, right) => {
+      const revenueDiff = toNumber(right?.revenue) - toNumber(left?.revenue);
+      if (revenueDiff !== 0) {
+        return revenueDiff;
+      }
+
+      return toNumber(right?.orders_count) - toNumber(left?.orders_count);
+    })
+    .slice(0, limit)
+    .map((row) => ({
+      [labelKey]: normalizeText(row?.[labelKey]),
+      orders_count: toNumber(row?.orders_count),
+      revenue: Number(toNumber(row?.revenue).toFixed(2)),
+      share_of_orders:
+        totalOrders > 0
+          ? Number(
+              ((toNumber(row?.orders_count) / Math.max(1, totalOrders)) * 100).toFixed(
+                2,
+              ),
+            )
+          : 0,
+      share_of_revenue:
+        totalRevenue > 0
+          ? Number(
+              ((toNumber(row?.revenue) / Math.max(0.01, totalRevenue)) * 100).toFixed(
+                2,
+              ),
+            )
+          : 0,
+    }));
+};
+
 const loadScopedRowsWithFallback = async ({
   tableName,
   selectCandidates,
@@ -630,22 +714,41 @@ const buildStoreSnapshot = async ({ storeId, days = STORE_CONTEXT_LOOKBACK_DAYS 
     }));
 
   const customerSpendMap = new Map();
+  const cityMetrics = new Map();
+  const provinceMetrics = new Map();
+  const countryMetrics = new Map();
   for (const order of paidOrders) {
     const key = normalizeText(order?.customer_email || order?.customer_name || order?.id);
     if (!key) {
-      continue;
+      // Even anonymous paid orders can still contribute to demand geography.
+    } else {
+      const current = customerSpendMap.get(key) || {
+        email: normalizeText(order?.customer_email),
+        name: normalizeText(order?.customer_name),
+        orders_count: 0,
+        total_spent: 0,
+      };
+
+      current.orders_count += 1;
+      current.total_spent += getOrderNetSalesAmount(order);
+      customerSpendMap.set(key, current);
     }
 
-    const current = customerSpendMap.get(key) || {
-      email: normalizeText(order?.customer_email),
-      name: normalizeText(order?.customer_name),
-      orders_count: 0,
-      total_spent: 0,
-    };
-
-    current.orders_count += 1;
-    current.total_spent += getOrderNetSalesAmount(order);
-    customerSpendMap.set(key, current);
+    const netOrderAmount = getOrderNetSalesAmount(order);
+    const location = resolveOrderLocation(order);
+    incrementLocationMetrics(cityMetrics, "city", location.city, netOrderAmount);
+    incrementLocationMetrics(
+      provinceMetrics,
+      "province",
+      location.province,
+      netOrderAmount,
+    );
+    incrementLocationMetrics(
+      countryMetrics,
+      "country",
+      location.country,
+      netOrderAmount,
+    );
   }
 
   const topCustomers = Array.from(customerSpendMap.values())
@@ -655,6 +758,13 @@ const buildStoreSnapshot = async ({ storeId, days = STORE_CONTEXT_LOOKBACK_DAYS 
       ...customer,
       total_spent: Number(customer.total_spent.toFixed(2)),
     }));
+  const repeatCustomersLookback = Array.from(customerSpendMap.values()).filter(
+    (customer) => toNumber(customer?.orders_count) >= 2,
+  ).length;
+  const activeCustomersLookback = customerSpendMap.size;
+  const topCities = buildTopLocationRows(cityMetrics, "city");
+  const topProvinces = buildTopLocationRows(provinceMetrics, "province");
+  const topCountries = buildTopLocationRows(countryMetrics, "country");
 
   return {
     lookback_days: normalizedDays,
@@ -689,11 +799,25 @@ const buildStoreSnapshot = async ({ storeId, days = STORE_CONTEXT_LOOKBACK_DAYS 
     },
     customers: {
       total_customers: customers.length,
-      active_customers_lookback: customerSpendMap.size,
+      active_customers_lookback: activeCustomersLookback,
+      repeat_customers_lookback: repeatCustomersLookback,
+      repeat_customer_rate:
+        activeCustomersLookback > 0
+          ? Number(
+              ((repeatCustomersLookback / activeCustomersLookback) * 100).toFixed(
+                2,
+              ),
+            )
+          : 0,
     },
     top_products: topProducts,
     top_customers: topCustomers,
     low_stock_products: lowStockProducts,
+    geography: {
+      top_cities: topCities,
+      top_provinces: topProvinces,
+      top_countries: topCountries,
+    },
   };
 };
 
@@ -732,10 +856,17 @@ const safeBuildStoreSnapshot = async ({ storeId, days = STORE_CONTEXT_LOOKBACK_D
       customers: {
         total_customers: 0,
         active_customers_lookback: 0,
+        repeat_customers_lookback: 0,
+        repeat_customer_rate: 0,
       },
       top_products: [],
       top_customers: [],
       low_stock_products: [],
+      geography: {
+        top_cities: [],
+        top_provinces: [],
+        top_countries: [],
+      },
     };
   }
 };

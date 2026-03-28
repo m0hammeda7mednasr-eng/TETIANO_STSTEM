@@ -458,17 +458,64 @@ describe("services/metaAnalyticsService", () => {
         financial: { net_revenue: 1200 },
         orders: { total: 22 },
         catalog: { low_stock_count: 3 },
+        customers: {
+          total_customers: 80,
+          active_customers_lookback: 28,
+          repeat_customers_lookback: 6,
+          repeat_customer_rate: 21.43,
+        },
         top_products: Array.from({ length: 8 }, (_, index) => ({
           id: `product-${index}`,
           title: `Product ${index}`,
+          total_revenue: 400 - index * 10,
+        })),
+        top_customers: Array.from({ length: 5 }, (_, index) => ({
+          name: `Customer ${index}`,
+          email: `customer-${index}@example.com`,
+          orders_count: 1 + (index % 3),
+          total_spent: 600 - index * 40,
         })),
         low_stock_products: Array.from({ length: 7 }, (_, index) => ({
           id: `low-${index}`,
           title: `Low ${index}`,
+          inventory_quantity: 1 + index,
         })),
+        geography: {
+          top_cities: Array.from({ length: 4 }, (_, index) => ({
+            city: `City ${index}`,
+            orders_count: 12 - index,
+            revenue: 500 - index * 25,
+            share_of_orders: 20 - index,
+            share_of_revenue: 22 - index,
+          })),
+          top_provinces: [
+            {
+              province: "Province A",
+              orders_count: 15,
+              revenue: 620,
+              share_of_orders: 27,
+              share_of_revenue: 29,
+            },
+          ],
+          top_countries: [
+            {
+              country: "Egypt",
+              orders_count: 22,
+              revenue: 1200,
+              share_of_orders: 100,
+              share_of_revenue: 100,
+            },
+          ],
+        },
       },
       metaOverview: {
-        summary: { spend: 500, roas: 2.4 },
+        summary: {
+          spend: 500,
+          roas: 2.4,
+          cpm: 18,
+          link_ctr: 1.1,
+          frequency: 3.7,
+        },
         campaigns: Array.from({ length: 9 }, (_, index) => ({
           id: `cmp-${index}`,
           name: `Campaign ${index}`,
@@ -480,11 +527,25 @@ describe("services/metaAnalyticsService", () => {
           name: `Ad ${index}`,
           spend: 50 + index,
           roas: 1.5 + index / 10,
+          diagnosis: index === 0 ? "winner" : "weak_hold",
         })),
       },
       decisionBoard: {
         summary: { scale_count: 2, pause_count: 1 },
         roas_framework: { scale_threshold: 2.8 },
+        benchmarks: {
+          cpm: 12,
+          strong_link_ctr: 1.4,
+          high_frequency: 3.5,
+        },
+        scale_now: [
+          {
+            id: "decision-0",
+            name: "Decision 0",
+            roas: 3.2,
+            purchases: 4,
+          },
+        ],
         campaigns: Array.from({ length: 10 }, (_, index) => ({
           id: `decision-${index}`,
           name: `Decision ${index}`,
@@ -495,7 +556,7 @@ describe("services/metaAnalyticsService", () => {
         creative_diagnostics: Array.from({ length: 7 }, (_, index) => ({
           id: `creative-${index}`,
           name: `Creative ${index}`,
-          diagnosis: "winner",
+          diagnosis: index === 0 ? "winner" : "weak_hold",
           action: "Protect it",
         })),
       },
@@ -516,6 +577,15 @@ describe("services/metaAnalyticsService", () => {
     expect(snapshot.assistant_questions).toHaveLength(6);
     expect(snapshot.store_snapshot.top_products).toHaveLength(5);
     expect(snapshot.store_snapshot.low_stock_products).toHaveLength(5);
+    expect(snapshot.store_snapshot.top_customers).toHaveLength(4);
+    expect(snapshot.store_snapshot.geography.top_cities).toHaveLength(4);
+    expect(snapshot.response_mode).toBe("operator_brief");
+    expect(snapshot.requested_lenses).toContain("operator_plan");
+    expect(snapshot.operational_risks.length).toBeGreaterThan(0);
+    expect(snapshot.growth_opportunities.length).toBeGreaterThan(0);
+    expect(snapshot.campaign_opportunities.length).toBeGreaterThan(0);
+    expect(snapshot.market_signals.length).toBeGreaterThan(0);
+    expect(snapshot.creative_priorities.length).toBeGreaterThan(0);
     expect(snapshot.decisions[0].why).toHaveLength(2);
   });
 

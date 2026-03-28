@@ -25,7 +25,7 @@ import { useLocale } from "../context/LocaleContext";
 import { getErrorMessage, metaAnalyticsAPI } from "../utils/api";
 
 const DEFAULT_ANALYSIS_FOCUS =
-  "Review only the decisions that matter now: what to scale, what to keep, what to test, and what to pause. Ignore inactive or old campaigns unless they directly matter.";
+  "Act as a store growth strategist. Review what to scale, what to pause, what to test, what audiences to target next, which campaign gaps exist, what creative should change, and which store-side blockers are distorting ad performance.";
 
 const META_VIEW_TABS = [
   { id: "overview", label: "Overview", icon: Target },
@@ -484,7 +484,7 @@ export default function MetaCommandCenter() {
     {
       role: "assistant",
       content:
-        "Ready. Ask about one campaign, one problem, or one decision, and I will stay on that scope.",
+        "Ready. Ask about campaigns, targeting, creative, market pressure, store blockers, or the next growth plan, and I will ground the answer in the latest store and Meta data.",
       timestamp: new Date().toISOString(),
     },
   ]);
@@ -578,10 +578,10 @@ export default function MetaCommandCenter() {
     }
 
     return [
-      "What should I pause right now and why?",
-      "Which campaigns deserve more budget today?",
-      "Why is ROAS weak or strong right now?",
-      "What creative should I rebuild first?",
+      "Give me the biggest growth blockers in the store right now.",
+      "Which campaigns or products deserve more budget today, and what are the guardrails?",
+      "What new audiences or campaign types are missing right now?",
+      "Which creative should I rebuild first, and what hook should replace it?",
     ];
   }, [assistantQuestions]);
   const formatCount = (value) =>
@@ -636,7 +636,7 @@ export default function MetaCommandCenter() {
     if (!normalizedMessage) return;
     setActiveView("ai");
     const history = assistantMessages
-      .slice(-6)
+      .slice(-8)
       .map((entry) => ({ role: entry.role, content: entry.content }));
     const userMessage = {
       role: "user",
@@ -1333,7 +1333,7 @@ export default function MetaCommandCenter() {
 
                 <Section
                   title="AI Operator Chat"
-                  description="Ask directly what should pause, scale, restock, or get a new hook."
+                  description="Ask about the whole store: what should pause, scale, restock, retarget, test next, or change in audience, offer, and creative."
                   actions={
                     <button
                       type="button"
@@ -1354,8 +1354,8 @@ export default function MetaCommandCenter() {
                         </div>
                         <p className="mt-1 text-sm leading-6 text-slate-500">
                           These prompts are generated from decision-board state,
-                          creative diagnostics, commerce pressure, and Meta
-                          guidance topics.
+                          creative diagnostics, commerce pressure, audience
+                          gaps, and Meta guidance topics.
                         </p>
                       </div>
                     </div>
@@ -1399,7 +1399,7 @@ export default function MetaCommandCenter() {
                     ))}
                     {assistantSending ? (
                       <div className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">
-                        Analyzing store and Meta context...
+                        Analyzing store, campaign, audience, and creative context...
                       </div>
                     ) : null}
                   </div>
@@ -1411,12 +1411,12 @@ export default function MetaCommandCenter() {
                         setAssistantInput(event.target.value)
                       }
                       className="w-full rounded-3xl border border-slate-200 px-4 py-3 text-sm leading-6 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100"
-                      placeholder="Ask about one campaign, one ad, or one issue only."
+                      placeholder="Ask about a campaign, audience, city, offer, creative angle, market pressure, or the next growth move."
                     />
                     <div className="mt-3 flex items-center justify-between gap-3">
                       <p className="text-xs text-slate-500">
-                        The reply is grounded in the latest store snapshot plus
-                        Meta decision data.
+                        The reply is grounded in the latest store snapshot,
+                        geography, customer behavior, and Meta decision data.
                       </p>
                       <button
                         type="button"

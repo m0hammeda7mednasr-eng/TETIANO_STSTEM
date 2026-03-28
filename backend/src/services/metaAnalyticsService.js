@@ -2196,58 +2196,134 @@ const buildAiPrompt = ({
   decisionBoard = {},
   storeSnapshot = {},
   focus = "",
-}) => ({
-  system: [
-    "You are a senior performance marketing analyst.",
-    "Analyze Meta ads performance data and produce direct, commercial recommendations.",
-    "Use the decision board and Meta playbook notes to explain what to pause, keep, test, and scale.",
-    "Prioritize active campaigns and only mention inactive or old campaigns if they directly explain the recommendation.",
-    "Keep the output compact and executive. Do not pad with low-value observations.",
-    "Explain why ROAS is strong or weak using CTR, conversion rate, CPM, frequency, and video engagement when available.",
-    "Respond in valid JSON only.",
-    "Required shape:",
-    "{",
-    '  "executive_summary": "short paragraph",',
-    '  "roas_explanation": ["..."],',
-    '  "scale_now": ["..."],',
-    '  "keep_running": ["..."],',
-    '  "pause_now": ["..."],',
-    '  "test_next": ["..."],',
-    '  "key_findings": ["..."],',
-    '  "opportunities": ["..."],',
-    '  "risks": ["..."],',
-    '  "actions": [{"title":"...","priority":"high|medium|low","reason":"...","expected_impact":"..."}],',
-    '  "tests": [{"title":"...","hypothesis":"...","metric":"..."}]',
-    "}",
-  ].join(" "),
-  user: JSON.stringify(
-    {
-      focus:
-        normalizeText(focus) ||
-        "Improve performance, budget allocation, and creative testing decisions.",
-      store_snapshot: {
-        financial: storeSnapshot?.financial || {},
-        orders: storeSnapshot?.orders || {},
-        catalog: storeSnapshot?.catalog || {},
-        top_products: normalizeArray(storeSnapshot?.top_products).slice(0, 5),
+}) => {
+  const operationalRisks = buildAssistantOperationalRisks({
+    storeSnapshot,
+    metaOverview: overview,
+    decisionBoard,
+  });
+  const growthOpportunities = buildAssistantGrowthOpportunities({
+    storeSnapshot,
+    metaOverview: overview,
+    decisionBoard,
+  });
+  const audienceHypotheses = buildAssistantAudienceHypotheses({
+    storeSnapshot,
+    decisionBoard,
+  });
+  const campaignIdeas = buildAssistantCampaignIdeas({
+    storeSnapshot,
+    decisionBoard,
+  });
+  const marketSignals = buildAssistantMarketSignals({
+    storeSnapshot,
+    metaOverview: overview,
+    decisionBoard,
+  });
+  const creativePriorities = buildAssistantCreativePriorities({
+    decisionBoard,
+  });
+
+  return {
+    system: [
+      "You are Tetiano AI, a senior store growth strategist and Meta performance operator.",
+      "Analyze the whole commercial system: demand generation, campaign structure, creative, offer, landing-page match, stock readiness, order quality, refunds, and retention.",
+      "Use only the provided context. When talking about market behavior, competitors, or audience psychology beyond direct data, label it clearly as a hypothesis or inference, never as a confirmed fact.",
+      "Prefer real store units, products, cities, customers, campaigns, and creatives from the context instead of generic advice.",
+      "Explain what is working, what is broken, what should scale, what should pause, what to test next, and what new campaigns or audience plays are missing.",
+      "When suggesting a campaign, include objective, target audience, offer angle, creative direction, and guardrail.",
+      "When explaining weak ROAS, connect it to CTR, link CTR, conversion rate, CPM, frequency, creative diagnostics, and store-side friction when available.",
+      "Keep the language executive and commercial, but do not oversimplify away critical detail.",
+      "Respond in valid JSON only.",
+      "Required shape:",
+      "{",
+      '  "executive_summary": "short paragraph",',
+      '  "store_diagnosis": {"primary_constraint":"...","growth_leverage":"...","confidence":"high|medium|low"},',
+      '  "roas_explanation": ["..."],',
+      '  "key_findings": ["..."],',
+      '  "scale_now": ["..."],',
+      '  "keep_running": ["..."],',
+      '  "pause_now": ["..."],',
+      '  "test_next": ["..."],',
+      '  "opportunities": ["..."],',
+      '  "risks": ["..."],',
+      '  "market_signals": [{"signal":"...","observation":"...","implication":"...","type":"hypothesis|inference","confidence":"high|medium|low"}],',
+      '  "audience_hypotheses": [{"segment":"...","targeting":"...","why_now":"...","offer_angle":"...","creative_angle":"...","confidence":"high|medium|low"}],',
+      '  "campaign_gaps": [{"campaign_type":"...","objective":"...","target":"...","offer_angle":"...","creative_direction":"...","guardrail":"...","why_now":"..."}],',
+      '  "creative_priorities": [{"creative":"...","diagnosis":"...","issue":"...","fix":"...","hook_direction":"...","placement_note":"..."}],',
+      '  "actions": [{"title":"...","priority":"high|medium|low","reason":"...","expected_impact":"..."}],',
+      '  "tests": [{"title":"...","hypothesis":"...","metric":"..."}]',
+      "}",
+    ].join(" "),
+    user: JSON.stringify(
+      {
+        focus:
+          normalizeText(focus) ||
+          "Improve store growth decisions, campaign allocation, creative testing, and operational readiness.",
+        store_snapshot: {
+          financial: storeSnapshot?.financial || {},
+          orders: storeSnapshot?.orders || {},
+          catalog: storeSnapshot?.catalog || {},
+          customers: storeSnapshot?.customers || {},
+          top_products: buildAssistantProductRows(storeSnapshot?.top_products, 5),
+          top_customers: buildAssistantCustomerRows(
+            storeSnapshot?.top_customers,
+            4,
+          ),
+          low_stock_products: buildAssistantProductRows(
+            storeSnapshot?.low_stock_products,
+            5,
+          ),
+          geography: {
+            top_cities: buildAssistantGeographyRows({
+              rows: storeSnapshot?.geography?.top_cities,
+              labelKey: "city",
+              limit: 4,
+            }),
+            top_provinces: buildAssistantGeographyRows({
+              rows: storeSnapshot?.geography?.top_provinces,
+              labelKey: "province",
+              limit: 4,
+            }),
+            top_countries: buildAssistantGeographyRows({
+              rows: storeSnapshot?.geography?.top_countries,
+              labelKey: "country",
+              limit: 4,
+            }),
+          },
+        },
+        meta_summary: overview?.summary || {},
+        daily: normalizeArray(overview?.daily).slice(-14),
+        top_campaigns: buildAssistantCampaignRows(overview?.campaigns, 10),
+        top_ads: buildAssistantCreativeRows(overview?.ads, 10),
+        top_accounts: normalizeArray(overview?.accounts).slice(0, 5),
+        decision_board: {
+          summary: decisionBoard?.summary || {},
+          roas_framework: decisionBoard?.roas_framework || {},
+          top_decisions: buildAssistantCampaignRows(decisionBoard?.campaigns, 8),
+          creative_diagnostics: buildAssistantCreativeRows(
+            decisionBoard?.creative_diagnostics,
+            6,
+          ),
+        },
+        growth_opportunities: growthOpportunities,
+        operational_risks: operationalRisks,
+        audience_hypotheses: audienceHypotheses,
+        campaign_gaps: campaignIdeas,
+        market_signals: marketSignals,
+        creative_priorities: creativePriorities,
+        assistant_questions: buildMetaQuestionSuggestions({
+          storeSnapshot,
+          metaOverview: overview,
+          decisionBoard,
+        }).slice(0, 6),
+        meta_playbook_notes: META_PLAYBOOK_NOTES,
       },
-      summary: overview?.summary || {},
-      daily: normalizeArray(overview?.daily).slice(-14),
-      top_campaigns: normalizeArray(overview?.campaigns).slice(0, 10),
-      top_ads: normalizeArray(overview?.ads).slice(0, 10),
-      top_accounts: normalizeArray(overview?.accounts).slice(0, 5),
-      decision_board: decisionBoard || {},
-      assistant_questions: buildMetaQuestionSuggestions({
-        storeSnapshot,
-        metaOverview: overview,
-        decisionBoard,
-      }).slice(0, 6),
-      meta_playbook_notes: META_PLAYBOOK_NOTES,
-    },
-    null,
-    2,
-  ),
-});
+      null,
+      2,
+    ),
+  };
+};
 
 export const generateOpenRouterMetaAnalysis = async ({
   apiKey,
@@ -2271,7 +2347,7 @@ export const generateOpenRouterMetaAnalysis = async ({
     siteUrl,
     siteName,
     temperature: 0.2,
-    maxCompletionTokens: 650,
+    maxCompletionTokens: 1100,
     messages: [
       {
         role: "system",
@@ -2296,7 +2372,7 @@ export const generateOpenRouterMetaAnalysis = async ({
 
 const sanitizeChatHistory = (history = []) =>
   normalizeArray(history)
-    .slice(-8)
+    .slice(-10)
     .map((entry) => ({
       role:
         normalizeText(entry?.role).toLowerCase() === "assistant"
@@ -2341,6 +2417,718 @@ const buildAssistantCreativeRows = (rows = [], limit = 5) =>
       link_ctr: toNumber(row?.link_ctr),
       action: normalizeText(row?.action),
     }));
+
+const buildAssistantProductRows = (rows = [], limit = 5) =>
+  normalizeArray(rows)
+    .slice(0, limit)
+    .map((row) => ({
+      id: normalizeText(row?.id || row?.product_id || row?.sku),
+      title:
+        normalizeText(row?.title || row?.name) ||
+        normalizeText(row?.id || row?.product_id),
+      vendor: normalizeText(row?.vendor),
+      total_revenue: toNumber(row?.total_revenue),
+      total_quantity: toNumber(row?.total_quantity),
+      orders_count: toNumber(row?.orders_count),
+      inventory_quantity: toNumber(row?.inventory_quantity),
+    }));
+
+const buildAssistantCustomerRows = (rows = [], limit = 4) =>
+  normalizeArray(rows)
+    .slice(0, limit)
+    .map((row) => ({
+      name: normalizeText(row?.name) || normalizeText(row?.email) || "Customer",
+      email: normalizeText(row?.email),
+      orders_count: toNumber(row?.orders_count),
+      total_spent: toNumber(row?.total_spent),
+    }));
+
+const buildAssistantGeographyRows = ({
+  rows = [],
+  labelKey = "label",
+  limit = 4,
+}) =>
+  normalizeArray(rows)
+    .slice(0, limit)
+    .map((row) => ({
+      label: normalizeText(row?.[labelKey] || row?.label),
+      orders_count: toNumber(row?.orders_count),
+      revenue: toNumber(row?.revenue),
+      share_of_orders: toNumber(row?.share_of_orders),
+      share_of_revenue: toNumber(row?.share_of_revenue),
+    }))
+    .filter((row) => row.label);
+
+const containsAssistantFragment = (message = "", fragments = []) => {
+  const normalizedMessage = normalizeSearchText(message);
+  if (!normalizedMessage) {
+    return false;
+  }
+
+  return normalizeArray(fragments).some((fragment) =>
+    normalizedMessage.includes(normalizeSearchText(fragment)),
+  );
+};
+
+const buildAssistantRequestProfile = ({
+  message = "",
+  focusedScope = "account_overview",
+}) => {
+  const asksStrategy = containsAssistantFragment(message, [
+    "strategy",
+    "growth",
+    "plan",
+    "roadmap",
+    "store",
+    "overall",
+    "وسع",
+    "تكبر",
+    "نمو",
+    "خطة",
+    "استراتيجية",
+    "الستور",
+    "المتجر",
+    "السوق",
+    "السوق كله",
+    "system",
+    "السيستم",
+  ]);
+  const asksAudience = containsAssistantFragment(message, [
+    "audience",
+    "target",
+    "persona",
+    "segment",
+    "اودينس",
+    "أودينس",
+    "تارجت",
+    "جمهور",
+    "فئة",
+    "مين",
+    "من هم",
+  ]);
+  const asksCreative = containsAssistantFragment(message, [
+    "creative",
+    "hook",
+    "angle",
+    "script",
+    "reels",
+    "stories",
+    "video",
+    "content",
+    "كريتيف",
+    "هوك",
+    "زاوية",
+    "فيديو",
+    "ريلز",
+    "ستوري",
+    "اعلان",
+    "إعلان",
+  ]);
+  const asksCampaignIdeas = containsAssistantFragment(message, [
+    "campaign",
+    "campaigns",
+    "funnel",
+    "launch",
+    "offer",
+    "retarget",
+    "retention",
+    "remarketing",
+    "campaign idea",
+    "حملة",
+    "حملات",
+    "لانش",
+    "عرض",
+    "ريماركتنج",
+    "اعادة استهداف",
+    "استرجاع",
+  ]);
+  const asksMarket = containsAssistantFragment(message, [
+    "market",
+    "competitor",
+    "competition",
+    "auction",
+    "saturated",
+    "منافس",
+    "منافسة",
+    "سوق",
+    "مزاد",
+    "تشبع",
+  ]);
+  const asksDiagnostics = containsAssistantFragment(message, [
+    "why",
+    "diagnose",
+    "analysis",
+    "analyze",
+    "what is wrong",
+    "problem",
+    "review",
+    "حلل",
+    "تحليل",
+    "راجع",
+    "غلط",
+    "مشكلة",
+    "ليه",
+  ]);
+
+  let responseMode = "operator_brief";
+  if (
+    focusedScope === "targeted" &&
+    !asksStrategy &&
+    !asksAudience &&
+    !asksCreative &&
+    !asksCampaignIdeas &&
+    !asksMarket &&
+    !asksDiagnostics &&
+    normalizeText(message).length <= 140
+  ) {
+    responseMode = "entity_drilldown";
+  } else if (
+    asksStrategy ||
+    asksAudience ||
+    asksCreative ||
+    asksCampaignIdeas ||
+    asksMarket ||
+    normalizeText(message).length > 140
+  ) {
+    responseMode = "strategy_deep_dive";
+  }
+
+  const requestedLenses = [];
+  if (asksDiagnostics) {
+    requestedLenses.push("diagnosis");
+  }
+  if (asksAudience) {
+    requestedLenses.push("audience");
+  }
+  if (asksCreative) {
+    requestedLenses.push("creative");
+  }
+  if (asksCampaignIdeas) {
+    requestedLenses.push("campaigns");
+  }
+  if (asksMarket) {
+    requestedLenses.push("market");
+  }
+  if (asksStrategy) {
+    requestedLenses.push("store_growth");
+  }
+  if (!requestedLenses.length) {
+    requestedLenses.push(
+      responseMode === "entity_drilldown" ? "entity_decision" : "operator_plan",
+    );
+  }
+
+  return {
+    response_mode: responseMode,
+    requested_lenses: requestedLenses.slice(0, 6),
+    allow_new_campaign_ideas:
+      responseMode !== "entity_drilldown" || asksCampaignIdeas,
+    ask_market_hypotheses: asksMarket,
+    ask_audience_strategy: asksAudience,
+    ask_creative_strategy: asksCreative,
+  };
+};
+
+const buildAssistantOperationalRisks = ({
+  storeSnapshot = {},
+  metaOverview = {},
+  decisionBoard = {},
+}) => {
+  const risks = [];
+  const orders = storeSnapshot?.orders || {};
+  const catalog = storeSnapshot?.catalog || {};
+  const metaSummary = metaOverview?.summary || {};
+  const benchmarks = decisionBoard?.benchmarks || {};
+  const creativeDiagnostics = normalizeArray(
+    decisionBoard?.creative_diagnostics,
+  );
+  const postClickDrops = creativeDiagnostics.filter(
+    (row) => normalizeText(row?.diagnosis) === "post_click_drop",
+  );
+  const fatiguedCampaigns = normalizeArray(decisionBoard?.campaigns).filter(
+    (row) => normalizeText(row?.primary_issue) === "fatigue",
+  );
+
+  if (toNumber(catalog?.low_stock_count) > 0) {
+    risks.push({
+      id: "inventory_pressure",
+      severity: toNumber(catalog?.low_stock_count) >= 5 ? "high" : "medium",
+      title: "Inventory can cap scaling",
+      reason: `${toFixedMetric(catalog?.low_stock_count, 0)} SKUs are low on stock and ${toFixedMetric(catalog?.out_of_stock_count, 0)} are already out.`,
+      action:
+        "Protect best sellers before opening more budget or expanding audience size.",
+    });
+  }
+
+  if (
+    toNumber(orders?.pending) >= 8 ||
+    toNumber(orders?.cancellation_rate) >= 10 ||
+    toNumber(orders?.refund_rate) >= 8
+  ) {
+    risks.push({
+      id: "order_quality",
+      severity: "high",
+      title: "Order quality is weakening true acquisition efficiency",
+      reason: `${toFixedMetric(orders?.pending, 0)} pending orders, ${toFixedMetric(orders?.cancellation_rate)}% cancellations, and ${toFixedMetric(orders?.refund_rate)}% refunds are still in the system.`,
+      action:
+        "Fix confirmation, promise, shipping, and payment friction before pushing harder on paid traffic.",
+    });
+  }
+
+  if (
+    fatiguedCampaigns.length > 0 ||
+    toNumber(metaSummary?.frequency) >=
+      Math.max(3, toNumber(benchmarks?.high_frequency))
+  ) {
+    risks.push({
+      id: "fatigue",
+      severity: "medium",
+      title: "Audience fatigue is building",
+      reason:
+        fatiguedCampaigns.length > 0
+          ? `${fatiguedCampaigns.length} campaigns are already flagged with fatigue.`
+          : `Frequency is ${toFixedMetric(metaSummary?.frequency)} which is near or above the fatigue guardrail.`,
+      action:
+        "Refresh creatives and widen audience entry points before adding more spend.",
+    });
+  }
+
+  if (postClickDrops.length > 0) {
+    risks.push({
+      id: "post_click",
+      severity: "medium",
+      title: "The click is stronger than the conversion",
+      reason: `${postClickDrops.length} ads are creating intent but leaking after the click.`,
+      action:
+        "Match the landing page hero, offer framing, social proof, and CTA to the ad promise.",
+    });
+  }
+
+  if (toNumber(metaSummary?.rows_count) === 0 || toNumber(metaSummary?.spend) === 0) {
+    risks.push({
+      id: "measurement",
+      severity: "high",
+      title: "Meta data is too thin for reliable optimization",
+      reason:
+        "The current window has little or no synced Meta delivery data.",
+      action:
+        "Sync Meta first, then compare spend, ROAS, CTR, conversion rate, and creative diagnostics together.",
+    });
+  }
+
+  return risks.slice(0, 5);
+};
+
+const buildAssistantGrowthOpportunities = ({
+  storeSnapshot = {},
+  decisionBoard = {},
+}) => {
+  const opportunities = [];
+  const scaleNow = normalizeArray(decisionBoard?.scale_now);
+  const creativeDiagnostics = normalizeArray(
+    decisionBoard?.creative_diagnostics,
+  );
+  const topProducts = buildAssistantProductRows(storeSnapshot?.top_products, 3);
+  const topCities = buildAssistantGeographyRows({
+    rows: storeSnapshot?.geography?.top_cities,
+    labelKey: "city",
+    limit: 2,
+  });
+  const financial = storeSnapshot?.financial || {};
+  const customers = storeSnapshot?.customers || {};
+  const winnerCreative = creativeDiagnostics.find(
+    (row) => normalizeText(row?.diagnosis) === "winner",
+  );
+
+  if (scaleNow[0]) {
+    opportunities.push({
+      id: "scale_winner",
+      title: "There is a live scaling candidate",
+      why_now: `${normalizeText(scaleNow[0]?.name) || normalizeText(scaleNow[0]?.id)} is already above the current scale threshold at ${toFixedMetric(scaleNow[0]?.roas)}x ROAS.`,
+      play:
+        "Increase budget in a controlled step, keep the winning creative stable, and watch frequency plus conversion rate after the increase.",
+    });
+  }
+
+  if (topProducts[0] && toNumber(financial?.net_revenue) > 0) {
+    const revenueShare =
+      (toNumber(topProducts[0]?.total_revenue) /
+        Math.max(0.01, toNumber(financial?.net_revenue))) *
+      100;
+    if (revenueShare >= 15) {
+      opportunities.push({
+        id: "hero_sku",
+        title: "A hero SKU can anchor acquisition",
+        why_now: `${topProducts[0].title} is contributing ${toFixedMetric(revenueShare)}% of net revenue in the current store snapshot.`,
+        play:
+          "Use the best seller as the hero offer, then build adjacent bundles or companion SKUs behind it.",
+      });
+    }
+  }
+
+  if (topCities[0] && toNumber(topCities[0]?.share_of_orders) >= 18) {
+    opportunities.push({
+      id: "geo_cluster",
+      title: "Demand is clustering in one geography",
+      why_now: `${topCities[0].label} is producing ${toFixedMetric(topCities[0]?.share_of_orders)}% of paid orders in the lookback window.`,
+      play:
+        "Test city-specific creative copy, shipping promise, or localized offer framing before scaling broader regions.",
+    });
+  }
+
+  if (
+    toNumber(customers?.active_customers_lookback) > 0 &&
+    toNumber(customers?.repeat_customer_rate) < 30
+  ) {
+    opportunities.push({
+      id: "retention_lift",
+      title: "Retention still has headroom",
+      why_now: `Repeat customer rate is ${toFixedMetric(customers?.repeat_customer_rate)}% across active customers in the lookback window.`,
+      play:
+        "Launch second-order reminders, bundles, or replenishment messaging instead of relying only on new-customer acquisition.",
+    });
+  }
+
+  if (winnerCreative) {
+    opportunities.push({
+      id: "creative_system",
+      title: "A winning creative can seed a full testing tree",
+      why_now: `${normalizeText(winnerCreative?.name) || normalizeText(winnerCreative?.id)} is acting as a current winner.`,
+      play:
+        "Keep the control live, then branch into new hooks, proofs, and offers around the same core promise.",
+    });
+  }
+
+  return opportunities.slice(0, 5);
+};
+
+const buildAssistantAudienceHypotheses = ({
+  storeSnapshot = {},
+  decisionBoard = {},
+}) => {
+  const hypotheses = [];
+  const topProducts = buildAssistantProductRows(storeSnapshot?.top_products, 2);
+  const topCities = buildAssistantGeographyRows({
+    rows: storeSnapshot?.geography?.top_cities,
+    labelKey: "city",
+    limit: 2,
+  });
+  const topCustomers = buildAssistantCustomerRows(storeSnapshot?.top_customers, 2);
+  const customers = storeSnapshot?.customers || {};
+  const creativePriorities = normalizeArray(
+    decisionBoard?.creative_diagnostics,
+  ).filter((row) => normalizeText(row?.diagnosis) !== "winner");
+
+  if (topProducts[0]) {
+    hypotheses.push({
+      segment: topCities[0]
+        ? `Prospecting buyers similar to recent customers in ${topCities[0].label}`
+        : "Prospecting buyers closest to recent purchasers",
+      targeting: topCities[0]
+        ? `Broad or lookalike prospecting seeded by conversions from ${topCities[0].label}`
+        : "Broad prospecting plus purchaser lookalikes from recent converters",
+      why_now: `${topProducts[0].title} is already the leading product in the store snapshot.`,
+      offer_angle: `Lead with the clearest problem-solution message and proof for ${topProducts[0].title}.`,
+      creative_angle:
+        creativePriorities[0] &&
+        ["weak_thumb_stop", "weak_hold"].includes(
+          normalizeText(creativePriorities[0]?.diagnosis),
+        )
+          ? "Open with the outcome or proof in the first 2 seconds instead of a slow setup."
+          : "Show the product result fast, then follow with social proof and offer clarity.",
+      confidence: topCities[0] ? "high" : "medium",
+    });
+  }
+
+  if (
+    toNumber(customers?.active_customers_lookback) > 0 &&
+    toNumber(customers?.repeat_customer_rate) < 35
+  ) {
+    hypotheses.push({
+      segment: "Recent first-order buyers who have not made a second purchase yet",
+      targeting:
+        "Custom audiences from the last 30-45 day buyers, segmented by first-order products if possible.",
+      why_now: `Repeat customer rate is only ${toFixedMetric(customers?.repeat_customer_rate)}% in the current lookback window.`,
+      offer_angle:
+        "Use bundles, replenishment timing, or a low-friction second-order incentive instead of deep discounting.",
+      creative_angle:
+        "Remind buyers what they already liked, then position the next logical purchase.",
+      confidence: "high",
+    });
+  }
+
+  if (topCities[0] && toNumber(topCities[0]?.share_of_revenue) >= 20) {
+    hypotheses.push({
+      segment: `${topCities[0].label} demand pocket`,
+      targeting:
+        "Localized city split or geo-priority budget test against the broader account baseline.",
+      why_now: `${topCities[0].label} is driving ${toFixedMetric(topCities[0]?.share_of_revenue)}% of paid revenue in the snapshot.`,
+      offer_angle:
+        "Use localized delivery promise, urgency, or trust-building details that feel native to that market pocket.",
+      creative_angle:
+        "Mirror language, lifestyle, and product use cases that fit the dominant buyers from that city.",
+      confidence: "medium",
+    });
+  }
+
+  if (topCustomers[0] && toNumber(topCustomers[0]?.orders_count) >= 2) {
+    hypotheses.push({
+      segment: "High-value repeat buyers for VIP retention",
+      targeting:
+        "Build a small retention audience from the top repeat buyers and people similar to them.",
+      why_now: `${topCustomers[0].name} and other repeat buyers are already showing stronger order depth than the account average.`,
+      offer_angle:
+        "Give early access, premium bundles, or limited launches instead of generic discount ads.",
+      creative_angle:
+        "Use exclusivity and status cues, not the same cold-acquisition message.",
+      confidence: "medium",
+    });
+  }
+
+  return hypotheses.slice(0, 4);
+};
+
+const buildAssistantCampaignIdeas = ({
+  storeSnapshot = {},
+  decisionBoard = {},
+}) => {
+  const campaignIdeas = [];
+  const scaleNow = normalizeArray(decisionBoard?.scale_now);
+  const topProducts = buildAssistantProductRows(storeSnapshot?.top_products, 2);
+  const topCities = buildAssistantGeographyRows({
+    rows: storeSnapshot?.geography?.top_cities,
+    labelKey: "city",
+    limit: 1,
+  });
+  const customers = storeSnapshot?.customers || {};
+  const creativeDiagnostics = normalizeArray(
+    decisionBoard?.creative_diagnostics,
+  );
+  const postClickDrop = creativeDiagnostics.find(
+    (row) => normalizeText(row?.diagnosis) === "post_click_drop",
+  );
+  const weakCreative = creativeDiagnostics.find((row) =>
+    ["weak_thumb_stop", "weak_hold", "late_offer"].includes(
+      normalizeText(row?.diagnosis),
+    ),
+  );
+
+  if (topProducts[0]) {
+    campaignIdeas.push({
+      campaign_type: "Hero SKU acquisition",
+      objective: "Purchases",
+      target:
+        topCities[0] && toNumber(topCities[0]?.share_of_orders) >= 18
+          ? `${topCities[0].label} buyers first, then broader purchaser lookalikes`
+          : "Broad prospecting plus recent purchaser lookalikes",
+      offer_angle: `${topProducts[0].title} as the hero product with one clear value proposition.`,
+      creative_direction:
+        "Lead with product proof early, then use social proof, outcome, and price/value framing.",
+      guardrail:
+        scaleNow[0]
+          ? `Watch ${normalizeText(scaleNow[0]?.name) || normalizeText(scaleNow[0]?.id)} frequency and conversion rate while expanding spend.`
+          : "Do not expand budget until the first winning angle is stable for another learning cycle.",
+      why_now: `${topProducts[0].title} is already proving demand inside the store snapshot.`,
+    });
+  }
+
+  if (
+    toNumber(customers?.active_customers_lookback) > 0 &&
+    toNumber(customers?.repeat_customer_rate) < 35
+  ) {
+    campaignIdeas.push({
+      campaign_type: "Second-order retention",
+      objective: "Repeat purchases",
+      target: "Buyers from the last 30-45 days who have only placed one order.",
+      offer_angle:
+        "Bundle, replenishment reminder, or easy follow-on product instead of broad discounting.",
+      creative_direction:
+        "Reference the first purchase, then show the next best product or benefit stack.",
+      guardrail:
+        "Measure incremental repeat order rate, not just cheap clicks or engagement.",
+      why_now: `Repeat customer rate is ${toFixedMetric(customers?.repeat_customer_rate)}%.`,
+    });
+  }
+
+  if (postClickDrop) {
+    campaignIdeas.push({
+      campaign_type: "Offer-clarity retargeting",
+      objective: "Recovered conversions",
+      target: "Clickers and engaged viewers who reached the product page but did not purchase.",
+      offer_angle:
+        "Remove uncertainty with clearer pricing, proof, guarantee, or delivery explanation.",
+      creative_direction:
+        "Use the same winning hook but align the landing-page promise, hero image, and CTA.",
+      guardrail:
+        "If conversion rate does not improve, treat it as a landing-page or offer issue, not a top-of-funnel issue.",
+      why_now: `${normalizeText(postClickDrop?.name) || normalizeText(postClickDrop?.id)} is winning attention but losing after the click.`,
+    });
+  }
+
+  if (weakCreative) {
+    campaignIdeas.push({
+      campaign_type: "Creative angle testing",
+      objective: "Message discovery",
+      target: "Keep the current audience stable and rotate the message.",
+      offer_angle:
+        "Test distinct hooks around pain, proof, transformation, and urgency instead of micro-edits.",
+      creative_direction:
+        "Launch 3-4 clearly different concepts and keep placements broad enough for delivery to find efficient inventory.",
+      guardrail:
+        "Change one major variable at a time so the winner is actually explainable.",
+      why_now: `${normalizeText(weakCreative?.name) || normalizeText(weakCreative?.id)} is signaling ${normalizeText(weakCreative?.diagnosis)}.`,
+    });
+  }
+
+  return campaignIdeas.slice(0, 4);
+};
+
+const buildAssistantMarketSignals = ({
+  storeSnapshot = {},
+  metaOverview = {},
+  decisionBoard = {},
+}) => {
+  const signals = [];
+  const summary = metaOverview?.summary || {};
+  const benchmarks = decisionBoard?.benchmarks || {};
+  const customers = storeSnapshot?.customers || {};
+  const catalog = storeSnapshot?.catalog || {};
+  const creativeDiagnostics = normalizeArray(
+    decisionBoard?.creative_diagnostics,
+  );
+  const hasPostClickDrop = creativeDiagnostics.some(
+    (row) => normalizeText(row?.diagnosis) === "post_click_drop",
+  );
+
+  if (
+    toNumber(summary?.cpm) > toNumber(benchmarks?.cpm) * 1.25 &&
+    toNumber(summary?.link_ctr) < Math.max(1.2, toNumber(benchmarks?.strong_link_ctr))
+  ) {
+    signals.push({
+      signal: "Auction pressure or weak attention",
+      observation: `CPM is ${toFixedMetric(summary?.cpm)} while link CTR is only ${toFixedMetric(summary?.link_ctr)}%.`,
+      implication:
+        "The market may be crowded, but the first fix is still stronger creative attention, not narrower targeting by default.",
+      confidence: "medium",
+      type: "hypothesis",
+    });
+  }
+
+  if (hasPostClickDrop) {
+    signals.push({
+      signal: "Demand exists, but the offer path is leaking",
+      observation:
+        "The account has ads that earn the click yet lose after the click.",
+      implication:
+        "The bottleneck is likely offer clarity, product-page trust, or landing-page match rather than pure audience quality.",
+      confidence: "high",
+      type: "inference",
+    });
+  }
+
+  if (toNumber(summary?.frequency) >= Math.max(3, toNumber(benchmarks?.high_frequency))) {
+    signals.push({
+      signal: "The reachable audience may be saturating",
+      observation: `Frequency is ${toFixedMetric(summary?.frequency)} in the active window.`,
+      implication:
+        "Rotate messages before leaning harder into the same audience pool.",
+      confidence: "medium",
+      type: "inference",
+    });
+  }
+
+  if (
+    toNumber(catalog?.low_stock_count) > 0 &&
+    normalizeArray(decisionBoard?.scale_now).length > 0
+  ) {
+    signals.push({
+      signal: "Demand is ahead of supply on some winners",
+      observation:
+        "There are scaleable campaigns while low-stock products still exist in the store snapshot.",
+      implication:
+        "Operational readiness, not demand generation, may be the growth limiter right now.",
+      confidence: "high",
+      type: "inference",
+    });
+  }
+
+  if (
+    toNumber(customers?.active_customers_lookback) > 0 &&
+    toNumber(customers?.repeat_customer_rate) < 30
+  ) {
+    signals.push({
+      signal: "Retention is under-monetized",
+      observation: `Repeat customer rate is ${toFixedMetric(customers?.repeat_customer_rate)}%.`,
+      implication:
+        "The store is still leaning too hard on acquisition instead of compounding revenue through follow-on orders.",
+      confidence: "medium",
+      type: "inference",
+    });
+  }
+
+  return signals.slice(0, 5);
+};
+
+const buildAssistantCreativePriorities = ({ decisionBoard = {} }) => {
+  const diagnosisPlaybook = {
+    weak_thumb_stop: {
+      issue: "The first impression is too soft.",
+      fix: "Replace the opening frame with a sharper problem, result, or proof moment.",
+      hook_direction:
+        "Show the outcome or tension in the first second instead of warming up slowly.",
+      placement_note:
+        "Favor Reels and Stories-safe framing with the product visible early.",
+    },
+    weak_hold: {
+      issue: "Viewers drop before the value lands.",
+      fix: "Shorten the intro and move the proof before the explanation.",
+      hook_direction:
+        "Cut to a faster 6-15 second structure with earlier product demonstration.",
+      placement_note:
+        "Keep pacing high and avoid dense text overlays in vertical placements.",
+    },
+    late_offer: {
+      issue: "The offer or CTA lands too late.",
+      fix: "Move price, proof, or CTA earlier in the script.",
+      hook_direction:
+        "Surface the strongest commercial reason to buy before mid-video.",
+      placement_note:
+        "Use shorter edits for Reels and feed placements where completion drops quickly.",
+    },
+    post_click_drop: {
+      issue: "The ad promise is stronger than the page conversion path.",
+      fix: "Keep the hook, but align the page hero, trust stack, and CTA with the ad.",
+      hook_direction:
+        "Repeat the winning promise across ad creative and landing page above the fold.",
+      placement_note:
+        "Optimize the click destination before launching more variants of the same ad.",
+    },
+    winner: {
+      issue: "This is currently a control creative.",
+      fix: "Do not edit the winner aggressively while testing adjacent variants.",
+      hook_direction:
+        "Branch into new proofs and offers around the same winning message.",
+      placement_note:
+        "Use the winner as the benchmark across placements before rotating it out.",
+    },
+  };
+
+  return normalizeArray(decisionBoard?.creative_diagnostics)
+    .slice(0, 4)
+    .map((row) => {
+      const diagnosis = normalizeText(row?.diagnosis) || "winner";
+      const playbook = diagnosisPlaybook[diagnosis] || diagnosisPlaybook.winner;
+
+      return {
+        creative: normalizeText(row?.name) || normalizeText(row?.id),
+        diagnosis,
+        issue: playbook.issue,
+        fix: playbook.fix,
+        hook_direction: playbook.hook_direction,
+        placement_note: playbook.placement_note,
+      };
+    });
+};
 
 const tokenizeAssistantMessage = (message = "") =>
   Array.from(
@@ -2479,7 +3267,13 @@ export const buildAssistantContextSnapshot = ({
     metaOverview,
     decisionBoard,
   });
+  const requestProfile = buildAssistantRequestProfile({
+    message,
+    focusedScope: focusedContext.scope,
+  });
   const useFocusedScope = focusedContext.scope === "targeted";
+  const includeStrategicLayers =
+    requestProfile.response_mode !== "entity_drilldown";
   const topCampaigns = buildAssistantCampaignRows(
     useFocusedScope ? focusedContext.matchedCampaigns : metaOverview?.campaigns,
     useFocusedScope ? 4 : 6,
@@ -2496,18 +3290,96 @@ export const buildAssistantContextSnapshot = ({
     focusedContext.matchedCreatives,
     4,
   );
+  const operationalRisks = includeStrategicLayers
+    ? buildAssistantOperationalRisks({
+        storeSnapshot,
+        metaOverview,
+        decisionBoard,
+      })
+    : [];
+  const growthOpportunities = includeStrategicLayers
+    ? buildAssistantGrowthOpportunities({
+        storeSnapshot,
+        metaOverview,
+        decisionBoard,
+      })
+    : [];
+  const audienceHypotheses =
+    includeStrategicLayers && requestProfile.ask_audience_strategy
+      ? buildAssistantAudienceHypotheses({
+          storeSnapshot,
+          decisionBoard,
+        })
+      : includeStrategicLayers
+        ? buildAssistantAudienceHypotheses({
+            storeSnapshot,
+            decisionBoard,
+          }).slice(0, 2)
+        : [];
+  const campaignIdeas =
+    includeStrategicLayers && requestProfile.allow_new_campaign_ideas
+      ? buildAssistantCampaignIdeas({
+          storeSnapshot,
+          decisionBoard,
+        })
+      : [];
+  const marketSignals =
+    includeStrategicLayers && requestProfile.ask_market_hypotheses
+      ? buildAssistantMarketSignals({
+          storeSnapshot,
+          metaOverview,
+          decisionBoard,
+        })
+      : includeStrategicLayers
+        ? buildAssistantMarketSignals({
+            storeSnapshot,
+            metaOverview,
+            decisionBoard,
+          }).slice(0, 2)
+        : [];
+  const creativePriorities =
+    includeStrategicLayers && requestProfile.ask_creative_strategy
+      ? buildAssistantCreativePriorities({
+          decisionBoard,
+        })
+      : includeStrategicLayers
+        ? buildAssistantCreativePriorities({
+            decisionBoard,
+          }).slice(0, 2)
+        : [];
 
   return {
     context_scope: focusedContext.scope,
+    response_mode: requestProfile.response_mode,
+    requested_lenses: requestProfile.requested_lenses,
     store_snapshot: {
       financial: storeSnapshot?.financial || {},
       orders: storeSnapshot?.orders || {},
       catalog: storeSnapshot?.catalog || {},
-      top_products: normalizeArray(storeSnapshot?.top_products).slice(0, 5),
-      low_stock_products: normalizeArray(storeSnapshot?.low_stock_products).slice(
-        0,
+      customers: storeSnapshot?.customers || {},
+      top_products: buildAssistantProductRows(storeSnapshot?.top_products, 5),
+      top_customers: buildAssistantCustomerRows(storeSnapshot?.top_customers, 4),
+      low_stock_products: buildAssistantProductRows(
+        storeSnapshot?.low_stock_products,
         5,
       ),
+      geography: {
+        top_cities: buildAssistantGeographyRows({
+          rows: storeSnapshot?.geography?.top_cities,
+          labelKey: "city",
+          limit: 4,
+        }),
+        top_provinces: buildAssistantGeographyRows({
+          rows: storeSnapshot?.geography?.top_provinces,
+          labelKey: "province",
+          limit: 4,
+        }),
+        top_countries: buildAssistantGeographyRows({
+          rows: storeSnapshot?.geography?.top_countries,
+          labelKey: "country",
+          limit: 4,
+        }),
+      },
     },
     meta_summary: metaOverview?.summary || {},
     decision_summary: decisionBoard?.summary || {},
@@ -2524,13 +3396,25 @@ export const buildAssistantContextSnapshot = ({
       useFocusedScope ? [] : decisionBoard?.creative_diagnostics,
       useFocusedScope ? 0 : 5,
     ),
+    operational_risks: operationalRisks,
+    growth_opportunities: growthOpportunities,
+    audience_hypotheses: audienceHypotheses,
+    campaign_opportunities: campaignIdeas,
+    market_signals: marketSignals,
+    creative_priorities: creativePriorities,
     recommendations: normalizeArray(recommendations).slice(
       0,
-      useFocusedScope ? 3 : 6,
+      requestProfile.response_mode === "strategy_deep_dive"
+        ? 8
+        : useFocusedScope
+          ? 3
+          : 6,
     ),
     assistant_questions: normalizeArray(assistantQuestions).slice(
       0,
-      useFocusedScope ? 0 : 6,
+      useFocusedScope && requestProfile.response_mode === "entity_drilldown"
+        ? 0
+        : 6,
     ),
     meta_playbook_notes: useFocusedScope
       ? []
@@ -2560,21 +3444,44 @@ export const generateOpenRouterStoreAssistantReply = async ({
     recommendations,
     assistantQuestions,
   });
+  const responseMode = normalizeText(compactContext?.response_mode) || "operator_brief";
+  const responseGuide =
+    responseMode === "strategy_deep_dive"
+      ? [
+          "The user is asking for a broader strategic answer.",
+          "Use short titled sections when helpful.",
+          "Cover, in this order when relevant: direct verdict, what is working, what is broken, audience strategy, campaign opportunities, creative direction, market or competitor hypotheses, operational risks, and a 7-day action plan.",
+          "When you mention market or competitor behavior beyond the data, label it clearly as a hypothesis or inference.",
+          "When you propose a campaign, include objective, target audience, offer angle, creative direction, and guardrail.",
+          "It is acceptable to use 6-10 concise bullets if that is what the question needs.",
+        ].join(" ")
+      : responseMode === "entity_drilldown"
+        ? [
+            "The user is asking about a narrow entity or issue.",
+            "Stay tightly scoped to that campaign, ad set, ad, or issue.",
+            "Start with one direct verdict sentence, then give no more than 5 short bullets.",
+            "Only bring in wider store context if it changes the decision materially.",
+          ].join(" ")
+        : [
+            "Default to an operator brief: one direct verdict sentence and up to 5 concise bullets.",
+            "Keep the answer practical and decision-oriented.",
+          ].join(" ");
   const prompt = {
     system: [
-      "You are Tetiano AI, an internal commerce operations strategist.",
-      "You help store operators decide what to pause, scale, restock, follow up on, and fix next.",
+      "You are Tetiano AI, the store's internal growth operator and Meta strategist.",
+      "You help store operators decide what to pause, scale, restock, follow up on, fix, and launch next.",
       "Use the provided store snapshot, Meta data, decision board, and recommendations only.",
       "Reply in the same language as the user. Prefer Arabic when the user writes Arabic.",
-      "Be specific, operational, and concise.",
-      "Default to a short operator brief: one direct verdict sentence, then no more than 4 short bullets.",
-      "Answer only what the user asked. Do not volunteer unrelated campaigns, inactive campaigns, old campaigns, or extra calculations unless they are necessary to answer.",
+      "Base every conclusion on the context. If something is not in the data, say it is missing.",
+      "If the user asks about market conditions, competitors, or audience behavior beyond the data, clearly label the point as a hypothesis or inference.",
+      "Be specific, commercial, and operational. Use real products, geographies, campaigns, creatives, and store constraints from the context when available.",
+      "Answer only what the user asked. Do not volunteer unrelated inactive entities or vanity observations.",
       "If the user asks about one campaign, ad set, or ad, stay tightly focused on that entity.",
       "If the user seems to mean a specific campaign or ad but the context does not clearly identify one, say that plainly and ask for the exact name.",
-      "Mention at most 3 metrics, and only if those metrics change the decision.",
+      "Mention the metrics that actually change the decision. Do not omit critical metrics just to stay short.",
       "When relevant, answer in four buckets: pause, keep running, test next, and scale now.",
-      "Explain ROAS in plain language using CTR, conversion rate, CPM, frequency, and video diagnostics when available.",
-      "When data is missing, say that clearly instead of inventing numbers.",
+      "Explain ROAS in plain language using CTR, conversion rate, CPM, frequency, video diagnostics, and store-side friction when available.",
+      responseGuide,
     ].join(" "),
     context: JSON.stringify(compactContext, null, 2),
   };
@@ -2584,8 +3491,13 @@ export const generateOpenRouterStoreAssistantReply = async ({
     model,
     siteUrl,
     siteName,
-    temperature: 0.15,
-    maxCompletionTokens: 420,
+    temperature: responseMode === "strategy_deep_dive" ? 0.18 : 0.15,
+    maxCompletionTokens:
+      responseMode === "strategy_deep_dive"
+        ? 980
+        : responseMode === "entity_drilldown"
+          ? 520
+          : 700,
     messages: [
       {
         role: "system",

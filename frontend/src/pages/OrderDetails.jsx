@@ -19,6 +19,14 @@ import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
 import { markSharedDataUpdated } from "../utils/realtime";
+import {
+  DEFAULT_SHIPPING_ISSUE_REASON,
+  getShippingIssueBadgeClassName,
+  getShippingIssueReasonLabel,
+  getShippingIssueReasonOptions,
+  isShippingIssueActive,
+  normalizeShippingIssueReason,
+} from "../utils/shippingIssues";
 
 const PAYMENT_METHOD_LABELS = {
   shopify: "Shopify",
@@ -140,6 +148,10 @@ export default function OrderDetails() {
   const [editingContact, setEditingContact] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
   const [contactForm, setContactForm] = useState(createOrderContactForm(null));
+  const [shippingIssueDraftReason, setShippingIssueDraftReason] = useState(
+    DEFAULT_SHIPPING_ISSUE_REASON,
+  );
+  const [updatingShippingIssue, setUpdatingShippingIssue] = useState(false);
   const canEditOrders = hasPermission("can_edit_orders");
 
   const showNotification = useCallback((message, type = "info") => {
@@ -202,6 +214,12 @@ export default function OrderDetails() {
 
   useEffect(() => {
     setContactForm(createOrderContactForm(order));
+  }, [order]);
+
+  useEffect(() => {
+    setShippingIssueDraftReason(
+      normalizeShippingIssueReason(order?.shipping_issue?.reason),
+    );
   }, [order]);
 
 
@@ -570,6 +588,83 @@ export default function OrderDetails() {
     }
   };
 
+  const shippingIssueOptions = useMemo(
+    () => getShippingIssueReasonOptions(select),
+    [select],
+  );
+
+  const shippingIssueActive = isShippingIssueActive(order);
+  const currentShippingIssueReason = normalizeShippingIssueReason(
+    order?.shipping_issue?.reason,
+  );
+  const hasShippingIssueReasonChanged =
+    shippingIssueActive &&
+    currentShippingIssueReason !== shippingIssueDraftReason;
+
+  const handleSaveShippingIssue = async () => {
+    if (!order || !canEditOrders) return;
+    if (shippingIssueActive && !hasShippingIssueReasonChanged) return;
+
+    setUpdatingShippingIssue(true);
+    try {
+      const response = await api.post(`/shopify/orders/${id}/shipping-issue`, {
+        active: true,
+        reason: shippingIssueDraftReason,
+      });
+
+      if (response?.data?.order) {
+        setOrder(response.data.order);
+      }
+
+      markSharedDataUpdated();
+      showNotification(
+        shippingIssueActive
+          ? select("تم تحديث سبب مشكلة الشحن", "Shipping issue updated")
+          : select("تم نقل الأوردر لمشاكل الشحن", "Order moved to Shipping Issues"),
+        "success",
+      );
+    } catch (error) {
+      console.error("Error updating shipping issue:", error);
+      showNotification(
+        error?.response?.data?.error ||
+          select("فشل تحديث مشكلة الشحن", "Failed to update shipping issue"),
+        "error",
+      );
+    } finally {
+      setUpdatingShippingIssue(false);
+    }
+  };
+
+  const handleReturnOrderToOrders = async () => {
+    if (!order || !canEditOrders) return;
+
+    setUpdatingShippingIssue(true);
+    try {
+      const response = await api.post(`/shopify/orders/${id}/shipping-issue`, {
+        active: false,
+      });
+
+      if (response?.data?.order) {
+        setOrder(response.data.order);
+      }
+
+      markSharedDataUpdated();
+      showNotification(
+        select("تم إرجاع الأوردر لقائمة الأوردرات", "Order returned to Orders"),
+        "success",
+      );
+    } catch (error) {
+      console.error("Error returning order to main orders:", error);
+      showNotification(
+        error?.response?.data?.error ||
+          select("فشل إرجاع الأوردر لقائمة الأوردرات", "Failed to return order to Orders"),
+        "error",
+      );
+    } finally {
+      setUpdatingShippingIssue(false);
+    }
+  };
+
   const handleCopyOrderReference = async () => {
     try {
       await navigator.clipboard.writeText(
@@ -790,7 +885,7 @@ export default function OrderDetails() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 w-full md:w-auto md:min-w-[680px]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 w-full md:w-auto md:min-w-[900px]">
               <div className="min-w-[210px]">
                 <label className="block text-xs text-gray-500 mb-1">
                   Payment Method
@@ -881,6 +976,77 @@ export default function OrderDetails() {
                   <span className="text-[11px] text-gray-500">
                     {getFulfillmentHelperText(order)}
                   </span>
+                </div>
+              </div>
+
+              <div className="min-w-[220px]">
+                <label className="block text-xs text-gray-500 mb-1">
+                  {select("مشاكل الشحن", "Shipping Issues")}
+                </label>
+                <select
+                  value={shippingIssueDraftReason}
+                  onChange={(e) => setShippingIssueDraftReason(e.target.value)}
+                  disabled={!canEditOrders || updatingShippingIssue}
+                  className="app-input w-full px-4 py-2.5 text-sm disabled:opacity-50"
+                >
+                  {shippingIssueOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                      shippingIssueActive
+                        ? getShippingIssueBadgeClassName(currentShippingIssueReason)
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {shippingIssueActive
+                      ? getShippingIssueReasonLabel(currentShippingIssueReason, select)
+                      : select("في الأوردرات", "In Orders")}
+                  </span>
+                  {shippingIssueActive ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleSaveShippingIssue}
+                        disabled={
+                          !canEditOrders ||
+                          updatingShippingIssue ||
+                          !hasShippingIssueReasonChanged
+                        }
+                        className="text-[11px] font-semibold text-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {select("تحديث", "Update")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleReturnOrderToOrders}
+                        disabled={!canEditOrders || updatingShippingIssue}
+                        className="text-[11px] font-semibold text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {select("رجوع للأوردرات", "Return to Orders")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => navigate("/orders/shipping-issues")}
+                        className="text-[11px] font-semibold text-slate-600"
+                      >
+                        {select("فتح الصفحة", "Open page")}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleSaveShippingIssue}
+                      disabled={!canEditOrders || updatingShippingIssue}
+                      className="text-[11px] font-semibold text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {select("نقل لمشاكل الشحن", "Move to Shipping Issues")}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

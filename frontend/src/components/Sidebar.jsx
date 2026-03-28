@@ -64,6 +64,12 @@ const buildSharedNav = (t, select) => [
         path: "/orders/in-stock-follow-up",
         permission: "can_view_orders",
       },
+      {
+        icon: Truck,
+        label: t("sidebar.shippingIssues", "Shipping Issues"),
+        path: "/orders/shipping-issues",
+        permission: "can_view_orders",
+      },
     ],
   },
   {
@@ -241,7 +247,8 @@ const isPathActive = (pathname, itemPath) => {
         pathname === "/orders" ||
         (/^\/orders\/[^/]+$/.test(pathname) &&
           pathname !== "/orders/missing" &&
-          pathname !== "/orders/in-stock-follow-up")
+          pathname !== "/orders/in-stock-follow-up" &&
+          pathname !== "/orders/shipping-issues")
       );
     case "/products":
       return (

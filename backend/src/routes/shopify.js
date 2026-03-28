@@ -35,6 +35,7 @@ import {
   MISSING_ORDER_REASON_NO_ACTION,
   MISSING_ORDER_REASON_STOCK_SHORTAGE,
 } from "../helpers/missingOrders.js";
+import { extractOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
 import { loadWarehouseAvailabilityByStoreIds } from "../services/warehouseAvailabilityService.js";
 
 const router = express.Router();
@@ -1735,6 +1736,8 @@ const buildOrderItemPreviews = (order) =>
 
 const buildOrderListItem = (order) => {
   const parsedData = parseJsonField(order?.data);
+  const localOrderMetadata = extractOrderLocalMetadata(parsedData);
+  const shippingIssue = localOrderMetadata?.shipping_issue || null;
   const financialStatus = getOrderFinancialStatus(order);
   const totalPrice = getOrderGrossAmount(order);
   const refundedAmount = getOrderRefundedAmount(order);
@@ -1794,6 +1797,8 @@ const buildOrderListItem = (order) => {
     is_paid_like: PAID_LIKE_STATUSES.has(financialStatus),
     is_fulfilled: fulfillmentStatus === "fulfilled",
     net_sales_amount: getOrderNetSalesAmount(order),
+    shipping_issue: shippingIssue,
+    shipping_issue_reason: shippingIssue?.reason || null,
   };
 };
 
@@ -2082,6 +2087,39 @@ const applyOrdersQueryFilters = (
     filtered = filtered.filter(
       (order) => resolveOrderPaymentMethod(order) === paymentMethod,
     );
+  }
+
+  if (query.shipping_issue && query.shipping_issue !== "all") {
+    const shippingIssueFilter = String(query.shipping_issue)
+      .toLowerCase()
+      .trim();
+    filtered = filtered.filter((order) => {
+      const shippingIssue =
+        extractOrderLocalMetadata(parseJsonField(order?.data))?.shipping_issue ||
+        null;
+
+      if (shippingIssueFilter === "active") {
+        return Boolean(shippingIssue);
+      }
+
+      if (shippingIssueFilter === "none") {
+        return !shippingIssue;
+      }
+
+      return true;
+    });
+  }
+
+  if (query.shipping_issue_reason && query.shipping_issue_reason !== "all") {
+    const shippingIssueReason = String(query.shipping_issue_reason)
+      .toLowerCase()
+      .trim();
+    filtered = filtered.filter((order) => {
+      const shippingIssue =
+        extractOrderLocalMetadata(parseJsonField(order?.data))?.shipping_issue ||
+        null;
+      return shippingIssue?.reason === shippingIssueReason;
+    });
   }
 
   if (query.fulfillment_status && query.fulfillment_status !== "all") {
@@ -4512,6 +4550,35 @@ router.post(
       res.json(result);
     } catch (error) {
       console.error("Update order fulfillment error:", error);
+      res
+        .status(resolveUpdateErrorStatusCode(error.message))
+        .json({ error: error.message });
+    }
+  },
+);
+
+router.post(
+  "/orders/:id/shipping-issue",
+  verifyToken,
+  requirePermission("can_edit_orders"),
+  async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const userId = req.user.id;
+      const result = await OrderManagementService.updateOrderShippingIssue(
+        userId,
+        orderId,
+        {
+          active: req.body?.active !== false,
+          reason: Object.prototype.hasOwnProperty.call(req.body || {}, "reason")
+            ? String(req.body?.reason ?? "").trim()
+            : undefined,
+        },
+      );
+
+      res.json(result);
+    } catch (error) {
+      console.error("Update order shipping issue error:", error);
       res
         .status(resolveUpdateErrorStatusCode(error.message))
         .json({ error: error.message });

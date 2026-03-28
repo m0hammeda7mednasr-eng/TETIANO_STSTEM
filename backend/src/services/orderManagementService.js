@@ -1,10 +1,12 @@
 import { Order } from "../models/index.js";
 import axios from "axios";
 import {
+  DEFAULT_SHIPPING_ISSUE_REASON,
   applyOrderLocalMetadata,
   extractOrderLocalMetadata,
   getEditableShippingAddressFromOrderData,
   mergeOrderLocalMetadata,
+  normalizeShippingIssueReason,
 } from "../helpers/orderLocalMetadata.js";
 
 const getShopifyTokenForStore = async (storeId, fallbackUserId) => {
@@ -920,6 +922,7 @@ export class OrderManagementService {
         shipping_address:
           localOrderMetadata?.contact_overrides?.shipping_address || null,
       };
+      order.shipping_issue = localOrderMetadata?.shipping_issue || null;
 
       // Extract shipping lines (shipping methods)
       order.shipping_lines = orderData?.shipping_lines || [];
@@ -1310,6 +1313,113 @@ export class OrderManagementService {
       };
     } catch (error) {
       console.error("Update order contact details error:", error);
+      throw error;
+    }
+  }
+
+  static async updateOrderShippingIssue(userId, orderId, update = {}) {
+    try {
+      const { data: order, error } = await Order.findByIdForUser(
+        userId,
+        orderId,
+      );
+
+      if (error || !order) {
+        throw new Error("Order not found");
+      }
+
+      const currentOrderData = applyOrderLocalMetadata(parseOrderData(order));
+      const currentMetadata = extractOrderLocalMetadata(currentOrderData);
+      const currentShippingIssue = currentMetadata?.shipping_issue || null;
+      const shouldActivate = update?.active !== false;
+      const nextReason = shouldActivate
+        ? normalizeShippingIssueReason(
+            update?.reason,
+            currentShippingIssue?.reason || DEFAULT_SHIPPING_ISSUE_REASON,
+          )
+        : null;
+      const currentReason =
+        currentShippingIssue?.reason || DEFAULT_SHIPPING_ISSUE_REASON;
+
+      if (
+        (shouldActivate &&
+          currentShippingIssue &&
+          currentReason === nextReason) ||
+        (!shouldActivate && !currentShippingIssue)
+      ) {
+        return {
+          success: true,
+          localOnly: true,
+          order: await this.getOrderDetails(userId, order.id),
+        };
+      }
+
+      const { supabase } = await import("../supabaseClient.js");
+      const { data: userInfo } = await supabase
+        .from("users")
+        .select("name,email")
+        .eq("id", userId)
+        .maybeSingle();
+
+      const nextOrderData = mergeOrderLocalMetadata(
+        currentOrderData,
+        {
+          shipping_issue: shouldActivate
+            ? {
+                reason: nextReason,
+              }
+            : null,
+        },
+        {
+          updatedBy: userId,
+          updatedByName:
+            String(userInfo?.name || "").trim() ||
+            String(userInfo?.email || "").trim(),
+        },
+      );
+
+      const updatePayload = {
+        data: nextOrderData,
+        local_updated_at: new Date().toISOString(),
+      };
+      let { error: updateError } = await supabase
+        .from("orders")
+        .update(updatePayload)
+        .eq("id", order.id);
+
+      if (updateError && isSchemaCompatibilityError(updateError)) {
+        const missingColumn = extractMissingColumn(updateError);
+        if (
+          missingColumn &&
+          Object.prototype.hasOwnProperty.call(updatePayload, missingColumn)
+        ) {
+          const retryPayload = { ...updatePayload };
+          delete retryPayload[missingColumn];
+          ({ error: updateError } = await supabase
+            .from("orders")
+            .update(retryPayload)
+            .eq("id", order.id));
+        }
+      }
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      await this.logSyncOperation(userId, order.id, "order_shipping_issue_update", {
+        local_only: true,
+        old_shipping_issue: currentShippingIssue,
+        new_shipping_issue:
+          extractOrderLocalMetadata(nextOrderData)?.shipping_issue || null,
+      });
+
+      return {
+        success: true,
+        localOnly: true,
+        order: await this.getOrderDetails(userId, order.id),
+      };
+    } catch (error) {
+      console.error("Update order shipping issue error:", error);
       throw error;
     }
   }

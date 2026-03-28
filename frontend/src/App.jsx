@@ -23,6 +23,7 @@ const ProductDetails = lazy(() => import("./pages/ProductDetails"));
 const BarcodeLabels = lazy(() => import("./pages/BarcodeLabels"));
 const Orders = lazy(() => import("./pages/Orders"));
 const MissingOrders = lazy(() => import("./pages/MissingOrders"));
+const ShippingIssues = lazy(() => import("./pages/ShippingIssues"));
 const OrderDetails = lazy(() => import("./pages/OrderDetails"));
 const WarehouseStock = lazy(() => import("./pages/WarehouseStock"));
 const WarehouseScanner = lazy(() => import("./pages/WarehouseScanner"));
@@ -163,6 +164,14 @@ function App() {
                 element={
                   <ProtectedRoute permission="can_view_orders">
                     <MissingOrders />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/orders/shipping-issues"
+                element={
+                  <ProtectedRoute permission="can_view_orders">
+                    <ShippingIssues />
                   </ProtectedRoute>
                 }
               />

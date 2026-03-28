@@ -1,4 +1,16 @@
 const LOCAL_ORDER_METADATA_KEY = "_tetiano_local_order";
+export const DEFAULT_SHIPPING_ISSUE_REASON = "unspecified";
+export const SHIPPING_ISSUE_REASON_VALUES = Object.freeze([
+  DEFAULT_SHIPPING_ISSUE_REASON,
+  "delivery_status",
+  "customer_issue",
+  "courier_issue",
+  "order_lost",
+  "delivery_delay",
+  "customer_data_issue",
+  "customer_cancelled",
+]);
+const SHIPPING_ISSUE_REASON_SET = new Set(SHIPPING_ISSUE_REASON_VALUES);
 const EDITABLE_SHIPPING_ADDRESS_FIELDS = [
   "address1",
   "address2",
@@ -12,6 +24,16 @@ const hasOwn = (value, key) =>
   Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
 
 const normalizeText = (value) => String(value ?? "").trim();
+export const normalizeShippingIssueReason = (
+  value,
+  fallback = DEFAULT_SHIPPING_ISSUE_REASON,
+) => {
+  const normalized = normalizeText(value)
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+
+  return SHIPPING_ISSUE_REASON_SET.has(normalized) ? normalized : fallback;
+};
 
 const toPlainObject = (value) => {
   if (!value) return {};
@@ -98,13 +120,46 @@ const normalizeContactOverrides = (value = {}) => {
   return normalized;
 };
 
+const normalizeShippingIssue = (value = {}) => {
+  const source = toPlainObject(value);
+  if (Object.keys(source).length === 0) {
+    return null;
+  }
+
+  return {
+    reason: normalizeShippingIssueReason(source?.reason),
+    updated_at: normalizeText(source?.updated_at),
+    updated_by: normalizeText(source?.updated_by),
+    updated_by_name: normalizeText(source?.updated_by_name),
+  };
+};
+
 const buildLocalMetadata = (value = {}) => {
   const source = toPlainObject(value);
   const contactOverrides = normalizeContactOverrides(source?.contact_overrides);
+  const shippingIssue = normalizeShippingIssue(source?.shipping_issue);
 
   return {
     contact_overrides: contactOverrides,
+    shipping_issue: shippingIssue,
   };
+};
+
+const buildPersistedLocalMetadata = (
+  contactOverrides = {},
+  shippingIssue = null,
+) => {
+  const persisted = {};
+
+  if (Object.keys(contactOverrides).length > 0) {
+    persisted.contact_overrides = contactOverrides;
+  }
+
+  if (shippingIssue) {
+    persisted.shipping_issue = shippingIssue;
+  }
+
+  return persisted;
 };
 
 const setNestedValue = (target, path, value) => {
@@ -154,6 +209,7 @@ export const applyOrderLocalMetadata = (
   const nextData = clonePlainObject(orderData);
   const metadata = buildLocalMetadata(metadataInput);
   const contactOverrides = metadata.contact_overrides || {};
+  const shippingIssue = metadata.shipping_issue || null;
 
   if (contactOverrides.customer_phone?.edited) {
     applyCustomerPhoneOverride(nextData, contactOverrides.customer_phone.edited);
@@ -163,8 +219,13 @@ export const applyOrderLocalMetadata = (
     applyShippingAddressOverride(nextData, contactOverrides.shipping_address.edited);
   }
 
-  if (Object.keys(contactOverrides).length > 0) {
-    nextData[LOCAL_ORDER_METADATA_KEY] = metadata;
+  const persistedMetadata = buildPersistedLocalMetadata(
+    contactOverrides,
+    shippingIssue,
+  );
+
+  if (Object.keys(persistedMetadata).length > 0) {
+    nextData[LOCAL_ORDER_METADATA_KEY] = persistedMetadata;
   } else {
     delete nextData[LOCAL_ORDER_METADATA_KEY];
   }
@@ -183,6 +244,9 @@ export const mergeOrderLocalMetadata = (
   const nextContactOverrides = {
     ...(nextMetadata.contact_overrides || {}),
   };
+  let nextShippingIssue = nextMetadata.shipping_issue
+    ? normalizeShippingIssue(nextMetadata.shipping_issue)
+    : null;
   const updatedAt =
     normalizeText(options?.updatedAt) || new Date().toISOString();
   const updatedBy = normalizeText(options?.updatedBy);
@@ -232,10 +296,27 @@ export const mergeOrderLocalMetadata = (
     }
   }
 
-  if (Object.keys(nextContactOverrides).length > 0) {
-    nextData[LOCAL_ORDER_METADATA_KEY] = {
-      contact_overrides: nextContactOverrides,
-    };
+  if (hasOwn(updates, "shipping_issue")) {
+    if (updates.shipping_issue === null) {
+      nextShippingIssue = null;
+    } else {
+      const shippingIssueInput = toPlainObject(updates.shipping_issue);
+      nextShippingIssue = {
+        reason: normalizeShippingIssueReason(shippingIssueInput?.reason),
+        updated_at: updatedAt,
+        updated_by: updatedBy,
+        updated_by_name: updatedByName,
+      };
+    }
+  }
+
+  const persistedMetadata = buildPersistedLocalMetadata(
+    nextContactOverrides,
+    nextShippingIssue,
+  );
+
+  if (Object.keys(persistedMetadata).length > 0) {
+    nextData[LOCAL_ORDER_METADATA_KEY] = persistedMetadata;
   } else {
     delete nextData[LOCAL_ORDER_METADATA_KEY];
   }

@@ -402,16 +402,15 @@ export default function GrowthCenter() {
     };
   }, [cacheKey, loadData]);
 
-  if (loading && !data) {
-    return (
+  const showLoadingState = loading && !data;
+  const loadingView = (
       <div className="flex h-screen bg-slate-100">
         <Sidebar />
         <main className="flex-1 overflow-auto">
           <LoadingSpinner label={select("جاري تحميل مركز النمو...", "Loading growth center...")} />
         </main>
       </div>
-    );
-  }
+  );
 
   const summary = data?.summary || {};
   const healthChecks = toArray(data?.health_checks);
@@ -554,6 +553,10 @@ export default function GrowthCenter() {
       })),
     [retention.win_back_candidates, select],
   );
+
+  if (showLoadingState) {
+    return loadingView;
+  }
 
   return (
     <div className="flex h-screen bg-slate-100">

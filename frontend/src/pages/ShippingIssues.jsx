@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
+  CalendarRange,
   Clock3,
   Eye,
   RefreshCw,
+  RotateCcw,
   Search,
   Undo2,
 } from "lucide-react";
@@ -29,8 +31,135 @@ import {
 const FETCH_PAGE_LIMIT = 200;
 const PAGE_SIZE = 50;
 const PAGINATION_WINDOW = 5;
+const DATE_PRESET_OPTIONS = [
+  { id: "today", ar: "اليوم", en: "Today" },
+  { id: "yesterday", ar: "أمس", en: "Yesterday" },
+  { id: "week", ar: "أسبوع", en: "Week" },
+  { id: "month", ar: "شهر", en: "Month" },
+  { id: "quarter", ar: "3 شهور", en: "3 Months" },
+  { id: "custom", ar: "تاريخ مخصص", en: "Custom Date" },
+];
 
 const normalizeText = (value) => String(value ?? "").trim();
+const formatDateInputValue = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+const shiftDateByDays = (date, amount) => {
+  const next = new Date(date.getTime());
+  next.setDate(next.getDate() + amount);
+  return next;
+};
+const getDatePresetRange = (presetId, now = new Date()) => {
+  const today = new Date(now.getTime());
+  today.setHours(0, 0, 0, 0);
+
+  switch (presetId) {
+    case "today":
+      return {
+        dateFrom: formatDateInputValue(today),
+        dateTo: formatDateInputValue(today),
+      };
+    case "yesterday": {
+      const yesterday = shiftDateByDays(today, -1);
+      return {
+        dateFrom: formatDateInputValue(yesterday),
+        dateTo: formatDateInputValue(yesterday),
+      };
+    }
+    case "week":
+      return {
+        dateFrom: formatDateInputValue(shiftDateByDays(today, -6)),
+        dateTo: formatDateInputValue(today),
+      };
+    case "month":
+      return {
+        dateFrom: formatDateInputValue(shiftDateByDays(today, -29)),
+        dateTo: formatDateInputValue(today),
+      };
+    case "quarter":
+      return {
+        dateFrom: formatDateInputValue(shiftDateByDays(today, -89)),
+        dateTo: formatDateInputValue(today),
+      };
+    default:
+      return {
+        dateFrom: "",
+        dateTo: "",
+      };
+  }
+};
+const normalizeDateRange = (range = {}) => {
+  const dateFrom = normalizeText(range?.dateFrom);
+  const dateTo = normalizeText(range?.dateTo);
+
+  if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
+    return {
+      dateFrom: dateTo,
+      dateTo: dateFrom,
+    };
+  }
+
+  return {
+    dateFrom,
+    dateTo,
+  };
+};
+const resolveDatePreset = (range = {}, now = new Date()) => {
+  const normalizedDateFrom = normalizeText(range?.dateFrom);
+  const normalizedDateTo = normalizeText(range?.dateTo);
+
+  for (const option of DATE_PRESET_OPTIONS) {
+    if (option.id === "custom") {
+      continue;
+    }
+
+    const presetRange = getDatePresetRange(option.id, now);
+    if (
+      presetRange.dateFrom === normalizedDateFrom &&
+      presetRange.dateTo === normalizedDateTo
+    ) {
+      return option.id;
+    }
+  }
+
+  return "custom";
+};
+const parseDateValue = (value) => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+const matchesDateRange = (value, range = {}) => {
+  const parsed = parseDateValue(value);
+  if (!range?.dateFrom && !range?.dateTo) {
+    return true;
+  }
+
+  if (!parsed) {
+    return false;
+  }
+
+  const fromDate = parseDateValue(range?.dateFrom);
+  const toDate = parseDateValue(range?.dateTo);
+
+  if (fromDate) {
+    fromDate.setHours(0, 0, 0, 0);
+    if (parsed < fromDate) {
+      return false;
+    }
+  }
+
+  if (toDate) {
+    toDate.setHours(23, 59, 59, 999);
+    if (parsed > toDate) {
+      return false;
+    }
+  }
+
+  return true;
+};
 
 const matchesSearch = (order, keyword) => {
   const normalized = String(keyword || "").trim().toLowerCase();
@@ -102,6 +231,7 @@ export default function ShippingIssues() {
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [reasonFilter, setReasonFilter] = useState("all");
+  const [dateRange, setDateRange] = useState(() => getDatePresetRange("quarter"));
   const [currentPage, setCurrentPage] = useState(1);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [updatingOrderIds, setUpdatingOrderIds] = useState({});
@@ -111,6 +241,38 @@ export default function ShippingIssues() {
   const reasonOptions = useMemo(() => getShippingIssueReasonOptions(select), [
     select,
   ]);
+  const datePresetOptions = useMemo(
+    () =>
+      DATE_PRESET_OPTIONS.map((option) => ({
+        ...option,
+        label: select(option.ar, option.en),
+      })),
+    [select],
+  );
+  const normalizedDateRange = useMemo(
+    () => normalizeDateRange(dateRange),
+    [dateRange],
+  );
+  const activeDatePresetId = useMemo(
+    () => resolveDatePreset(normalizedDateRange),
+    [normalizedDateRange],
+  );
+  const activeDatePresetLabel = useMemo(() => {
+    const activePreset = datePresetOptions.find(
+      (option) => option.id === activeDatePresetId,
+    );
+    if (activePresetId !== "custom") {
+      return activePreset?.label || select("الفترة", "Period");
+    }
+
+    if (normalizedDateRange.dateFrom || normalizedDateRange.dateTo) {
+      return `${normalizedDateRange.dateFrom || "..."} -> ${
+        normalizedDateRange.dateTo || "..."
+      }`;
+    }
+
+    return select("كل التواريخ", "All updates");
+  }, [activeDatePresetId, datePresetOptions, normalizedDateRange, select]);
 
   const formatDate = useCallback(
     (value) => {
@@ -212,15 +374,30 @@ export default function ShippingIssues() {
         }
 
         if (reasonFilter === "all") {
-          return true;
+          return matchesDateRange(
+            order?.shipping_issue?.updated_at ||
+              order?.updated_at ||
+              order?.created_at,
+            normalizedDateRange,
+          );
         }
 
-        return (
+        const matchesReason =
           normalizeShippingIssueReason(order?.shipping_issue?.reason) ===
-          reasonFilter
+          reasonFilter;
+
+        if (!matchesReason) {
+          return false;
+        }
+
+        return matchesDateRange(
+          order?.shipping_issue?.updated_at ||
+            order?.updated_at ||
+            order?.created_at,
+          normalizedDateRange,
         );
       }),
-    [orders, reasonFilter, searchTerm],
+    [normalizedDateRange, orders, reasonFilter, searchTerm],
   );
 
   const summary = useMemo(() => {
@@ -278,7 +455,7 @@ export default function ShippingIssues() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [reasonFilter, searchTerm]);
+  }, [normalizedDateRange.dateFrom, normalizedDateRange.dateTo, reasonFilter, searchTerm]);
 
   useEffect(() => {
     setCurrentPage((page) => Math.min(Math.max(page, 1), totalPages));
@@ -327,6 +504,33 @@ export default function ShippingIssues() {
       delete next[orderId];
       return next;
     });
+  };
+
+  const handleDatePresetChange = (presetId) => {
+    if (presetId === "custom") {
+      setDateRange({
+        dateFrom: "",
+        dateTo: "",
+      });
+      return;
+    }
+
+    setDateRange(getDatePresetRange(presetId));
+  };
+
+  const handleDateInputChange = (field, value) => {
+    setDateRange((current) =>
+      normalizeDateRange({
+        ...current,
+        [field]: value,
+      }),
+    );
+  };
+
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setReasonFilter("all");
+    setDateRange(getDatePresetRange("quarter"));
   };
 
   const getNoteDraftValue = (order, field) => {
@@ -601,46 +805,138 @@ export default function ShippingIssues() {
             />
           </div>
 
-          <div className="space-y-4 rounded-2xl bg-white p-4 shadow sm:p-5">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="relative w-full md:w-80">
-                <Search
-                  className={`absolute top-2.5 text-slate-400 ${
-                    isRTL ? "right-3" : "left-3"
-                  }`}
-                  size={16}
-                />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder={select(
-                    "\u0627\u0628\u062d\u062b \u0628\u0627\u0644\u0639\u0645\u064a\u0644 \u0623\u0648 \u0631\u0642\u0645 \u0627\u0644\u0623\u0648\u0631\u062f\u0631",
-                    "Search by customer or order number",
-                  )}
-                  className={`w-full rounded-lg border border-slate-200 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500 ${
-                    isRTL ? "pr-8 pl-3 text-right" : "pl-8 pr-3 text-left"
-                  }`}
-                />
+          <div className="app-surface rounded-[28px] p-4 sm:p-5">
+            <div className="space-y-4">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div className={isRTL ? "text-right" : "text-left"}>
+                  <h2 className="text-lg font-bold text-slate-900">
+                    {select("فلترة ومتابعة المشاكل", "Filter & Follow-Up")}
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {select(
+                      "فلتر حسب آخر تحديث للمشكلة، ودوّر بسرعة على العميل أو رقم الأوردر.",
+                      "Filter by the issue's latest update and search quickly by customer or order number.",
+                    )}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="app-button-secondary inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-700"
+                >
+                  <RotateCcw size={16} />
+                  {select("إعادة ضبط", "Reset")}
+                </button>
               </div>
 
-              <select
-                value={reasonFilter}
-                onChange={(event) => setReasonFilter(event.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500"
-              >
-                <option value="all">
-                  {select(
-                    "\u0643\u0644 \u0627\u0644\u0623\u0633\u0628\u0627\u0628",
-                    "All reasons",
-                  )}
-                </option>
-                {reasonOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
+              <div className="flex flex-wrap gap-2">
+                {datePresetOptions.map((option) => {
+                  const isActive = option.id === activeDatePresetId;
+
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => handleDatePresetChange(option.id)}
+                      className={`app-chip px-3 py-2 text-sm font-medium transition ${
+                        isActive
+                          ? "border-sky-700 bg-sky-700 text-white shadow-[0_12px_28px_-18px_rgba(2,132,199,0.9)]"
+                          : "text-slate-700 hover:bg-white"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_260px_240px]">
+                <div className="relative">
+                  <Search
+                    className={`absolute top-3 text-slate-400 ${
+                      isRTL ? "right-3" : "left-3"
+                    }`}
+                    size={16}
+                  />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder={select(
+                      "ابحث بالعميل أو رقم الأوردر",
+                      "Search by customer or order number",
+                    )}
+                    className={`app-input py-2.5 text-sm ${
+                      isRTL ? "pr-9 pl-3 text-right" : "pl-9 pr-3 text-left"
+                    }`}
+                  />
+                </div>
+
+                <select
+                  value={reasonFilter}
+                  onChange={(event) => setReasonFilter(event.target.value)}
+                  className="app-input px-3 py-2.5 text-sm text-slate-700"
+                >
+                  <option value="all">
+                    {select("كل الأسباب", "All reasons")}
                   </option>
-                ))}
-              </select>
+                  {reasonOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="app-note flex flex-col justify-center px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    {select("النطاق الحالي", "Current Scope")}
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {activeDatePresetLabel}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {select(
+                      `${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} نتيجة مطابقة`,
+                      `${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} matching issue(s)`,
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {activeDatePresetId === "custom" ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="app-note flex flex-col gap-2 px-4 py-3">
+                    <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      <CalendarRange size={14} />
+                      {select("من تاريخ", "From Date")}
+                    </span>
+                    <input
+                      type="date"
+                      value={normalizedDateRange.dateFrom}
+                      onChange={(event) =>
+                        handleDateInputChange("dateFrom", event.target.value)
+                      }
+                      className="app-input px-3 py-2.5 text-sm"
+                    />
+                  </label>
+
+                  <label className="app-note flex flex-col gap-2 px-4 py-3">
+                    <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      <CalendarRange size={14} />
+                      {select("إلى تاريخ", "To Date")}
+                    </span>
+                    <input
+                      type="date"
+                      value={normalizedDateRange.dateTo}
+                      onChange={(event) =>
+                        handleDateInputChange("dateTo", event.target.value)
+                      }
+                      className="app-input px-3 py-2.5 text-sm"
+                    />
+                  </label>
+                </div>
+              ) : null}
             </div>
 
             {loading ? (

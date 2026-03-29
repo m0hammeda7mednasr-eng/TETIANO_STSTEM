@@ -106,6 +106,7 @@ export default function ShippingIssues() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [updatingOrderIds, setUpdatingOrderIds] = useState({});
   const [noteDrafts, setNoteDrafts] = useState({});
+  const [noteSaveStatusByOrderId, setNoteSaveStatusByOrderId] = useState({});
 
   const reasonOptions = useMemo(() => getShippingIssueReasonOptions(select), [
     select,
@@ -290,6 +291,13 @@ export default function ShippingIssues() {
     }));
   };
 
+  const setNoteSaveStatus = (orderId, status) => {
+    setNoteSaveStatusByOrderId((current) => ({
+      ...current,
+      [orderId]: status,
+    }));
+  };
+
   const updateNoteDraft = (orderId, field, value) => {
     setNoteDrafts((current) => ({
       ...current,
@@ -298,6 +306,15 @@ export default function ShippingIssues() {
         [field]: value,
       },
     }));
+    setNoteSaveStatusByOrderId((current) => {
+      if (!current[orderId]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[orderId];
+      return next;
+    });
   };
 
   const clearNoteDraft = (orderId) => {
@@ -387,12 +404,36 @@ export default function ShippingIssues() {
     );
 
     setUpdatingState(orderId, true);
+    setNoteSaveStatus(orderId, "saving");
+    setError("");
     try {
-      await api.post(`/shopify/orders/${orderId}/shipping-issue`, {
+      const response = await api.post(`/shopify/orders/${orderId}/shipping-issue`, {
         active: true,
+        reason,
         shipping_company_note: shippingCompanyNote,
         customer_service_note: customerServiceNote,
       });
+      const persistedShippingIssue = response?.data?.order?.shipping_issue || {};
+      const persistedShippingCompanyNote = normalizeText(
+        persistedShippingIssue?.shipping_company_note,
+      );
+      const persistedCustomerServiceNote = normalizeText(
+        persistedShippingIssue?.customer_service_note,
+      );
+
+      if (
+        persistedShippingCompanyNote !== shippingCompanyNote ||
+        persistedCustomerServiceNote !== customerServiceNote
+      ) {
+        setNoteSaveStatus(orderId, "failed");
+        setError(
+          select(
+            "الـ backend الحالي لم يحفظ النوتس. اعمل restart أو deploy لآخر نسخة من السيرفر ثم جرّب تاني.",
+            "The current backend did not persist the notes. Restart or deploy the latest server version, then try again.",
+          ),
+        );
+        return;
+      }
 
       setOrders((current) =>
         current.map((entry) =>
@@ -412,9 +453,23 @@ export default function ShippingIssues() {
         ),
       );
       clearNoteDraft(orderId);
+      setLastUpdatedAt(new Date());
+      setNoteSaveStatus(orderId, "saved");
+      window.setTimeout(() => {
+        setNoteSaveStatusByOrderId((current) => {
+          if (current[orderId] !== "saved") {
+            return current;
+          }
+
+          const next = { ...current };
+          delete next[orderId];
+          return next;
+        });
+      }, 2500);
       markSharedDataUpdated();
     } catch (updateError) {
       console.error("Error saving shipping follow-up notes:", updateError);
+      setNoteSaveStatus(orderId, "failed");
       setError(
         updateError?.response?.data?.error ||
           select(
@@ -619,6 +674,7 @@ export default function ShippingIssues() {
                       "customer_service_note",
                     );
                     const hasUnsavedNotes = hasNoteDraftChanged(order);
+                    const noteSaveStatus = noteSaveStatusByOrderId[order.id];
 
                     return (
                       <article
@@ -767,6 +823,22 @@ export default function ShippingIssues() {
                                   "Update the issue status and save internal notes after each shipping or customer follow-up.",
                                 )}
                               </p>
+                              {noteSaveStatus === "saved" ? (
+                                <p className="mt-2 text-xs font-medium text-emerald-700">
+                                  {select(
+                                    "تم حفظ النوتس بنجاح.",
+                                    "Notes saved successfully.",
+                                  )}
+                                </p>
+                              ) : null}
+                              {noteSaveStatus === "failed" ? (
+                                <p className="mt-2 text-xs font-medium text-rose-700">
+                                  {select(
+                                    "فشل تأكيد حفظ النوتس من السيرفر.",
+                                    "Could not confirm note persistence from the server.",
+                                  )}
+                                </p>
+                              ) : null}
                             </div>
 
                             <div className="flex flex-wrap gap-2">
@@ -777,8 +849,12 @@ export default function ShippingIssues() {
                                 className="inline-flex items-center gap-1 rounded-lg bg-sky-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 {select(
-                                  "\u062d\u0641\u0638 \u0627\u0644\u0646\u0648\u062a\u0633",
-                                  "Save notes",
+                                  noteSaveStatus === "saving"
+                                    ? "\u062c\u0627\u0631\u064a \u062d\u0641\u0638 \u0627\u0644\u0646\u0648\u062a\u0633..."
+                                    : "\u062d\u0641\u0638 \u0627\u0644\u0646\u0648\u062a\u0633",
+                                  noteSaveStatus === "saving"
+                                    ? "Saving notes..."
+                                    : "Save notes",
                                 )}
                               </button>
                               <button

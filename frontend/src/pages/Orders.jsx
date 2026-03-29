@@ -42,9 +42,8 @@ import {
   writeCachedView,
 } from "../utils/viewCache";
 import {
-  DEFAULT_SHIPPING_ISSUE_REASON,
+  isShippingIssueClosed,
   isShippingIssueActive,
-  normalizeShippingIssueReason,
 } from "../utils/shippingIssues";
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
@@ -946,10 +945,8 @@ export default function Orders() {
   const shippingIssuesSummary = useMemo(
     () => ({
       total: shippingIssueOrders.length,
-      unspecified: shippingIssueOrders.filter(
-        (order) =>
-          normalizeShippingIssueReason(order?.shipping_issue?.reason) ===
-          DEFAULT_SHIPPING_ISSUE_REASON,
+      openFollowUp: shippingIssueOrders.filter(
+        (order) => !isShippingIssueClosed(order?.shipping_issue?.reason),
       ).length,
     }),
     [shippingIssueOrders],
@@ -1609,11 +1606,11 @@ export default function Orders() {
                       "These orders are removed from the main list and tracked from the Shipping Issues page until they are returned back.",
                     )}
                   </p>
-                  {shippingIssuesSummary.unspecified > 0 ? (
+                  {shippingIssuesSummary.openFollowUp > 0 ? (
                     <p className="mt-2 text-xs font-medium text-violet-900/80">
                       {select(
-                        `${formatNumber(shippingIssuesSummary.unspecified, { maximumFractionDigits: 0 })} أوردر لسه بدون تحديد سبب`,
-                        `${formatNumber(shippingIssuesSummary.unspecified, { maximumFractionDigits: 0 })} order(s) still need an issue reason`,
+                        `لسه ${formatNumber(shippingIssuesSummary.openFollowUp, { maximumFractionDigits: 0 })} أوردر في متابعة شحن مفتوحة`,
+                        `${formatNumber(shippingIssuesSummary.openFollowUp, { maximumFractionDigits: 0 })} order(s) still have an open shipping follow-up`,
                       )}
                     </p>
                   ) : null}

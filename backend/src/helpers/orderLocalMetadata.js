@@ -1,14 +1,13 @@
 const LOCAL_ORDER_METADATA_KEY = "_tetiano_local_order";
-export const DEFAULT_SHIPPING_ISSUE_REASON = "unspecified";
+export const DEFAULT_SHIPPING_ISSUE_REASON = "issue";
 export const SHIPPING_ISSUE_REASON_VALUES = Object.freeze([
+  "confirm_return",
+  "part_with_phone",
+  "delivered",
+  "cancel",
   DEFAULT_SHIPPING_ISSUE_REASON,
-  "delivery_status",
-  "customer_issue",
-  "courier_issue",
-  "order_lost",
-  "delivery_delay",
-  "customer_data_issue",
-  "customer_cancelled",
+  "part",
+  "return_with_phone",
 ]);
 const SHIPPING_ISSUE_REASON_SET = new Set(SHIPPING_ISSUE_REASON_VALUES);
 const EDITABLE_SHIPPING_ADDRESS_FIELDS = [
@@ -128,6 +127,8 @@ const normalizeShippingIssue = (value = {}) => {
 
   return {
     reason: normalizeShippingIssueReason(source?.reason),
+    shipping_company_note: normalizeText(source?.shipping_company_note),
+    customer_service_note: normalizeText(source?.customer_service_note),
     updated_at: normalizeText(source?.updated_at),
     updated_by: normalizeText(source?.updated_by),
     updated_by_name: normalizeText(source?.updated_by_name),
@@ -303,6 +304,12 @@ export const mergeOrderLocalMetadata = (
       const shippingIssueInput = toPlainObject(updates.shipping_issue);
       nextShippingIssue = {
         reason: normalizeShippingIssueReason(shippingIssueInput?.reason),
+        shipping_company_note: normalizeText(
+          shippingIssueInput?.shipping_company_note,
+        ),
+        customer_service_note: normalizeText(
+          shippingIssueInput?.customer_service_note,
+        ),
         updated_at: updatedAt,
         updated_by: updatedBy,
         updated_by_name: updatedByName,

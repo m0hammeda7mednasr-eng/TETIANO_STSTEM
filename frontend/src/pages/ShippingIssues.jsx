@@ -11,25 +11,26 @@ import {
 import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
 import { useLocale } from "../context/LocaleContext";
-import { markSharedDataUpdated, subscribeToSharedDataUpdates } from "../utils/realtime";
+import {
+  markSharedDataUpdated,
+  subscribeToSharedDataUpdates,
+} from "../utils/realtime";
 import { extractArray, extractObject } from "../utils/response";
 import {
-  DEFAULT_SHIPPING_ISSUE_REASON,
   getShippingIssueBadgeClassName,
   getShippingIssueReasonLabel,
   getShippingIssueReasonOptions,
   isShippingIssueActive,
+  isShippingIssueClosed,
+  isShippingIssuePhoneRequired,
   normalizeShippingIssueReason,
 } from "../utils/shippingIssues";
 
 const FETCH_PAGE_LIMIT = 200;
 const PAGE_SIZE = 50;
 const PAGINATION_WINDOW = 5;
-const CUSTOMER_SIDE_REASONS = new Set([
-  "customer_issue",
-  "customer_data_issue",
-  "customer_cancelled",
-]);
+
+const normalizeText = (value) => String(value ?? "").trim();
 
 const matchesSearch = (order, keyword) => {
   const normalized = String(keyword || "").trim().toLowerCase();
@@ -54,16 +55,48 @@ function SummaryCard({ title, value, tone = "violet" }) {
   }[tone];
 
   return (
-    <div className={`rounded-2xl bg-gradient-to-br p-5 text-white shadow-sm ${toneClassName}`}>
+    <div
+      className={`rounded-2xl bg-gradient-to-br p-5 text-white shadow-sm ${toneClassName}`}
+    >
       <p className="text-sm/6 text-white/80">{title}</p>
       <p className="mt-2 text-3xl font-bold">{value}</p>
     </div>
   );
 }
 
+function ShippingIssueNoteField({
+  label,
+  description,
+  placeholder,
+  value,
+  onChange,
+  disabled,
+  isRTL,
+}) {
+  return (
+    <label className="app-note flex h-full flex-col gap-3 px-4 py-4">
+      <div className={isRTL ? "text-right" : "text-left"}>
+        <p className="text-sm font-semibold text-slate-900">{label}</p>
+        <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
+      </div>
+      <textarea
+        rows={4}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        placeholder={placeholder}
+        className={`app-input min-h-[112px] w-full resize-y px-3 py-2.5 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 ${
+          isRTL ? "text-right" : "text-left"
+        }`}
+      />
+    </label>
+  );
+}
+
 export default function ShippingIssues() {
   const navigate = useNavigate();
-  const { select, isRTL, formatDateTime, formatNumber, formatTime } = useLocale();
+  const { select, isRTL, formatDateTime, formatNumber, formatTime } =
+    useLocale();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -72,11 +105,11 @@ export default function ShippingIssues() {
   const [currentPage, setCurrentPage] = useState(1);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [updatingOrderIds, setUpdatingOrderIds] = useState({});
+  const [noteDrafts, setNoteDrafts] = useState({});
 
-  const reasonOptions = useMemo(
-    () => getShippingIssueReasonOptions(select),
-    [select],
-  );
+  const reasonOptions = useMemo(() => getShippingIssueReasonOptions(select), [
+    select,
+  ]);
 
   const formatDate = useCallback(
     (value) => {
@@ -92,65 +125,71 @@ export default function ShippingIssues() {
     [formatDateTime],
   );
 
-  const fetchShippingIssues = useCallback(async ({ silent = false } = {}) => {
-    if (!silent) {
-      setLoading(true);
-      setError("");
-    }
-
-    try {
-      let offset = 0;
-      let hasMore = true;
-      const rows = [];
-
-      while (hasMore) {
-        const response = await api.get("/shopify/orders", {
-          params: {
-            limit: FETCH_PAGE_LIMIT,
-            offset,
-            sort_by: "created_at",
-            sort_dir: "desc",
-            shipping_issue: "active",
-          },
-        });
-
-        const payload = extractObject(response?.data);
-        const batch = extractArray(payload).filter((order) =>
-          isShippingIssueActive(order),
-        );
-        const pagination =
-          payload?.pagination && typeof payload.pagination === "object"
-            ? payload.pagination
-            : {};
-
-        rows.push(...batch);
-
-        if (batch.length === 0) {
-          break;
-        }
-
-        hasMore =
-          typeof pagination.has_more === "boolean"
-            ? pagination.has_more
-            : batch.length === FETCH_PAGE_LIMIT;
-        offset =
-          typeof pagination.next_offset === "number"
-            ? pagination.next_offset
-            : offset + batch.length;
+  const fetchShippingIssues = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!silent) {
+        setLoading(true);
+        setError("");
       }
 
-      setOrders(rows);
-      setLastUpdatedAt(new Date());
-    } catch (requestError) {
-      console.error("Error fetching shipping issues:", requestError);
-      setError(
-        requestError?.response?.data?.error ||
-          select("فشل تحميل مشاكل الشحن", "Failed to load shipping issues"),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [select]);
+      try {
+        let offset = 0;
+        let hasMore = true;
+        const rows = [];
+
+        while (hasMore) {
+          const response = await api.get("/shopify/orders", {
+            params: {
+              limit: FETCH_PAGE_LIMIT,
+              offset,
+              sort_by: "created_at",
+              sort_dir: "desc",
+              shipping_issue: "active",
+            },
+          });
+
+          const payload = extractObject(response?.data);
+          const batch = extractArray(payload).filter((order) =>
+            isShippingIssueActive(order),
+          );
+          const pagination =
+            payload?.pagination && typeof payload.pagination === "object"
+              ? payload.pagination
+              : {};
+
+          rows.push(...batch);
+
+          if (batch.length === 0) {
+            break;
+          }
+
+          hasMore =
+            typeof pagination.has_more === "boolean"
+              ? pagination.has_more
+              : batch.length === FETCH_PAGE_LIMIT;
+          offset =
+            typeof pagination.next_offset === "number"
+              ? pagination.next_offset
+              : offset + batch.length;
+        }
+
+        setOrders(rows);
+        setLastUpdatedAt(new Date());
+      } catch (requestError) {
+        console.error("Error fetching shipping issues:", requestError);
+        setError(
+          requestError?.response?.data?.error ||
+            select(
+              "\u0641\u0634\u0644 \u062a\u062d\u0645\u064a\u0644 \u0645\u0634\u0627\u0643\u0644 \u0627\u0644\u0634\u062d\u0646",
+              "Failed to load shipping issues",
+            ),
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [select],
+  );
 
   useEffect(() => {
     fetchShippingIssues();
@@ -184,22 +223,18 @@ export default function ShippingIssues() {
   );
 
   const summary = useMemo(() => {
-    const unspecified = filteredOrders.filter(
-      (order) =>
-        normalizeShippingIssueReason(order?.shipping_issue?.reason) ===
-        DEFAULT_SHIPPING_ISSUE_REASON,
+    const closedCases = filteredOrders.filter((order) =>
+      isShippingIssueClosed(order?.shipping_issue?.reason),
     ).length;
-    const customerSide = filteredOrders.filter((order) =>
-      CUSTOMER_SIDE_REASONS.has(
-        normalizeShippingIssueReason(order?.shipping_issue?.reason),
-      ),
+    const phoneCases = filteredOrders.filter((order) =>
+      isShippingIssuePhoneRequired(order?.shipping_issue?.reason),
     ).length;
 
     return {
       total: filteredOrders.length,
-      unspecified,
-      customerSide,
-      deliverySide: filteredOrders.length - unspecified - customerSide,
+      openFollowUp: filteredOrders.length - closedCases,
+      phoneCases,
+      closedCases,
     };
   }, [filteredOrders]);
 
@@ -255,6 +290,55 @@ export default function ShippingIssues() {
     }));
   };
 
+  const updateNoteDraft = (orderId, field, value) => {
+    setNoteDrafts((current) => ({
+      ...current,
+      [orderId]: {
+        ...current[orderId],
+        [field]: value,
+      },
+    }));
+  };
+
+  const clearNoteDraft = (orderId) => {
+    setNoteDrafts((current) => {
+      if (!current[orderId]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[orderId];
+      return next;
+    });
+  };
+
+  const getNoteDraftValue = (order, field) => {
+    const orderDraft = noteDrafts[order.id];
+    if (orderDraft && Object.prototype.hasOwnProperty.call(orderDraft, field)) {
+      return orderDraft[field];
+    }
+
+    return String(order?.shipping_issue?.[field] || "");
+  };
+
+  const hasNoteDraftChanged = (order) => {
+    const orderDraft = noteDrafts[order.id];
+    if (!orderDraft) {
+      return false;
+    }
+
+    return ["shipping_company_note", "customer_service_note"].some((field) => {
+      if (!Object.prototype.hasOwnProperty.call(orderDraft, field)) {
+        return false;
+      }
+
+      return (
+        normalizeText(orderDraft[field]) !==
+        normalizeText(order?.shipping_issue?.[field])
+      );
+    });
+  };
+
   const handleIssueReasonChange = async (orderId, reason) => {
     setUpdatingState(orderId, true);
     try {
@@ -282,7 +366,61 @@ export default function ShippingIssues() {
       console.error("Error updating shipping issue:", updateError);
       setError(
         updateError?.response?.data?.error ||
-          select("فشل تحديث سبب المشكلة", "Failed to update issue reason"),
+          select(
+            "\u0641\u0634\u0644 \u062a\u062d\u062f\u064a\u062b \u0633\u0628\u0628 \u0627\u0644\u0645\u0634\u0643\u0644\u0629",
+            "Failed to update issue reason",
+          ),
+      );
+    } finally {
+      setUpdatingState(orderId, false);
+    }
+  };
+
+  const handleSaveIssueNotes = async (order) => {
+    const orderId = order.id;
+    const reason = normalizeShippingIssueReason(order?.shipping_issue?.reason);
+    const shippingCompanyNote = normalizeText(
+      getNoteDraftValue(order, "shipping_company_note"),
+    );
+    const customerServiceNote = normalizeText(
+      getNoteDraftValue(order, "customer_service_note"),
+    );
+
+    setUpdatingState(orderId, true);
+    try {
+      await api.post(`/shopify/orders/${orderId}/shipping-issue`, {
+        active: true,
+        shipping_company_note: shippingCompanyNote,
+        customer_service_note: customerServiceNote,
+      });
+
+      setOrders((current) =>
+        current.map((entry) =>
+          entry.id === orderId
+            ? {
+                ...entry,
+                shipping_issue: {
+                  ...entry.shipping_issue,
+                  reason,
+                  shipping_company_note: shippingCompanyNote,
+                  customer_service_note: customerServiceNote,
+                  updated_at: new Date().toISOString(),
+                },
+                shipping_issue_reason: reason,
+              }
+            : entry,
+        ),
+      );
+      clearNoteDraft(orderId);
+      markSharedDataUpdated();
+    } catch (updateError) {
+      console.error("Error saving shipping follow-up notes:", updateError);
+      setError(
+        updateError?.response?.data?.error ||
+          select(
+            "\u0641\u0634\u0644 \u062d\u0641\u0638 \u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0627\u0644\u0645\u062a\u0627\u0628\u0639\u0629",
+            "Failed to save follow-up notes",
+          ),
       );
     } finally {
       setUpdatingState(orderId, false);
@@ -296,12 +434,16 @@ export default function ShippingIssues() {
         active: false,
       });
       setOrders((current) => current.filter((order) => order.id !== orderId));
+      clearNoteDraft(orderId);
       markSharedDataUpdated();
     } catch (updateError) {
       console.error("Error returning order to orders list:", updateError);
       setError(
         updateError?.response?.data?.error ||
-          select("فشل إرجاع الأوردر لقائمة الأوردرات", "Failed to return order to Orders"),
+          select(
+            "\u0641\u0634\u0644 \u0625\u0631\u062c\u0627\u0639 \u0627\u0644\u0623\u0648\u0631\u062f\u0631 \u0644\u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062f\u0631\u0627\u062a",
+            "Failed to return order to Orders",
+          ),
       );
     } finally {
       setUpdatingState(orderId, false);
@@ -318,18 +460,24 @@ export default function ShippingIssues() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className={isRTL ? "text-right" : "text-left"}>
                 <h1 className="text-3xl font-bold text-slate-900">
-                  {select("مشاكل الشحن", "Shipping Issues")}
+                  {select(
+                    "\u0645\u0634\u0627\u0643\u0644 \u0627\u0644\u0634\u062d\u0646",
+                    "Shipping Issues",
+                  )}
                 </h1>
                 <p className="mt-1 text-slate-600">
                   {select(
-                    "كل أوردر متحول من قائمة الأوردرات علشان متابعة الشحن يظهر هنا مع سبب المشكلة وإمكانية الإرجاع.",
-                    "Orders moved out of the main orders list for shipping follow-up appear here with their issue reason and a return action.",
+                    "\u0627\u0644\u0623\u0648\u0631\u062f\u0631\u0627\u062a \u0627\u0644\u0645\u062d\u0648\u0644\u0629 \u0645\u0646 \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062f\u0631\u0627\u062a \u0644\u0645\u062a\u0627\u0628\u0639\u0629 \u0627\u0644\u0634\u062d\u0646 \u062a\u0638\u0647\u0631 \u0647\u0646\u0627 \u0645\u0639 \u062d\u0627\u0644\u0629 \u0627\u0644\u0645\u0634\u0643\u0644\u0629 \u0648\u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0627\u0644\u0645\u062a\u0627\u0628\u0639\u0629 \u0627\u0644\u062f\u0627\u062e\u0644\u064a\u0629.",
+                    "Orders moved out of the main list for shipping follow-up appear here with issue status and internal follow-up notes.",
                   )}
                 </p>
                 {lastUpdatedAt ? (
                   <div className="mt-3 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
                     <Clock3 size={12} />
-                    {select("آخر تحديث", "Last refresh")}{" "}
+                    {select(
+                      "\u0622\u062e\u0631 \u062a\u062d\u062f\u064a\u062b",
+                      "Last refresh",
+                    )}{" "}
                     {formatTime(lastUpdatedAt, {
                       hour: "2-digit",
                       minute: "2-digit",
@@ -344,7 +492,7 @@ export default function ShippingIssues() {
                 className="flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-white transition hover:bg-sky-800"
               >
                 <RefreshCw size={18} />
-                {select("تحديث", "Refresh")}
+                {select("\u062a\u062d\u062f\u064a\u062b", "Refresh")}
               </button>
             </div>
           </div>
@@ -357,10 +505,45 @@ export default function ShippingIssues() {
           ) : null}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <SummaryCard title={select("إجمالي المشاكل", "Total Issues")} value={formatNumber(summary.total, { maximumFractionDigits: 0 })} />
-            <SummaryCard title={select("بدون تحديد", "Unspecified")} value={formatNumber(summary.unspecified, { maximumFractionDigits: 0 })} tone="amber" />
-            <SummaryCard title={select("مشاكل تخص العميل", "Customer-Side")} value={formatNumber(summary.customerSide, { maximumFractionDigits: 0 })} tone="sky" />
-            <SummaryCard title={select("مشاكل التوصيل", "Delivery-Side")} value={formatNumber(summary.deliverySide, { maximumFractionDigits: 0 })} tone="rose" />
+            <SummaryCard
+              title={select(
+                "\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0645\u0634\u0627\u0643\u0644",
+                "Total Issues",
+              )}
+              value={formatNumber(summary.total, {
+                maximumFractionDigits: 0,
+              })}
+            />
+            <SummaryCard
+              title={select(
+                "\u0645\u062a\u0627\u0628\u0639\u0627\u062a \u0645\u0641\u062a\u0648\u062d\u0629",
+                "Open Follow-Up",
+              )}
+              value={formatNumber(summary.openFollowUp, {
+                maximumFractionDigits: 0,
+              })}
+              tone="amber"
+            />
+            <SummaryCard
+              title={select(
+                "\u062d\u0627\u0644\u0627\u062a \u0628\u0627\u0644\u0647\u0627\u062a\u0641",
+                "Phone Cases",
+              )}
+              value={formatNumber(summary.phoneCases, {
+                maximumFractionDigits: 0,
+              })}
+              tone="sky"
+            />
+            <SummaryCard
+              title={select(
+                "\u062d\u0627\u0644\u0627\u062a \u0645\u063a\u0644\u0642\u0629",
+                "Closed Cases",
+              )}
+              value={formatNumber(summary.closedCases, {
+                maximumFractionDigits: 0,
+              })}
+              tone="rose"
+            />
           </div>
 
           <div className="space-y-4 rounded-2xl bg-white p-4 shadow sm:p-5">
@@ -376,7 +559,10 @@ export default function ShippingIssues() {
                   type="text"
                   value={searchTerm}
                   onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder={select("ابحث بالعميل أو رقم الأوردر", "Search by customer or order number")}
+                  placeholder={select(
+                    "\u0627\u0628\u062d\u062b \u0628\u0627\u0644\u0639\u0645\u064a\u0644 \u0623\u0648 \u0631\u0642\u0645 \u0627\u0644\u0623\u0648\u0631\u062f\u0631",
+                    "Search by customer or order number",
+                  )}
                   className={`w-full rounded-lg border border-slate-200 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500 ${
                     isRTL ? "pr-8 pl-3 text-right" : "pl-8 pr-3 text-left"
                   }`}
@@ -388,7 +574,12 @@ export default function ShippingIssues() {
                 onChange={(event) => setReasonFilter(event.target.value)}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500"
               >
-                <option value="all">{select("كل الأسباب", "All reasons")}</option>
+                <option value="all">
+                  {select(
+                    "\u0643\u0644 \u0627\u0644\u0623\u0633\u0628\u0627\u0628",
+                    "All reasons",
+                  )}
+                </option>
                 {reasonOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -399,58 +590,218 @@ export default function ShippingIssues() {
 
             {loading ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
-                {select("جاري تحميل مشاكل الشحن...", "Loading shipping issues...")}
+                {select(
+                  "\u062c\u0627\u0631\u064a \u062a\u062d\u0645\u064a\u0644 \u0645\u0634\u0627\u0643\u0644 \u0627\u0644\u0634\u062d\u0646...",
+                  "Loading shipping issues...",
+                )}
               </div>
             ) : filteredOrders.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
-                {select("لا توجد مشاكل شحن مطابقة حالياً.", "There are no matching shipping issues right now.")}
+                {select(
+                  "\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0634\u0627\u0643\u0644 \u0634\u062d\u0646 \u0645\u0637\u0627\u0628\u0642\u0629 \u062d\u0627\u0644\u064a\u0627\u064b.",
+                  "There are no matching shipping issues right now.",
+                )}
               </div>
             ) : (
               <>
-                <div className="space-y-3 lg:hidden">
+                <div className="space-y-3">
                   {paginatedOrders.map((order) => {
-                    const reason = normalizeShippingIssueReason(order?.shipping_issue?.reason);
+                    const reason = normalizeShippingIssueReason(
+                      order?.shipping_issue?.reason,
+                    );
                     const isUpdating = Boolean(updatingOrderIds[order.id]);
+                    const shippingCompanyNote = getNoteDraftValue(
+                      order,
+                      "shipping_company_note",
+                    );
+                    const customerServiceNote = getNoteDraftValue(
+                      order,
+                      "customer_service_note",
+                    );
+                    const hasUnsavedNotes = hasNoteDraftChanged(order);
 
                     return (
-                      <article key={order.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                        <div className="flex items-start justify-between gap-3">
+                      <article
+                        key={order.id}
+                        className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm sm:p-5"
+                      >
+                        <div className="grid gap-4 xl:grid-cols-[180px_minmax(0,1fr)_260px] xl:items-start">
                           <div>
-                            <button type="button" onClick={() => navigate(`/orders/${order.id}`)} className="text-lg font-semibold text-slate-900 transition hover:text-sky-700">
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/orders/${order.id}`)}
+                              className="font-semibold text-slate-900 transition hover:text-sky-700"
+                            >
                               #{order.order_number || order.shopify_id}
                             </button>
-                            <p className="mt-1 text-sm text-slate-500">{order.customer_name || select("عميل غير معروف", "Unknown customer")}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {formatDate(
+                                order?.shipping_issue?.updated_at ||
+                                  order.updated_at,
+                              )}
+                            </p>
                           </div>
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getShippingIssueBadgeClassName(reason)}`}>
-                            {getShippingIssueReasonLabel(reason, select)}
-                          </span>
+
+                          <div className="min-w-0">
+                            <p className="font-medium text-slate-900">
+                              {order.customer_name ||
+                                select(
+                                  "\u0639\u0645\u064a\u0644 \u063a\u064a\u0631 \u0645\u0639\u0631\u0648\u0641",
+                                  "Unknown customer",
+                                )}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {order.customer_email || "-"}
+                            </p>
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <span
+                                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getShippingIssueBadgeClassName(
+                                  reason,
+                                )}`}
+                              >
+                                {getShippingIssueReasonLabel(reason, select)}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                {select(
+                                  "\u0622\u062e\u0631 \u062a\u0639\u062f\u064a\u0644",
+                                  "Last update",
+                                )}
+                                :{" "}
+                                {formatDate(
+                                  order?.shipping_issue?.updated_at ||
+                                    order.updated_at,
+                                )}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                              {select(
+                                "\u062a\u063a\u064a\u064a\u0631 \u062d\u0627\u0644\u0629 \u0627\u0644\u0645\u0634\u0643\u0644\u0629",
+                                "Change issue",
+                              )}
+                            </label>
+                            <select
+                              value={reason}
+                              onChange={(event) =>
+                                handleIssueReasonChange(
+                                  order.id,
+                                  event.target.value,
+                                )
+                              }
+                              disabled={isUpdating}
+                              className="app-input w-full px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                            >
+                              {reasonOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
 
-                        <div className="mt-3 space-y-3">
-                          <select
-                            value={reason}
-                            onChange={(event) => handleIssueReasonChange(order.id, event.target.value)}
+                        <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px] xl:items-start">
+                          <ShippingIssueNoteField
+                            label={select(
+                              "\u0645\u0644\u0627\u062d\u0638\u0629 \u0634\u0631\u0643\u0629 \u0627\u0644\u0634\u062d\u0646",
+                              "Shipping Company Note",
+                            )}
+                            description={select(
+                              "\u0627\u0643\u062a\u0628 \u0622\u062e\u0631 \u062a\u062d\u062f\u064a\u062b \u0648\u0627\u0644\u062e\u0637\u0648\u0629 \u0627\u0644\u0642\u0627\u062f\u0645\u0629 \u0645\u0646 \u062c\u0647\u0629 \u0627\u0644\u0634\u062d\u0646.",
+                              "Document the latest courier update and next shipping step.",
+                            )}
+                            placeholder={select(
+                              "\u0645\u062b\u0627\u0644: \u062a\u0645 \u062a\u0623\u0643\u064a\u062f \u0645\u0639\u0627\u062f \u0627\u0644\u0627\u0633\u062a\u0644\u0627\u0645 \u063a\u062f\u0627\u064b \u0645\u0639 \u0627\u0644\u0645\u0646\u062f\u0648\u0628.",
+                              "Example: Pickup was confirmed with the courier for tomorrow.",
+                            )}
+                            value={shippingCompanyNote}
+                            onChange={(event) =>
+                              updateNoteDraft(
+                                order.id,
+                                "shipping_company_note",
+                                event.target.value,
+                              )
+                            }
                             disabled={isUpdating}
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {reasonOptions.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                          <p className="text-xs text-slate-500">
-                            {select("آخر تعديل", "Last update")}: {formatDate(order?.shipping_issue?.updated_at || order.updated_at)}
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            <button type="button" onClick={() => navigate(`/orders/${order.id}`)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-                              <Eye size={15} />
-                              {select("عرض", "View")}
-                            </button>
-                            <button type="button" onClick={() => handleReturnToOrders(order.id)} disabled={isUpdating} className="inline-flex items-center gap-1 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60">
-                              <Undo2 size={15} />
-                              {select("رجوع للأوردرات", "Return to Orders")}
-                            </button>
+                            isRTL={isRTL}
+                          />
+
+                          <ShippingIssueNoteField
+                            label={select(
+                              "\u0645\u0644\u0627\u062d\u0638\u0629 \u062e\u062f\u0645\u0629 \u0627\u0644\u0639\u0645\u0644\u0627\u0621",
+                              "Customer Service Note",
+                            )}
+                            description={select(
+                              "\u0627\u0643\u062a\u0628 \u062e\u0644\u0627\u0635\u0629 \u062a\u0648\u0627\u0635\u0644 \u062e\u062f\u0645\u0629 \u0627\u0644\u0639\u0645\u0644\u0627\u0621 \u0645\u0639 \u0627\u0644\u0639\u0645\u064a\u0644 \u0648\u0645\u0627 \u062a\u0645 \u0627\u0644\u0627\u062a\u0641\u0627\u0642 \u0639\u0644\u064a\u0647.",
+                              "Summarize customer service follow-up and the agreed customer action.",
+                            )}
+                            placeholder={select(
+                              "\u0645\u062b\u0627\u0644: \u062a\u0645 \u0625\u0628\u0644\u0627\u063a \u0627\u0644\u0639\u0645\u064a\u0644 \u0648\u0623\u0643\u062f \u062a\u0648\u0627\u0641\u0631 \u0627\u0644\u0647\u0627\u062a\u0641 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u0627\u0633\u062a\u0644\u0627\u0645.",
+                              "Example: Customer was informed and confirmed phone availability during delivery.",
+                            )}
+                            value={customerServiceNote}
+                            onChange={(event) =>
+                              updateNoteDraft(
+                                order.id,
+                                "customer_service_note",
+                                event.target.value,
+                              )
+                            }
+                            disabled={isUpdating}
+                            isRTL={isRTL}
+                          />
+
+                          <div className="app-note flex h-full flex-col justify-between gap-4 px-4 py-4">
+                            <div className={isRTL ? "text-right" : "text-left"}>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                {select(
+                                  "\u0625\u062c\u0631\u0627\u0621\u0627\u062a \u0627\u0644\u0645\u062a\u0627\u0628\u0639\u0629",
+                                  "Follow-Up Actions",
+                                )}
+                              </p>
+                              <p className="mt-2 text-sm leading-6 text-slate-600">
+                                {select(
+                                  "\u062d\u062f\u0651\u062b \u0627\u0644\u062d\u0627\u0644\u0629 \u0648\u0627\u062d\u0641\u0638 \u0627\u0644\u0646\u0648\u062a\u0633 \u0627\u0644\u062f\u0627\u062e\u0644\u064a\u0629 \u0628\u0639\u062f \u0643\u0644 \u0645\u062a\u0627\u0628\u0639\u0629 \u0645\u0639 \u0627\u0644\u0634\u062d\u0646 \u0623\u0648 \u0627\u0644\u0639\u0645\u064a\u0644.",
+                                  "Update the issue status and save internal notes after each shipping or customer follow-up.",
+                                )}
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleSaveIssueNotes(order)}
+                                disabled={!hasUnsavedNotes || isUpdating}
+                                className="inline-flex items-center gap-1 rounded-lg bg-sky-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {select(
+                                  "\u062d\u0641\u0638 \u0627\u0644\u0646\u0648\u062a\u0633",
+                                  "Save notes",
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/orders/${order.id}`)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                              >
+                                <Eye size={15} />
+                                {select("\u0639\u0631\u0636", "View")}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleReturnToOrders(order.id)}
+                                disabled={isUpdating}
+                                className="inline-flex items-center gap-1 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                <Undo2 size={15} />
+                                {select(
+                                  "\u0631\u062c\u0648\u0639 \u0644\u0644\u0623\u0648\u0631\u062f\u0631\u0627\u062a",
+                                  "Return to Orders",
+                                )}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </article>
@@ -458,77 +809,61 @@ export default function ShippingIssues() {
                   })}
                 </div>
 
-                <div className="hidden space-y-3 lg:block">
-                  {paginatedOrders.map((order) => {
-                    const reason = normalizeShippingIssueReason(order?.shipping_issue?.reason);
-                    const isUpdating = Boolean(updatingOrderIds[order.id]);
-
-                    return (
-                      <div key={order.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
-                        <div className="grid items-center gap-4 xl:grid-cols-[160px_1fr_240px_260px_220px]">
-                          <div>
-                            <button type="button" onClick={() => navigate(`/orders/${order.id}`)} className="font-semibold text-slate-900 transition hover:text-sky-700">
-                              #{order.order_number || order.shopify_id}
-                            </button>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {formatDate(order?.shipping_issue?.updated_at || order.updated_at)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-medium text-slate-900">{order.customer_name || select("عميل غير معروف", "Unknown customer")}</p>
-                            <p className="mt-1 text-xs text-slate-500">{order.customer_email || "-"}</p>
-                          </div>
-                          <div>
-                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getShippingIssueBadgeClassName(reason)}`}>
-                              {getShippingIssueReasonLabel(reason, select)}
-                            </span>
-                          </div>
-                          <select
-                            value={reason}
-                            onChange={(event) => handleIssueReasonChange(order.id, event.target.value)}
-                            disabled={isUpdating}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {reasonOptions.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                          <div className="flex flex-wrap gap-2">
-                            <button type="button" onClick={() => navigate(`/orders/${order.id}`)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-                              <Eye size={15} />
-                              {select("عرض", "View")}
-                            </button>
-                            <button type="button" onClick={() => handleReturnToOrders(order.id)} disabled={isUpdating} className="inline-flex items-center gap-1 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60">
-                              <Undo2 size={15} />
-                              {select("رجوع للأوردرات", "Return to Orders")}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
                 <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-slate-600">
                     {select(
-                      `عرض ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} من ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} أوردر`,
-                      `Showing ${formatNumber(visibleRange.start, { maximumFractionDigits: 0 })} - ${formatNumber(visibleRange.end, { maximumFractionDigits: 0 })} of ${formatNumber(filteredOrders.length, { maximumFractionDigits: 0 })} orders`,
+                      `\u0639\u0631\u0636 ${formatNumber(visibleRange.start, {
+                        maximumFractionDigits: 0,
+                      })} - ${formatNumber(visibleRange.end, {
+                        maximumFractionDigits: 0,
+                      })} \u0645\u0646 ${formatNumber(filteredOrders.length, {
+                        maximumFractionDigits: 0,
+                      })} \u0623\u0648\u0631\u062f\u0631`,
+                      `Showing ${formatNumber(visibleRange.start, {
+                        maximumFractionDigits: 0,
+                      })} - ${formatNumber(visibleRange.end, {
+                        maximumFractionDigits: 0,
+                      })} of ${formatNumber(filteredOrders.length, {
+                        maximumFractionDigits: 0,
+                      })} orders`,
                     )}
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
-                    <button type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPage <= 1} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-                      {select("السابق", "Previous")}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCurrentPage((page) => Math.max(1, page - 1))
+                      }
+                      disabled={currentPage <= 1}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {select("\u0627\u0644\u0633\u0627\u0628\u0642", "Previous")}
                     </button>
                     {paginationPages.map((pageNumber) => (
-                      <button key={pageNumber} type="button" onClick={() => setCurrentPage(pageNumber)} className={`rounded-lg px-3 py-2 text-sm font-medium ${pageNumber === currentPage ? "bg-sky-700 text-white shadow-sm" : "border border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
-                        {formatNumber(pageNumber, { maximumFractionDigits: 0 })}
+                      <button
+                        key={pageNumber}
+                        type="button"
+                        onClick={() => setCurrentPage(pageNumber)}
+                        className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                          pageNumber === currentPage
+                            ? "bg-sky-700 text-white shadow-sm"
+                            : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {formatNumber(pageNumber, {
+                          maximumFractionDigits: 0,
+                        })}
                       </button>
                     ))}
-                    <button type="button" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={currentPage >= totalPages} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-                      {select("التالي", "Next")}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCurrentPage((page) => Math.min(totalPages, page + 1))
+                      }
+                      disabled={currentPage >= totalPages}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {select("\u0627\u0644\u062a\u0627\u0644\u064a", "Next")}
                     </button>
                   </div>
                 </div>

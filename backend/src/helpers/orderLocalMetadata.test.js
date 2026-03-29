@@ -11,7 +11,9 @@ describe("helpers/orderLocalMetadata", () => {
     const orderData = {
       _tetiano_local_order: {
         shipping_issue: {
-          reason: "courier_issue",
+          reason: "confirm_return",
+          shipping_company_note: "Courier confirmed a return pickup window.",
+          customer_service_note: "Customer agreed to keep the phone available.",
           updated_by_name: "Ops",
         },
       },
@@ -22,12 +24,14 @@ describe("helpers/orderLocalMetadata", () => {
 
     expect(metadata.shipping_issue).toEqual(
       expect.objectContaining({
-        reason: "courier_issue",
+        reason: "confirm_return",
+        shipping_company_note: "Courier confirmed a return pickup window.",
+        customer_service_note: "Customer agreed to keep the phone available.",
         updated_by_name: "Ops",
       }),
     );
     expect(applied._tetiano_local_order.shipping_issue.reason).toBe(
-      "courier_issue",
+      "confirm_return",
     );
   });
 
@@ -49,6 +53,8 @@ describe("helpers/orderLocalMetadata", () => {
     expect(extractOrderLocalMetadata(updated).shipping_issue).toEqual(
       expect.objectContaining({
         reason: DEFAULT_SHIPPING_ISSUE_REASON,
+        shipping_company_note: "",
+        customer_service_note: "",
         updated_at: "2026-03-28T10:00:00.000Z",
         updated_by: "user-1",
         updated_by_name: "Ops",
@@ -56,10 +62,39 @@ describe("helpers/orderLocalMetadata", () => {
     );
   });
 
+  it("stores follow-up notes inside shipping issue metadata", () => {
+    const updated = mergeOrderLocalMetadata(
+      {},
+      {
+        shipping_issue: {
+          reason: "part_with_phone",
+          shipping_company_note: "Driver requested a reachable phone number.",
+          customer_service_note: "CS confirmed the customer will answer today.",
+        },
+      },
+      {
+        updatedAt: "2026-03-28T11:30:00.000Z",
+        updatedBy: "user-2",
+        updatedByName: "Customer Service",
+      },
+    );
+
+    expect(extractOrderLocalMetadata(updated).shipping_issue).toEqual(
+      expect.objectContaining({
+        reason: "part_with_phone",
+        shipping_company_note: "Driver requested a reachable phone number.",
+        customer_service_note: "CS confirmed the customer will answer today.",
+        updated_at: "2026-03-28T11:30:00.000Z",
+        updated_by: "user-2",
+        updated_by_name: "Customer Service",
+      }),
+    );
+  });
+
   it("clears shipping issue metadata when requested", () => {
     const withIssue = mergeOrderLocalMetadata({}, {
       shipping_issue: {
-        reason: "order_lost",
+        reason: "issue",
       },
     });
     const cleared = mergeOrderLocalMetadata(withIssue, {

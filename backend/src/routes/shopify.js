@@ -4573,6 +4573,18 @@ router.post(
           reason: Object.prototype.hasOwnProperty.call(req.body || {}, "reason")
             ? String(req.body?.reason ?? "").trim()
             : undefined,
+          shipping_company_note: Object.prototype.hasOwnProperty.call(
+            req.body || {},
+            "shipping_company_note",
+          )
+            ? String(req.body?.shipping_company_note ?? "").trim()
+            : undefined,
+          customer_service_note: Object.prototype.hasOwnProperty.call(
+            req.body || {},
+            "customer_service_note",
+          )
+            ? String(req.body?.customer_service_note ?? "").trim()
+            : undefined,
         },
       );
 

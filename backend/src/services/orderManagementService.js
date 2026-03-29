@@ -1332,19 +1332,41 @@ export class OrderManagementService {
       const currentMetadata = extractOrderLocalMetadata(currentOrderData);
       const currentShippingIssue = currentMetadata?.shipping_issue || null;
       const shouldActivate = update?.active !== false;
+      const hasUpdateField = (field) =>
+        Object.prototype.hasOwnProperty.call(update || {}, field);
+      const currentShippingCompanyNote = String(
+        currentShippingIssue?.shipping_company_note || "",
+      ).trim();
+      const currentCustomerServiceNote = String(
+        currentShippingIssue?.customer_service_note || "",
+      ).trim();
       const nextReason = shouldActivate
         ? normalizeShippingIssueReason(
-            update?.reason,
+            hasUpdateField("reason")
+              ? update?.reason
+              : currentShippingIssue?.reason || DEFAULT_SHIPPING_ISSUE_REASON,
             currentShippingIssue?.reason || DEFAULT_SHIPPING_ISSUE_REASON,
           )
         : null;
+      const nextShippingCompanyNote = shouldActivate
+        ? hasUpdateField("shipping_company_note")
+          ? String(update?.shipping_company_note ?? "").trim()
+          : currentShippingCompanyNote
+        : "";
+      const nextCustomerServiceNote = shouldActivate
+        ? hasUpdateField("customer_service_note")
+          ? String(update?.customer_service_note ?? "").trim()
+          : currentCustomerServiceNote
+        : "";
       const currentReason =
         currentShippingIssue?.reason || DEFAULT_SHIPPING_ISSUE_REASON;
 
       if (
         (shouldActivate &&
           currentShippingIssue &&
-          currentReason === nextReason) ||
+          currentReason === nextReason &&
+          currentShippingCompanyNote === nextShippingCompanyNote &&
+          currentCustomerServiceNote === nextCustomerServiceNote) ||
         (!shouldActivate && !currentShippingIssue)
       ) {
         return {
@@ -1367,6 +1389,8 @@ export class OrderManagementService {
           shipping_issue: shouldActivate
             ? {
                 reason: nextReason,
+                shipping_company_note: nextShippingCompanyNote,
+                customer_service_note: nextCustomerServiceNote,
               }
             : null,
         },

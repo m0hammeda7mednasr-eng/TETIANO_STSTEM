@@ -4,6 +4,7 @@ import {
   AlertCircle,
   CalendarRange,
   Clock3,
+  Download,
   Eye,
   RefreshCw,
   RotateCcw,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
+import { buildCsvFilename, downloadCsvSections } from "../utils/csv";
 import { useLocale } from "../context/LocaleContext";
 import {
   markSharedDataUpdated,
@@ -261,7 +263,7 @@ export default function ShippingIssues() {
     const activePreset = datePresetOptions.find(
       (option) => option.id === activeDatePresetId,
     );
-    if (activePresetId !== "custom") {
+    if (activeDatePresetId !== "custom") {
       return activePreset?.label || select("الفترة", "Period");
     }
 
@@ -273,6 +275,16 @@ export default function ShippingIssues() {
 
     return select("كل التواريخ", "All updates");
   }, [activeDatePresetId, datePresetOptions, normalizedDateRange, select]);
+  const activeReasonFilterLabel = useMemo(() => {
+    if (reasonFilter === "all") {
+      return select("كل الأسباب", "All reasons");
+    }
+
+    return (
+      reasonOptions.find((option) => option.value === reasonFilter)?.label ||
+      reasonFilter
+    );
+  }, [reasonFilter, reasonOptions, select]);
 
   const formatDate = useCallback(
     (value) => {
@@ -532,6 +544,78 @@ export default function ShippingIssues() {
     setReasonFilter("all");
     setDateRange(getDatePresetRange("quarter"));
   };
+
+  const handleExportShippingIssues = useCallback(() => {
+    if (filteredOrders.length === 0) {
+      return;
+    }
+
+    downloadCsvSections({
+      filename: buildCsvFilename("shipping-issues-report"),
+      sections: [
+        {
+          title: select("بيانات التصفية", "Filter metadata"),
+          headers: [select("الحقل", "Field"), select("القيمة", "Value")],
+          rows: [
+            [select("البحث", "Search"), searchTerm.trim() || "-"],
+            [select("السبب", "Reason"), activeReasonFilterLabel],
+            [select("الفترة", "Period"), activeDatePresetLabel],
+            [
+              select("من تاريخ", "Date from"),
+              normalizedDateRange.dateFrom || "-",
+            ],
+            [
+              select("إلى تاريخ", "Date to"),
+              normalizedDateRange.dateTo || "-",
+            ],
+            [
+              select("عدد النتائج", "Results"),
+              formatNumber(filteredOrders.length, { maximumFractionDigits: 0 }),
+            ],
+            [select("وقت التصدير", "Exported at"), new Date().toISOString()],
+          ],
+        },
+        {
+          title: select(
+            "مشاكل الشحن الظاهرة",
+            "Visible shipping issues",
+          ),
+          headers: [
+            select("رقم الأوردر", "Order Number"),
+            select("اسم العميل", "Customer"),
+            select("البريد الإلكتروني", "Email"),
+            select("الهاتف", "Phone"),
+            select("سبب المشكلة", "Issue"),
+            select("ملاحظة شركة الشحن", "Shipping Company Note"),
+            select("ملاحظة خدمة العملاء", "Customer Service Note"),
+            select("آخر تحديث", "Last update"),
+            select("تاريخ الإنشاء", "Created at"),
+          ],
+          rows: filteredOrders.map((order) => [
+            order.order_number || order.shopify_id || "",
+            order.customer_name || select("عميل غير معروف", "Unknown customer"),
+            order.customer_email || "",
+            order.customer_phone || "",
+            getShippingIssueReasonLabel(order?.shipping_issue?.reason, select),
+            order?.shipping_issue?.shipping_company_note || "",
+            order?.shipping_issue?.customer_service_note || "",
+            formatDate(order?.shipping_issue?.updated_at || order?.updated_at),
+            formatDate(order?.created_at),
+          ]),
+        },
+      ],
+    });
+  }, [
+    activeDatePresetLabel,
+    activeReasonFilterLabel,
+    filteredOrders,
+    formatDate,
+    formatNumber,
+    normalizedDateRange.dateFrom,
+    normalizedDateRange.dateTo,
+    searchTerm,
+    select,
+  ]);
 
   const getNoteDraftValue = (order, field) => {
     const orderDraft = noteDrafts[order.id];
@@ -820,14 +904,25 @@ export default function ShippingIssues() {
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleResetFilters}
-                  className="app-button-secondary inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-700"
-                >
-                  <RotateCcw size={16} />
-                  {select("إعادة ضبط", "Reset")}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExportShippingIssues}
+                    disabled={filteredOrders.length === 0}
+                    className="app-button-primary inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Download size={16} />
+                    {select("تصدير Excel", "Export Excel")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="app-button-secondary inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-700"
+                  >
+                    <RotateCcw size={16} />
+                    {select("إعادة ضبط", "Reset")}
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-2">

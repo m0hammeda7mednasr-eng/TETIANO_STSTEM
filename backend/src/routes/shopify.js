@@ -28,7 +28,11 @@ import { extractCustomerPhone } from "../helpers/customerContact.js";
 import { buildProductsSummaryExportPayload } from "../helpers/orderExport.js";
 import { hasActiveOrderScopeFilters } from "../helpers/orderScope.js";
 import { buildProductSourcingDetail } from "../helpers/suppliers.js";
-import { extractWarehouseInventorySnapshot } from "../helpers/productLocalMetadata.js";
+import {
+  extractProductLocalMetadata,
+  extractWarehouseInventorySnapshot,
+  isProductLowStockAlertsSuppressed,
+} from "../helpers/productLocalMetadata.js";
 import {
   DAY_MS,
   buildMissingOrdersFromStock,
@@ -910,6 +914,39 @@ const getReadableShopifyError = (error) => {
   return String(error?.message || "Unknown Shopify OAuth error").trim();
 };
 
+const parseBooleanFlag = (value, fieldName) => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (
+    normalized === "true" ||
+    normalized === "1" ||
+    normalized === "yes" ||
+    normalized === "on"
+  ) {
+    return true;
+  }
+  if (
+    normalized === "false" ||
+    normalized === "0" ||
+    normalized === "no" ||
+    normalized === "off"
+  ) {
+    return false;
+  }
+
+  throw new Error(`${fieldName} must be a boolean value`);
+};
+
 const isShopifyCredentialError = (error) => {
   const status = Number(error?.response?.status || 0);
   if (status === 401 || status === 403) {
@@ -1284,6 +1321,7 @@ const buildProductSummary = (product) => {
   const totalInventory = getProductTotalInventory(product);
   const totalWarehouseInventory = getProductTotalWarehouseInventory(product);
   const primaryImageUrl = getProductPrimaryImageUrl(product);
+  const localMetadata = extractProductLocalMetadata(product?.data);
 
   return {
     ...product,
@@ -1299,6 +1337,9 @@ const buildProductSummary = (product) => {
     variants,
     variants_count: variants.length,
     has_multiple_variants: variants.length > 1,
+    suppress_low_stock_alerts: Boolean(
+      localMetadata?.suppress_low_stock_alerts,
+    ),
   };
 };
 
@@ -2978,9 +3019,26 @@ const applyProductsQueryFilters = (rows, query = {}) => {
     const stockStatus = String(query.stock_status).toLowerCase().trim();
     filtered = filtered.filter((product) => {
       const quantity = toNumber(product.inventory_quantity);
-      if (stockStatus === "out_of_stock") return quantity <= 0;
-      if (stockStatus === "low_stock") return quantity > 0 && quantity < 10;
-      if (stockStatus === "in_stock") return quantity >= 10;
+      const actualStockState =
+        quantity <= 0
+          ? "out_of_stock"
+          : quantity < 10
+            ? "low_stock"
+            : "in_stock";
+      const effectiveStockState =
+        isProductLowStockAlertsSuppressed(product) &&
+        actualStockState !== "in_stock"
+          ? "suppressed"
+          : actualStockState;
+      if (stockStatus === "out_of_stock") {
+        return effectiveStockState === "out_of_stock";
+      }
+      if (stockStatus === "low_stock") {
+        return effectiveStockState === "low_stock";
+      }
+      if (stockStatus === "in_stock") {
+        return effectiveStockState === "in_stock";
+      }
       return true;
     });
   }
@@ -4184,6 +4242,7 @@ router.post(
         sku,
         supplier_phone,
         supplier_location,
+        suppress_low_stock_alerts,
         variant_updates,
       } = req.body;
       const productId = req.params.id;
@@ -4215,6 +4274,19 @@ router.post(
         });
       }
 
+      if (
+        Object.prototype.hasOwnProperty.call(
+          req.body,
+          "suppress_low_stock_alerts",
+        ) &&
+        !isAdmin
+      ) {
+        return res.status(403).json({
+          error:
+            "Access denied: admin access required for low-stock alert preference updates",
+        });
+      }
+
       const updates = {};
       if (price !== undefined && price !== null)
         updates.price = parseFloat(price);
@@ -4236,6 +4308,17 @@ router.post(
       }
       if (Object.prototype.hasOwnProperty.call(req.body, "supplier_location")) {
         updates.supplier_location = String(supplier_location ?? "").trim();
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(
+          req.body,
+          "suppress_low_stock_alerts",
+        )
+      ) {
+        updates.suppress_low_stock_alerts = parseBooleanFlag(
+          suppress_low_stock_alerts,
+          "suppress_low_stock_alerts",
+        );
       }
       if (Array.isArray(variant_updates) && variant_updates.length > 0) {
         updates.variant_updates = variant_updates.map((variantUpdate) => {

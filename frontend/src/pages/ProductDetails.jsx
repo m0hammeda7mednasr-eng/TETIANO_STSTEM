@@ -3,9 +3,13 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import {
   ArrowLeft,
+  Bell,
+  BellOff,
   Package,
   Edit2,
+  RefreshCw,
   Save,
+  ShieldCheck,
   X,
   Clock,
   CheckCircle,
@@ -116,6 +120,7 @@ export default function ProductDetails() {
   const [notification, setNotification] = useState(null);
   const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
   const [barcodeModalTargetKey, setBarcodeModalTargetKey] = useState("");
+  const [lowStockAlertsSaving, setLowStockAlertsSaving] = useState(false);
 
   // Editable fields
   const [editedProduct, setEditedProduct] = useState({});
@@ -551,6 +556,71 @@ export default function ProductDetails() {
     },
     [hasPrintableBarcodeTarget, select, showNotification],
   );
+
+  const toggleLowStockAlerts = useCallback(async () => {
+    if (!product || !isAdmin || !canEditProducts || lowStockAlertsSaving) {
+      return;
+    }
+
+    const nextSuppressed = !Boolean(product?.suppress_low_stock_alerts);
+    setLowStockAlertsSaving(true);
+
+    try {
+      await api.post(`/shopify/products/${id}/update`, {
+        suppress_low_stock_alerts: nextSuppressed,
+      });
+
+      setProduct((currentProduct) =>
+        currentProduct
+          ? {
+              ...currentProduct,
+              suppress_low_stock_alerts: nextSuppressed,
+            }
+          : currentProduct,
+      );
+      setEditedProduct((currentEditedProduct) =>
+        currentEditedProduct
+          ? {
+              ...currentEditedProduct,
+              suppress_low_stock_alerts: nextSuppressed,
+            }
+          : currentEditedProduct,
+      );
+
+      showNotification(
+        nextSuppressed
+          ? select(
+              "تم إيقاف تنبيهات المخزون المنخفض لهذا المنتج.",
+              "Low-stock alerts were turned off for this product.",
+            )
+          : select(
+              "تم تشغيل تنبيهات المخزون المنخفض لهذا المنتج من جديد.",
+              "Low-stock alerts were turned back on for this product.",
+            ),
+        "success",
+      );
+    } catch (error) {
+      console.error("Error updating low-stock alert preference:", error);
+      showNotification(
+        error?.response?.data?.error ||
+          select(
+            "فشل تحديث إعداد تنبيهات المخزون المنخفض.",
+            "Failed to update the low-stock alert setting.",
+          ),
+        "error",
+      );
+    } finally {
+      setLowStockAlertsSaving(false);
+    }
+  }, [
+    canEditProducts,
+    id,
+    isAdmin,
+    lowStockAlertsSaving,
+    product,
+    select,
+    showNotification,
+  ]);
 
   const handleCopyProductReference = async () => {
     try {
@@ -1726,9 +1796,27 @@ export default function ProductDetails() {
                 </div>
               )}
 
-              {/* Status */}
+              {/* Product Health */}
               <div className="app-surface rounded-[28px] p-6">
-                <h2 className="text-lg font-bold text-gray-800 mb-4">الحالة</h2>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800">
+                      {select("صحة المنتج", "Product health")}
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {select(
+                        "ملخص سريع لحالة التوفر والمتابعة التشغيلية لهذا المنتج.",
+                        "A quick read on availability and operational follow-up for this product.",
+                      )}
+                    </p>
+                  </div>
+                  {isAdmin && canEditProducts && (
+                    <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                      <ShieldCheck size={14} />
+                      {select("تحكم إداري", "Admin control")}
+                    </span>
+                  )}
+                </div>
                 <div className="space-y-3">
                   <div>
                     <p className="text-sm text-gray-600">حالة المنتج</p>
@@ -1774,6 +1862,88 @@ export default function ProductDetails() {
                           : "نفذ من المخزون"}
                     </span>
                   </div>
+
+                  {isAdmin && canEditProducts && (
+                    <div className="pt-3">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-start gap-3">
+                            <div
+                              className={`mt-0.5 flex h-11 w-11 items-center justify-center rounded-2xl ${
+                                product?.suppress_low_stock_alerts
+                                  ? "bg-slate-900 text-white"
+                                  : "bg-emerald-100 text-emerald-700"
+                              }`}
+                            >
+                              {product?.suppress_low_stock_alerts ? (
+                                <BellOff size={18} />
+                              ) : (
+                                <Bell size={18} />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {select(
+                                  "تنبيهات المخزون المنخفض",
+                                  "Low-stock alerts",
+                                )}
+                              </p>
+                              <p className="mt-1 text-xs leading-5 text-slate-600">
+                                {product?.suppress_low_stock_alerts
+                                  ? select(
+                                      "متوقفة لهذا المنتج. سيظل المخزون ظاهرًا هنا، لكن المنتج لن يدخل في التنبيهات أو قوائم ضغط المخزون.",
+                                      "Paused for this product. Inventory still appears here, but the product stays out of alerts and stock-pressure lists.",
+                                    )
+                                  : select(
+                                      "شغالة بشكل طبيعي. المنتج يدخل في تنبيهات المخزون المنخفض وكل القوائم التشغيلية المرتبطة بها.",
+                                      "Active normally. The product participates in low-stock alerts and all related operational lists.",
+                                    )}
+                              </p>
+                            </div>
+                          </div>
+                          <span
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                              product?.suppress_low_stock_alerts
+                                ? "bg-slate-900 text-white"
+                                : "bg-emerald-100 text-emerald-700"
+                            }`}
+                          >
+                            {product?.suppress_low_stock_alerts
+                              ? select("متوقفة", "Paused")
+                              : select("شغالة", "Active")}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={toggleLowStockAlerts}
+                          disabled={lowStockAlertsSaving}
+                          className={`mt-4 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                            product?.suppress_low_stock_alerts
+                              ? "app-button-primary text-white"
+                              : "border border-slate-300 bg-white text-slate-900 hover:bg-slate-100"
+                          }`}
+                        >
+                          {lowStockAlertsSaving ? (
+                            <RefreshCw size={16} className="animate-spin" />
+                          ) : product?.suppress_low_stock_alerts ? (
+                            <Bell size={16} />
+                          ) : (
+                            <BellOff size={16} />
+                          )}
+                          {product?.suppress_low_stock_alerts
+                            ? select(
+                                "تشغيل تنبيهات المخزون المنخفض",
+                                "Turn low-stock alerts on",
+                              )
+                            : select(
+                                "إيقاف تنبيهات المخزون المنخفض",
+                                "Turn low-stock alerts off",
+                              )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

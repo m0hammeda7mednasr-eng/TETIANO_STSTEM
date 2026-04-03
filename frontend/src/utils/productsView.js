@@ -73,6 +73,19 @@ export const getStockState = (inventoryQuantity) => {
   return "in_stock";
 };
 
+export const getAlertManagedStockState = (
+  inventoryQuantity,
+  suppressLowStockAlerts = false,
+) => {
+  const actualStockState = getStockState(inventoryQuantity);
+
+  if (suppressLowStockAlerts && actualStockState !== "in_stock") {
+    return "suppressed";
+  }
+
+  return actualStockState;
+};
+
 export const getSyncState = (product) => {
   if (product.pending_sync) return "pending";
   if (product.sync_error) return "failed";
@@ -229,12 +242,18 @@ export const buildVariantRows = (products, isAdmin) =>
         has_multiple_variants: hasMultipleVariants,
         variants_count: toNumber(product?.variants_count || variants.length),
         option_values: optionValues,
+        suppress_low_stock_alerts: Boolean(product?.suppress_low_stock_alerts),
       };
 
       return {
         ...row,
         _meta: {
-          stockState: getStockState(inventoryQuantity),
+          actualStockState: getStockState(inventoryQuantity),
+          stockState: getAlertManagedStockState(
+            inventoryQuantity,
+            row.suppress_low_stock_alerts,
+          ),
+          lowStockAlertSuppressed: row.suppress_low_stock_alerts,
           syncState: getSyncState(row),
           profitabilityState: getProfitabilityState(row),
           updatedAt: normalizeDate(updatedAt),

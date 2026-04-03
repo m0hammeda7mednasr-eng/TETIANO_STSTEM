@@ -154,6 +154,9 @@ export class ProductManagementService {
       product.metafields = productData?.metafields || [];
       product.supplier_phone = localMetadata.supplier_phone;
       product.supplier_location = localMetadata.supplier_location;
+      product.suppress_low_stock_alerts = Boolean(
+        localMetadata.suppress_low_stock_alerts,
+      );
 
       // Inventory tracking
       product.inventory_tracked = variants.some(

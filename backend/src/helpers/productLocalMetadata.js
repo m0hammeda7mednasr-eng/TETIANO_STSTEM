@@ -12,6 +12,12 @@ const hasOwn = (value, key) =>
   Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
 
 const normalizeText = (value) => String(value ?? "").trim();
+const normalizeBoolean = (value) =>
+  value === true ||
+  value === 1 ||
+  String(value ?? "")
+    .trim()
+    .toLowerCase() === "true";
 
 const toPlainObject = (value) => {
   if (!value) return {};
@@ -36,6 +42,9 @@ const clonePlainObject = (value) =>
 const normalizeLocalFields = (value = {}) => ({
   supplier_phone: normalizeText(value?.supplier_phone),
   supplier_location: normalizeText(value?.supplier_location),
+  suppress_low_stock_alerts: normalizeBoolean(
+    value?.suppress_low_stock_alerts,
+  ),
 });
 
 const parseNumeric = (value) => {
@@ -152,6 +161,12 @@ export const extractProductLocalMetadata = (productData) => {
   return normalizeLocalFields(localMetadata);
 };
 
+export const isProductLowStockAlertsSuppressed = (productOrData) =>
+  Boolean(
+    extractProductLocalMetadata(productOrData?.data ?? productOrData)
+      ?.suppress_low_stock_alerts,
+  );
+
 export const mergeProductLocalMetadata = (productData, updates = {}) => {
   const nextData = clonePlainObject(productData);
   const currentMetadata = extractProductLocalMetadata(nextData);
@@ -165,7 +180,17 @@ export const mergeProductLocalMetadata = (productData, updates = {}) => {
     nextMetadata.supplier_location = normalizeText(updates.supplier_location);
   }
 
-  if (nextMetadata.supplier_phone || nextMetadata.supplier_location) {
+  if (hasOwn(updates, "suppress_low_stock_alerts")) {
+    nextMetadata.suppress_low_stock_alerts = normalizeBoolean(
+      updates.suppress_low_stock_alerts,
+    );
+  }
+
+  if (
+    nextMetadata.supplier_phone ||
+    nextMetadata.supplier_location ||
+    nextMetadata.suppress_low_stock_alerts
+  ) {
     nextData[LOCAL_PRODUCT_METADATA_KEY] = nextMetadata;
   } else {
     delete nextData[LOCAL_PRODUCT_METADATA_KEY];

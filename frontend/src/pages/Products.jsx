@@ -1229,7 +1229,7 @@ export default function Products() {
                       </div>
                     )}
                     <StockBadge
-                      stockState={variant._meta.stockState}
+                      stockState={variant._meta.actualStockState}
                       shopifyInventoryQuantity={variant.shopify_inventory_quantity}
                       warehouseInventoryQuantity={variant.warehouse_inventory_quantity}
                     />
@@ -1271,9 +1271,9 @@ export default function Products() {
                           maximumFractionDigits: 0,
                         })}
                         valueClassName={
-                          variant._meta.stockState === "in_stock"
+                          variant._meta.actualStockState === "in_stock"
                             ? "text-emerald-600"
-                            : variant._meta.stockState === "low_stock"
+                            : variant._meta.actualStockState === "low_stock"
                               ? "text-amber-600"
                               : "text-rose-600"
                         }
@@ -1466,11 +1466,7 @@ function VariantImage({ variant }) {
   );
 }
 
-function StockBadge({
-  stockState,
-  shopifyInventoryQuantity = 0,
-  warehouseInventoryQuantity = 0,
-}) {
+function StockBadge({ stockState, shopifyInventoryQuantity = 0, warehouseInventoryQuantity = 0 }) {
   const hasWarehouseStockOnly =
     toNumber(shopifyInventoryQuantity) <= 0 &&
     toNumber(warehouseInventoryQuantity) > 0;

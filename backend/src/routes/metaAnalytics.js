@@ -30,6 +30,7 @@ import {
   generateOpenRouterMetaAnalysis,
   generateOpenRouterStoreAssistantReply,
 } from "../services/metaAnalyticsService.js";
+import { isProductLowStockAlertsSuppressed } from "../helpers/productLocalMetadata.js";
 
 const router = express.Router();
 const SCHEMA_ERROR_CODES = new Set([
@@ -75,8 +76,9 @@ const PRODUCTS_SELECTS = [
     "inventory_quantity",
     "created_at",
     "updated_at",
+    "data",
   ].join(","),
-  ["id", "store_id", "title", "inventory_quantity", "updated_at"].join(","),
+  ["id", "store_id", "title", "inventory_quantity", "updated_at", "data"].join(","),
 ];
 const ORDERS_SELECT = [
   "id",
@@ -420,11 +422,17 @@ const dedupeRowsById = (rows = []) => {
 };
 
 const isLowStockProduct = (product) => {
+  if (isProductLowStockAlertsSuppressed(product)) {
+    return false;
+  }
+
   const quantity = toNumber(product?.inventory_quantity);
   return quantity > 0 && quantity < LOW_STOCK_THRESHOLD;
 };
 
-const isOutOfStockProduct = (product) => toNumber(product?.inventory_quantity) <= 0;
+const isOutOfStockProduct = (product) =>
+  !isProductLowStockAlertsSuppressed(product) &&
+  toNumber(product?.inventory_quantity) <= 0;
 
 const isPaidOrder = (order) => PAID_STATUSES.has(getOrderFinancialStatus(order));
 

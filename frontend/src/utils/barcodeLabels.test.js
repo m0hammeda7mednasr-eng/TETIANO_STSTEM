@@ -43,6 +43,14 @@ describe("barcodeLabels", () => {
     });
   });
 
+  test("getBarcodeLabelPresetById resolves the new 38x25 preset", () => {
+    expect(getBarcodeLabelPresetById("38x25")).toMatchObject({
+      id: "38x25",
+      widthMm: 38,
+      heightMm: 25,
+    });
+  });
+
   test("hasPrintableLabelContent allows text-only custom labels when requested", () => {
     expect(
       hasPrintableLabelContent(
@@ -86,7 +94,7 @@ describe("barcodeLabels", () => {
     });
 
     expect(html).toContain("@page");
-    expect(html).toContain("size: 50mm 30mm;");
+    expect(html).toContain("size: 50mm 30mm landscape;");
     expect(html).toContain("Dress &lt;Main&gt;");
     expect(html.match(/class="label-page"/g)).toHaveLength(2);
   });

@@ -26,6 +26,7 @@ import {
   measureSync,
 } from "../helpers/requestProfiler.js";
 import { computeNetProfitMetrics } from "../helpers/netProfit.js";
+import { isProductLowStockAlertsSuppressed } from "../helpers/productLocalMetadata.js";
 
 const router = express.Router();
 const UUID_REGEX =
@@ -60,11 +61,19 @@ const DASHBOARD_PRODUCT_COUNT_SELECT = [
   "title",
   "inventory_quantity",
   "updated_at",
+  "data",
 ].join(",");
 const DASHBOARD_PRODUCT_COUNT_SELECTS = [
   DASHBOARD_PRODUCT_COUNT_SELECT,
-  ["id", "store_id", "user_id", "title", "inventory_quantity"].join(","),
-  ["id", "store_id", "user_id", "inventory_quantity"].join(","),
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "title",
+    "inventory_quantity",
+    "data",
+  ].join(","),
+  ["id", "store_id", "user_id", "inventory_quantity", "data"].join(","),
   "id,store_id,user_id",
 ];
 const DASHBOARD_CUSTOMER_COUNT_SELECT = "id,store_id,user_id";
@@ -318,11 +327,18 @@ const GROWTH_CENTER_PRODUCT_SELECTS = [
     "shipping_cost",
     "inventory_quantity",
     "updated_at",
+    "data",
   ].join(","),
-  ["id", "store_id", "user_id", "title", "inventory_quantity", "updated_at"].join(
-    ",",
-  ),
-  ["id", "store_id", "user_id", "title", "inventory_quantity"].join(","),
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "title",
+    "inventory_quantity",
+    "updated_at",
+    "data",
+  ].join(","),
+  ["id", "store_id", "user_id", "title", "inventory_quantity", "data"].join(","),
 ];
 const GROWTH_CENTER_ORDER_SELECT = [
   "id",
@@ -701,6 +717,10 @@ const dedupeRowsById = (rows = []) => {
 };
 
 const isLowStockProduct = (product) => {
+  if (isProductLowStockAlertsSuppressed(product)) {
+    return false;
+  }
+
   const quantity = toNumber(product?.inventory_quantity);
   return quantity > 0 && quantity < LOW_STOCK_THRESHOLD;
 };
@@ -1895,6 +1915,7 @@ const buildGrowthProductMetrics = ({
   }
 
   return dedupeRowsById(products).map((product) => {
+    const suppressLowStockAlerts = isProductLowStockAlertsSuppressed(product);
     const allTimeSnapshot = readSalesSnapshotForProduct(product, salesAllTimeByKey);
     const primarySnapshot = readSalesSnapshotForProduct(
       product,
@@ -1948,6 +1969,10 @@ const buildGrowthProductMetrics = ({
       stockStatus = "watch";
     }
 
+    if (suppressLowStockAlerts && stockStatus !== "healthy") {
+      stockStatus = "healthy";
+    }
+
     return {
       id: product?.id || null,
       route: product?.id ? `/products/${product.id}` : "/products",
@@ -1972,6 +1997,7 @@ const buildGrowthProductMetrics = ({
       days_of_cover: daysOfCover === null ? null : roundMetric(daysOfCover, 1),
       suggested_reorder_units: suggestedReorderUnits,
       stock_status: stockStatus,
+      suppress_low_stock_alerts: suppressLowStockAlerts,
       missing_saved_costs:
         primarySnapshot.sold_units > 0 && (costPrice <= 0 || totalUnitCost <= 0),
       has_margin_leak:
@@ -1991,8 +2017,9 @@ const buildGrowthReplenishmentSnapshot = (productMetrics = []) => {
   const priorities = (productMetrics || [])
     .filter(
       (product) =>
-        product?.stock_status !== "healthy" ||
-        toNumber(product?.sold_units_lookback) > 0,
+        !product?.suppress_low_stock_alerts &&
+        (product?.stock_status !== "healthy" ||
+          toNumber(product?.sold_units_lookback) > 0),
     )
     .sort((left, right) => {
       const leftUrgency =

@@ -2,7 +2,11 @@ import { describe, expect, it } from "@jest/globals";
 
 import {
   applyProductWarehouseInventorySnapshot,
+  extractProductLocalMetadata,
   getProductWarehouseInventorySnapshot,
+  isProductLowStockAlertsSuppressed,
+  mergeProductLocalMetadata,
+  preserveProductLocalMetadata,
   preserveProductWarehouseData,
 } from "./productLocalMetadata.js";
 
@@ -127,6 +131,45 @@ describe("helpers/productLocalMetadata warehouse separation", () => {
       last_movement_quantity: 3,
       created_at: null,
       updated_at: "2026-03-23T10:00:00.000Z",
+    });
+  });
+
+  it("stores and reads the low-stock suppression flag in local product metadata", () => {
+    const nextData = mergeProductLocalMetadata(
+      {
+        title: "Seasonal item",
+      },
+      {
+        suppress_low_stock_alerts: true,
+      },
+    );
+
+    expect(extractProductLocalMetadata(nextData)).toEqual({
+      supplier_phone: "",
+      supplier_location: "",
+      suppress_low_stock_alerts: true,
+    });
+    expect(isProductLowStockAlertsSuppressed(nextData)).toBe(true);
+  });
+
+  it("preserves the low-stock suppression flag during product data refresh", () => {
+    const result = preserveProductLocalMetadata(
+      {
+        title: "Updated from Shopify",
+        inventory_quantity: 3,
+      },
+      {
+        _tetiano_local_product: {
+          suppress_low_stock_alerts: true,
+        },
+      },
+    );
+
+    expect(isProductLowStockAlertsSuppressed(result)).toBe(true);
+    expect(extractProductLocalMetadata(result)).toEqual({
+      supplier_phone: "",
+      supplier_location: "",
+      suppress_low_stock_alerts: true,
     });
   });
 });

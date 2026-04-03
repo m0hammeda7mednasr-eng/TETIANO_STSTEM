@@ -1,6 +1,7 @@
 import {
   buildCatalogCounts,
   buildVariantRows,
+  getAlertManagedStockState,
   getNormalizedDateRange,
   getStockState,
 } from "./productsView";
@@ -20,6 +21,13 @@ describe("productsView", () => {
     expect(getStockState(0)).toBe("out_of_stock");
     expect(getStockState(5)).toBe("low_stock");
     expect(getStockState(10)).toBe("in_stock");
+  });
+
+  test("getAlertManagedStockState hides low-stock states when alerts are suppressed", () => {
+    expect(getAlertManagedStockState(0, true)).toBe("suppressed");
+    expect(getAlertManagedStockState(5, true)).toBe("suppressed");
+    expect(getAlertManagedStockState(12, true)).toBe("in_stock");
+    expect(getAlertManagedStockState(5, false)).toBe("low_stock");
   });
 
   test("buildVariantRows creates a default variant row when variants are missing", () => {
@@ -74,6 +82,25 @@ describe("productsView", () => {
     expect(rows[0].warehouse_inventory_quantity).toBe(6);
     expect(rows[0].total_shopify_inventory).toBe(0);
     expect(rows[0].total_warehouse_inventory).toBe(14);
+  });
+
+  test("buildVariantRows marks products with suppressed low-stock alerts", () => {
+    const rows = buildVariantRows(
+      [
+        {
+          id: "product-3",
+          title: "Carryover Blazer",
+          inventory_quantity: 4,
+          suppress_low_stock_alerts: true,
+        },
+      ],
+      false,
+    );
+
+    expect(rows[0].suppress_low_stock_alerts).toBe(true);
+    expect(rows[0]._meta.actualStockState).toBe("low_stock");
+    expect(rows[0]._meta.stockState).toBe("suppressed");
+    expect(rows[0]._meta.lowStockAlertSuppressed).toBe(true);
   });
 
   test("buildCatalogCounts keeps product totals separate from variant totals", () => {

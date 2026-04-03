@@ -381,6 +381,7 @@ export class ProductUpdateService {
       sku,
       supplier_phone,
       supplier_location,
+      suppress_low_stock_alerts,
     } = updates;
     const variantUpdates = Array.isArray(updates?.variant_updates)
       ? updates.variant_updates
@@ -391,6 +392,11 @@ export class ProductUpdateService {
     }
     if (hasOwn(updates, "supplier_location")) {
       localFieldUpdates.supplier_location = normalizeText(supplier_location);
+    }
+    if (hasOwn(updates, "suppress_low_stock_alerts")) {
+      localFieldUpdates.suppress_low_stock_alerts = Boolean(
+        suppress_low_stock_alerts,
+      );
     }
     const localOnlyFields = [];
     if (cost_price !== undefined) {
@@ -410,6 +416,9 @@ export class ProductUpdateService {
     }
     if (hasOwn(localFieldUpdates, "supplier_location")) {
       localOnlyFields.push("supplier_location");
+    }
+    if (hasOwn(localFieldUpdates, "suppress_low_stock_alerts")) {
+      localOnlyFields.push("suppress_low_stock_alerts");
     }
     const shopifyFields = [];
     if (price !== undefined) {
@@ -558,6 +567,15 @@ export class ProductUpdateService {
           currentLocalMetadata.supplier_location
       ) {
         oldValues.supplier_location = currentLocalMetadata.supplier_location;
+      }
+      if (
+        hasOwn(localFieldUpdates, "suppress_low_stock_alerts") &&
+        Boolean(localFieldUpdates.suppress_low_stock_alerts) !==
+          Boolean(currentLocalMetadata.suppress_low_stock_alerts)
+      ) {
+        oldValues.suppress_low_stock_alerts = Boolean(
+          currentLocalMetadata.suppress_low_stock_alerts,
+        );
       }
 
       if (Object.keys(localFieldUpdates).length > 0) {

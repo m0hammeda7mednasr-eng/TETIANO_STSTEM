@@ -22,6 +22,7 @@ import {
 } from "../helpers/orderScope.js";
 
 const router = express.Router();
+const RETURNED_ORDER_STATUSES = new Set(["restocked"]);
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -145,6 +146,15 @@ const normalizeSku = (value) =>
     .replace(/\s+/g, " ")
     .toUpperCase();
 
+const normalizeVariantTitle = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized || normalized.toLowerCase() === "default title") {
+    return "";
+  }
+
+  return normalized.toLowerCase();
+};
+
 const extractIdentifierVariants = (value) => {
   const normalized = normalizeKey(value);
   if (!normalized) {
@@ -194,6 +204,16 @@ const resolveSkuMatch = (map, values = []) => {
   }
 
   return null;
+};
+
+const isRestockedOrder = (order) => {
+  const financialStatus = getOrderFinancialStatus(order);
+  const fulfillmentStatus = getOrderFulfillmentStatus(order);
+
+  return (
+    RETURNED_ORDER_STATUSES.has(financialStatus) ||
+    RETURNED_ORDER_STATUSES.has(fulfillmentStatus)
+  );
 };
 
 const isSchemaCompatibilityError = (error) => {
@@ -414,6 +434,7 @@ const buildRefundDetails = (order) => {
     amountByLineItemId,
     latestAtByLineItemId,
     isFullyRefunded:
+      isRestockedOrder(order) ||
       getOrderGrossAmount(order) > 0 &&
       getOrderRefundedAmount(order) >= getOrderGrossAmount(order),
   };
@@ -460,7 +481,7 @@ const buildFulfillmentDetails = (order) => {
   };
 };
 
-const getItemRefundedQuantity = (item, refundDetails) => {
+const getItemRefundedQuantity = (item, refundDetails, order) => {
   const lineItemId = normalizeKey(item?.id || item?.line_item_id);
   const explicitRefundQuantity = toNumber(
     refundDetails.quantityByLineItemId.get(lineItemId),
@@ -483,7 +504,7 @@ const getItemRefundedQuantity = (item, refundDetails) => {
     return orderedQuantity - currentQuantity;
   }
 
-  if (refundDetails.isFullyRefunded) {
+  if (refundDetails.isFullyRefunded || isRestockedOrder(order)) {
     return orderedQuantity;
   }
 
@@ -514,7 +535,10 @@ const getItemDeliveredQuantity = (order, item, fulfillmentDetails) => {
     return Math.min(orderedQuantity, orderedQuantity - fulfillableQuantity);
   }
 
-  if (getOrderFulfillmentStatus(order) === "fulfilled") {
+  if (
+    getOrderFulfillmentStatus(order) === "fulfilled" ||
+    isRestockedOrder(order)
+  ) {
     return orderedQuantity;
   }
 
@@ -609,6 +633,78 @@ const updateLatestTimestamp = (entry, fieldName, candidate) => {
   if (!previous || new Date(candidate).getTime() > new Date(previous).getTime()) {
     entry[fieldName] = candidate;
   }
+};
+
+const getLineItemVariantTitleCandidates = (item = {}) => {
+  const candidates = new Set();
+  const directVariantTitle = normalizeVariantTitle(
+    item?.variant_title || item?.variant_name,
+  );
+  if (directVariantTitle) {
+    candidates.add(directVariantTitle);
+  }
+
+  const compositeName = String(item?.name || "").trim();
+  const productTitle = String(
+    item?.title || item?.product_title || "",
+  ).trim();
+  if (compositeName && productTitle && compositeName.startsWith(productTitle)) {
+    const suffix = compositeName
+      .slice(productTitle.length)
+      .replace(/^[\s\-–—/|:]+/, "")
+      .trim();
+    const normalizedSuffix = normalizeVariantTitle(suffix);
+    if (normalizedSuffix) {
+      candidates.add(normalizedSuffix);
+    }
+  }
+
+  return Array.from(candidates);
+};
+
+const resolveVariantEntryForProduct = (productEntry, item, matchedVariantEntry) => {
+  if (matchedVariantEntry) {
+    return matchedVariantEntry;
+  }
+
+  const variants = Array.isArray(productEntry?.variants) ? productEntry.variants : [];
+  if (variants.length === 0) {
+    return null;
+  }
+
+  const itemVariantId = normalizeKey(item?.variant_id);
+  if (itemVariantId) {
+    const variantById = variants.find((variant) =>
+      extractIdentifierVariants(variant?.id).includes(
+        normalizeIdentifier(itemVariantId),
+      ),
+    );
+    if (variantById) {
+      return variantById;
+    }
+  }
+
+  const itemSku = normalizeSku(item?.sku);
+  if (itemSku) {
+    const variantBySku = variants.find(
+      (variant) => normalizeSku(variant?.sku) === itemSku,
+    );
+    if (variantBySku) {
+      return variantBySku;
+    }
+  }
+
+  const titleCandidates = getLineItemVariantTitleCandidates(item);
+  if (titleCandidates.length > 0) {
+    const variantByTitle = variants.find((variant) =>
+      titleCandidates.includes(normalizeVariantTitle(variant?.title)),
+    );
+    if (variantByTitle) {
+      return variantByTitle;
+    }
+  }
+
+  return variants.length === 1 ? variants[0] : null;
 };
 
 const getTaskStatusKey = (status) => {
@@ -782,7 +878,7 @@ const loadScopedTasks = async (req, storeId) => {
 const buildOrderLineEntries = (order, refundDetails, fulfillmentDetails) => {
   const orderCancelled = isCancelledOrder(order);
   const orderRefundedAmount = getOrderRefundedAmount(order);
-  const isPaidLike = PAID_LIKE_STATUSES.has(getOrderFinancialStatus(order));
+  const orderRestocked = isRestockedOrder(order);
   const lineContexts = [];
   let explicitRefundAmountTotal = 0;
   let refundableBaseTotal = 0;
@@ -795,7 +891,7 @@ const buildOrderLineEntries = (order, refundDetails, fulfillmentDetails) => {
 
     const refundedQuantity = Math.min(
       orderedQuantity,
-      getItemRefundedQuantity(item, refundDetails),
+      getItemRefundedQuantity(item, refundDetails, order),
     );
     const deliveredQuantity = Math.min(
       orderedQuantity,
@@ -827,7 +923,7 @@ const buildOrderLineEntries = (order, refundDetails, fulfillmentDetails) => {
     );
     const orderLineAmount = getLineItemBookedAmount(item);
     const grossSales =
-      isPaidLike && orderedQuantity > 0
+      !orderCancelled && orderedQuantity > 0
         ? (orderLineAmount * saleableQuantity) / orderedQuantity
         : 0;
     const explicitRefundAmount = Math.min(
@@ -862,9 +958,16 @@ const buildOrderLineEntries = (order, refundDetails, fulfillmentDetails) => {
     });
   }
 
+  const effectiveRefundedAmount =
+    orderRestocked && orderRefundedAmount <= 0
+      ? lineContexts.reduce((sum, line) => sum + line.grossSales, 0)
+      : orderRefundedAmount;
   const remainingRefundAmount = Math.max(
     0,
-    Math.min(orderRefundedAmount, lineContexts.reduce((sum, line) => sum + line.grossSales, 0)) -
+    Math.min(
+      effectiveRefundedAmount,
+      lineContexts.reduce((sum, line) => sum + line.grossSales, 0),
+    ) -
       explicitRefundAmountTotal,
   );
 
@@ -941,6 +1044,7 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
 
   for (const order of filteredOrders) {
     const orderId = normalizeKey(order?.id);
+    const orderFinancialStatus = getOrderFinancialStatus(order);
     const refundDetails = buildRefundDetails(order);
     const fulfillmentDetails = buildFulfillmentDetails(order);
     const lineEntries = buildOrderLineEntries(order, refundDetails, fulfillmentDetails);
@@ -976,10 +1080,15 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
         continue;
       }
 
-      const resolvedVariantEntry =
-        variantEntry ||
-        productEntry.variants[0];
-      if (!resolvedVariantEntry) {
+      const resolvedVariantEntry = resolveVariantEntryForProduct(
+        productEntry,
+        item,
+        variantEntry,
+      );
+      const targets = resolvedVariantEntry
+        ? [productEntry, resolvedVariantEntry]
+        : [productEntry];
+      if (targets.length === 0) {
         continue;
       }
       const orderCreatedAt = order?.created_at || null;
@@ -988,10 +1097,12 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
         fulfillmentDetails.latestAtByLineItemId.get(lineItemId) ||
         (deliveredQuantity > 0 ? order?.updated_at || order?.created_at : null);
       const lineReturnAt =
-        refundDetails.latestAtByLineItemId.get(lineItemId) ||
-        (refundedQuantity > 0 ? order?.updated_at || order?.created_at : null);
-
-      const targets = [productEntry, resolvedVariantEntry];
+        returnedQuantity > 0
+          ? refundDetails.latestAtByLineItemId.get(lineItemId) ||
+            order?.updated_at ||
+            order?.created_at ||
+            null
+          : null;
 
       for (const target of targets) {
         target.ordered_quantity += orderedQuantity;
@@ -1004,13 +1115,13 @@ export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) 
         target.net_sales += netSales;
         target.orderIds.add(orderId);
 
-        if (grossSales > 0) {
+        if (PAID_LIKE_STATUSES.has(orderFinancialStatus) && grossSales > 0) {
           target.paidOrderIds.add(orderId);
         }
         if (deliveredQuantity > 0) {
           target.deliveredOrderIds.add(orderId);
         }
-        if (refundedQuantity > 0) {
+        if (returnedQuantity > 0) {
           target.returnedOrderIds.add(orderId);
         }
         if (pendingQuantity > 0) {

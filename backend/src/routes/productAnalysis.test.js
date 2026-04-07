@@ -288,6 +288,215 @@ describe("routes/productAnalysis buildAnalyticsPayload", () => {
     expect(payload.data[0].net_delivered_quantity).toBe(0);
   });
 
+  it("includes booked sales from pending orders inside the default all-orders scope", async () => {
+    tableData.products = [
+      {
+        id: "product-pending",
+        shopify_id: "shopify-product-pending",
+        store_id: "store-1",
+        title: "Pending Sales Product",
+        sku: "SKU-PENDING-SALES",
+        inventory_quantity: 8,
+        data: {
+          variants: [
+            {
+              id: "variant-pending",
+              title: "Default",
+              sku: "SKU-PENDING-SALES",
+              inventory_quantity: 8,
+            },
+          ],
+        },
+      },
+    ];
+    tableData.orders = [
+      {
+        id: "order-pending-sales",
+        store_id: "store-1",
+        financial_status: "pending",
+        fulfillment_status: "",
+        total_price: 150,
+        created_at: "2026-03-04T09:00:00.000Z",
+        updated_at: "2026-03-04T10:00:00.000Z",
+        data: {
+          line_items: [
+            {
+              id: "line-pending-sales",
+              product_id: "shopify-product-pending",
+              variant_id: "variant-pending",
+              sku: "SKU-PENDING-SALES",
+              quantity: 1,
+              price: "150",
+            },
+          ],
+        },
+      },
+    ];
+
+    const payload = await buildAnalyticsPayload(
+      {
+        user: {
+          id: "admin-1",
+          role: "admin",
+          isAdmin: true,
+        },
+      },
+      "store-1",
+    );
+
+    expect(payload.data).toHaveLength(1);
+    expect(payload.data[0].ordered_quantity).toBe(1);
+    expect(payload.data[0].pending_quantity).toBe(1);
+    expect(payload.data[0].gross_sales).toBe(150);
+    expect(payload.data[0].net_sales).toBe(150);
+    expect(payload.data[0].paid_orders_count).toBe(0);
+    expect(payload.summary.gross_sales).toBe(150);
+    expect(payload.summary.net_sales).toBe(150);
+  });
+
+  it("treats restocked orders as fully returned even when Shopify refund totals are missing", async () => {
+    tableData.products = [
+      {
+        id: "product-restocked",
+        shopify_id: "shopify-product-restocked",
+        store_id: "store-1",
+        title: "Restocked Product",
+        sku: "SKU-RESTOCKED",
+        inventory_quantity: 6,
+        data: {
+          variants: [
+            {
+              id: "variant-restocked",
+              title: "Default",
+              sku: "SKU-RESTOCKED",
+              inventory_quantity: 6,
+            },
+          ],
+        },
+      },
+    ];
+    tableData.orders = [
+      {
+        id: "order-restocked",
+        store_id: "store-1",
+        financial_status: "paid",
+        fulfillment_status: "restocked",
+        total_price: 120,
+        created_at: "2026-03-05T09:00:00.000Z",
+        updated_at: "2026-03-05T10:00:00.000Z",
+        data: {
+          line_items: [
+            {
+              id: "line-restocked",
+              product_id: "shopify-product-restocked",
+              variant_id: "variant-restocked",
+              sku: "SKU-RESTOCKED",
+              quantity: 1,
+              price: "120",
+            },
+          ],
+        },
+      },
+    ];
+
+    const payload = await buildAnalyticsPayload(
+      {
+        user: {
+          id: "admin-1",
+          role: "admin",
+          isAdmin: true,
+        },
+      },
+      "store-1",
+    );
+
+    expect(payload.data).toHaveLength(1);
+    expect(payload.data[0].delivered_quantity).toBe(1);
+    expect(payload.data[0].returned_quantity).toBe(1);
+    expect(payload.data[0].net_delivered_quantity).toBe(0);
+    expect(payload.data[0].gross_sales).toBe(120);
+    expect(payload.data[0].net_sales).toBe(0);
+    expect(payload.summary.returned_quantity).toBe(1);
+    expect(payload.summary.net_sales).toBe(0);
+  });
+
+  it("matches variants by line item variant title before falling back to the first product variant", async () => {
+    tableData.products = [
+      {
+        id: "product-variants",
+        shopify_id: "shopify-product-variants",
+        store_id: "store-1",
+        title: "Variant Match Product",
+        sku: "",
+        inventory_quantity: 10,
+        data: {
+          variants: [
+            {
+              id: "variant-red",
+              title: "Red",
+              sku: "",
+              inventory_quantity: 5,
+            },
+            {
+              id: "variant-blue",
+              title: "Blue",
+              sku: "",
+              inventory_quantity: 5,
+            },
+          ],
+        },
+      },
+    ];
+    tableData.orders = [
+      {
+        id: "order-variant-title",
+        store_id: "store-1",
+        financial_status: "paid",
+        fulfillment_status: "fulfilled",
+        total_price: 90,
+        created_at: "2026-03-06T09:00:00.000Z",
+        updated_at: "2026-03-06T10:00:00.000Z",
+        data: {
+          line_items: [
+            {
+              id: "line-variant-title",
+              product_id: "shopify-product-variants",
+              quantity: 1,
+              price: "90",
+              title: "Variant Match Product",
+              name: "Variant Match Product - Blue",
+              variant_title: "Blue",
+            },
+          ],
+          fulfillments: [
+            {
+              created_at: "2026-03-06T09:30:00.000Z",
+              line_items: [{ id: "line-variant-title", quantity: 1 }],
+            },
+          ],
+        },
+      },
+    ];
+
+    const payload = await buildAnalyticsPayload(
+      {
+        user: {
+          id: "admin-1",
+          role: "admin",
+          isAdmin: true,
+        },
+      },
+      "store-1",
+    );
+
+    expect(payload.data).toHaveLength(1);
+    expect(payload.data[0].ordered_quantity).toBe(1);
+    expect(payload.data[0].variants[0].ordered_quantity).toBe(0);
+    expect(payload.data[0].variants[1].ordered_quantity).toBe(1);
+    expect(payload.data[0].variants[1].gross_sales).toBe(90);
+    expect(payload.data[0].variants[1].net_sales).toBe(90);
+  });
+
   it("matches Shopify GIDs to numeric product ids and keeps money-set line totals", async () => {
     tableData.products = [
       {

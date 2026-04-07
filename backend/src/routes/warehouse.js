@@ -1203,7 +1203,7 @@ const writeActivityLog = async ({
 
 router.use(authenticateToken);
 
-router.get("/stock", requirePermission("can_view_products"), async (req, res) => {
+router.get("/stock", requirePermission("can_view_warehouse"), async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     const pagination = getPagination(req.query);
@@ -1248,7 +1248,7 @@ router.get("/stock", requirePermission("can_view_products"), async (req, res) =>
 
 router.post(
   "/sync-to-shopify",
-  requirePermission("can_edit_products"),
+  requirePermission("can_edit_warehouse"),
   async (req, res) => {
     try {
       const { storeId } = await resolveStoreContext(req);
@@ -1424,7 +1424,7 @@ router.post(
   },
 );
 
-router.get("/scans", requirePermission("can_view_products"), async (req, res) => {
+router.get("/scans", requirePermission("can_view_warehouse"), async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     const pagination = getPagination(req.query);
@@ -1475,7 +1475,7 @@ router.get("/scans", requirePermission("can_view_products"), async (req, res) =>
   }
 });
 
-router.post("/scan", requirePermission("can_edit_products"), async (req, res) => {
+router.post("/scan", requirePermission("can_edit_warehouse"), async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     const movementType = String(req.body?.movement_type || "").trim().toLowerCase();

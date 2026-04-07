@@ -17,6 +17,8 @@ const DEFAULT_CLIENT_PERMISSIONS = {
   can_view_dashboard: true,
   can_view_products: true,
   can_edit_products: false,
+  can_view_warehouse: true,
+  can_edit_warehouse: false,
   can_view_suppliers: true,
   can_edit_suppliers: false,
   can_view_orders: true,
@@ -30,6 +32,11 @@ const DEFAULT_CLIENT_PERMISSIONS = {
   can_view_all_reports: false,
   can_view_activity_log: false,
   can_print_barcode_labels: true,
+};
+
+const CLIENT_PERMISSION_FALLBACK_KEYS = {
+  can_view_warehouse: ["can_view_products"],
+  can_edit_warehouse: ["can_edit_products"],
 };
 
 const readJsonFromStorage = (key) => {
@@ -70,6 +77,24 @@ const syncCurrentStoreId = (stores = []) => {
   return nextStoreId;
 };
 
+const normalizeClientPermissions = (rawPermissions = null) =>
+  Object.keys(DEFAULT_CLIENT_PERMISSIONS).reduce((acc, key) => {
+    if (Object.prototype.hasOwnProperty.call(rawPermissions || {}, key)) {
+      acc[key] = Boolean(rawPermissions[key]);
+      return acc;
+    }
+
+    const fallbackKey = (CLIENT_PERMISSION_FALLBACK_KEYS[key] || []).find(
+      (candidateKey) =>
+        Object.prototype.hasOwnProperty.call(rawPermissions || {}, candidateKey),
+    );
+
+    acc[key] = fallbackKey
+      ? Boolean(rawPermissions[fallbackKey])
+      : DEFAULT_CLIENT_PERMISSIONS[key];
+    return acc;
+  }, {});
+
 const buildCachedPermissions = (cachedUser, cachedPermissions) => {
   if (cachedUser?.role === "admin") {
     return Object.keys(DEFAULT_CLIENT_PERMISSIONS).reduce((acc, key) => {
@@ -78,7 +103,7 @@ const buildCachedPermissions = (cachedUser, cachedPermissions) => {
     }, {});
   }
 
-  return cachedPermissions || { ...DEFAULT_CLIENT_PERMISSIONS };
+  return normalizeClientPermissions(cachedPermissions);
 };
 
 export const AuthProvider = ({ children }) => {
@@ -103,10 +128,18 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const applyAuthState = useCallback((nextUser, nextPermissions) => {
+    const normalizedPermissions =
+      nextUser?.role === "admin"
+        ? Object.keys(DEFAULT_CLIENT_PERMISSIONS).reduce((acc, key) => {
+            acc[key] = true;
+            return acc;
+          }, {})
+        : normalizeClientPermissions(nextPermissions);
+
     localStorage.setItem("user", JSON.stringify(nextUser));
-    localStorage.setItem("permissions", JSON.stringify(nextPermissions));
+    localStorage.setItem("permissions", JSON.stringify(normalizedPermissions));
     setUser(nextUser);
-    setPermissions(nextPermissions);
+    setPermissions(normalizedPermissions);
     setIsAdmin(nextUser?.role === "admin");
   }, []);
 

@@ -20,6 +20,8 @@ import { subscribeToSharedDataUpdates } from "../utils/realtime";
 const getRequestablePermissions = (locale) => [
   { value: "can_view_products", label: getPermissionLabel("can_view_products", locale) },
   { value: "can_edit_products", label: getPermissionLabel("can_edit_products", locale) },
+  { value: "can_view_warehouse", label: getPermissionLabel("can_view_warehouse", locale) },
+  { value: "can_edit_warehouse", label: getPermissionLabel("can_edit_warehouse", locale) },
   { value: "can_view_suppliers", label: getPermissionLabel("can_view_suppliers", locale) },
   { value: "can_edit_suppliers", label: getPermissionLabel("can_edit_suppliers", locale) },
   { value: "can_view_orders", label: getPermissionLabel("can_view_orders", locale) },

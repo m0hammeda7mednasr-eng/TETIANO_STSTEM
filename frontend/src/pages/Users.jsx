@@ -22,6 +22,8 @@ const DEFAULT_PERMISSION_STATE = {
   can_view_dashboard: true,
   can_view_products: true,
   can_edit_products: false,
+  can_view_warehouse: true,
+  can_edit_warehouse: false,
   can_view_suppliers: true,
   can_edit_suppliers: false,
   can_view_orders: true,
@@ -37,6 +39,11 @@ const DEFAULT_PERMISSION_STATE = {
   can_print_barcode_labels: true,
 };
 
+const PERMISSION_FALLBACK_KEYS = {
+  can_view_warehouse: ["can_view_products"],
+  can_edit_warehouse: ["can_edit_products"],
+};
+
 const TABS = ["users", "requests", "reports"];
 
 const getTabFromQuery = (value) => (TABS.includes(value) ? value : "users");
@@ -47,10 +54,18 @@ const normalizePermissions = (rawPermissions) => {
     : rawPermissions || {};
 
   return Object.keys(DEFAULT_PERMISSION_STATE).reduce((acc, key) => {
-    acc[key] =
-      source[key] !== undefined
-        ? Boolean(source[key])
-        : DEFAULT_PERMISSION_STATE[key];
+    if (source[key] !== undefined) {
+      acc[key] = Boolean(source[key]);
+      return acc;
+    }
+
+    const fallbackKey = (PERMISSION_FALLBACK_KEYS[key] || []).find(
+      (candidateKey) => source[candidateKey] !== undefined,
+    );
+
+    acc[key] = fallbackKey
+      ? Boolean(source[fallbackKey])
+      : DEFAULT_PERMISSION_STATE[key];
     return acc;
   }, {});
 };

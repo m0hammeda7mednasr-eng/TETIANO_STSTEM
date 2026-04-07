@@ -130,7 +130,7 @@ function App() {
               <Route
                 path="/warehouse"
                 element={
-                  <ProtectedRoute permission="can_view_products">
+                  <ProtectedRoute permission="can_view_warehouse">
                     <WarehouseStock />
                   </ProtectedRoute>
                 }
@@ -138,7 +138,7 @@ function App() {
               <Route
                 path="/warehouse/scanner"
                 element={
-                  <ProtectedRoute permission="can_edit_products">
+                  <ProtectedRoute permission="can_edit_warehouse">
                     <WarehouseScanner />
                   </ProtectedRoute>
                 }

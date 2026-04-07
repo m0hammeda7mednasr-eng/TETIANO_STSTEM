@@ -146,7 +146,7 @@ export default function WarehouseStock() {
   const [syncNotice, setSyncNotice] = useState(null);
 
   const deferredSearchTerm = useDeferredValue(searchTerm);
-  const canManageWarehouse = hasPermission("can_edit_products");
+  const canManageWarehouse = hasPermission("can_edit_warehouse");
 
   const fetchStock = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -367,7 +367,7 @@ export default function WarehouseStock() {
                           : "ØªØ­ØªØ§Ø¬ ØµÙ„Ø§Ø­ÙŠØ© Ø¥Ø¯Ø§Ø±Ø© Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª Ù„ØªØ´ØºÙŠÙ„ Ù…Ø²Ø§Ù…Ù†Ø© Shopify",
                         canManageWarehouse
                           ? "Push the actual warehouse balance to Shopify when pressed"
-                          : "You need product edit permission to run the Shopify sync",
+                          : "You need warehouse edit permission to run the Shopify sync",
                       )}
                       className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-70"
                     >
@@ -406,7 +406,7 @@ export default function WarehouseStock() {
                         : "Ø²Ø± Ø§Ù„Ù…Ø²Ø§Ù…Ù†Ø© Ø¸Ø§Ù‡Ø± Ù‡Ù†Ø§ØŒ Ù„ÙƒÙ†Ùƒ ØªØ­ØªØ§Ø¬ ØµÙ„Ø§Ø­ÙŠØ© Ø¥Ø¯Ø§Ø±Ø© Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª Ù„ØªÙ†ÙÙŠØ°Ù‡.",
                       canManageWarehouse
                         ? "Shopify sync is manual only and runs only when you press the sync button at the top of the page."
-                        : "The sync button is visible here, but you need product edit permission to run it.",
+                        : "The sync button is visible here, but you need warehouse edit permission to run it.",
                     )}
                   </p>
               </div>

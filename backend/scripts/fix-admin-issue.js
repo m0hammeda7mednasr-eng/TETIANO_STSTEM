@@ -51,6 +51,8 @@ async function checkAndFixAdminIssue() {
                 can_view_dashboard: true,
                 can_view_products: true,
                 can_edit_products: true,
+                can_view_warehouse: true,
+                can_edit_warehouse: true,
                 can_view_suppliers: true,
                 can_edit_suppliers: true,
                 can_view_orders: true,

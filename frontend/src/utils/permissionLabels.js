@@ -4,8 +4,10 @@ const PERMISSION_COPY = {
   ar: {
     labels: {
       can_view_dashboard: "عرض لوحة التحكم",
-      can_view_products: "عرض المنتجات والمخزن",
-      can_edit_products: "إدارة المنتجات وحركات المخزن",
+      can_view_products: "عرض المنتجات",
+      can_edit_products: "إدارة المنتجات",
+      can_view_warehouse: "عرض المخزن",
+      can_edit_warehouse: "إدارة حركات المخزن",
       can_view_suppliers: "عرض الموردين",
       can_edit_suppliers: "إدارة الموردين وحساباتهم",
       can_view_orders: "عرض الطلبات",
@@ -23,9 +25,13 @@ const PERMISSION_COPY = {
     descriptions: {
       can_view_dashboard: "يعرض لوحة التحكم والإحصائيات الرئيسية للمتجر.",
       can_view_products:
-        "يعرض المنتجات وتفاصيلها وتحليل المنتجات وشاشات المخزن.",
+        "يعرض المنتجات وتفاصيلها وتحليل المنتجات وصفحات الباركود.",
       can_edit_products:
-        "يسمح بتعديل المنتجات وSKU والسعر والمخزون، وإدارة حركات المخزن بما فيها الماسح.",
+        "يسمح بتعديل المنتجات وSKU والسعر ومخزون Shopify فقط.",
+      can_view_warehouse:
+        "يعرض شاشة المخزن والرصيد المحلي المنفصل عن Shopify وسجل المسح.",
+      can_edit_warehouse:
+        "يسمح باستخدام الماسح وتعديل حركات المخزن ومزامنة رصيد المخزن إلى Shopify.",
       can_view_suppliers:
         "يعرض قوائم الموردين والحسابات وحركاتهم بدون تعديل.",
       can_edit_suppliers:
@@ -54,8 +60,10 @@ const PERMISSION_COPY = {
   en: {
     labels: {
       can_view_dashboard: "View Dashboard",
-      can_view_products: "View Products and Warehouse",
-      can_edit_products: "Manage Products and Warehouse Movements",
+      can_view_products: "View Products",
+      can_edit_products: "Manage Products",
+      can_view_warehouse: "View Warehouse",
+      can_edit_warehouse: "Manage Warehouse Movements",
       can_view_suppliers: "View Suppliers",
       can_edit_suppliers: "Manage Suppliers and Accounts",
       can_view_orders: "View Orders",
@@ -73,9 +81,13 @@ const PERMISSION_COPY = {
     descriptions: {
       can_view_dashboard: "Shows the main dashboard and key store metrics.",
       can_view_products:
-        "Shows products, product details, product analysis, and warehouse views.",
+        "Shows products, product details, product analysis, and barcode label views.",
       can_edit_products:
-        "Allows editing products, SKU, price, stock, and warehouse movements.",
+        "Allows editing products, SKU, price, and Shopify stock.",
+      can_view_warehouse:
+        "Shows warehouse stock, the separate warehouse balance, and scan history.",
+      can_edit_warehouse:
+        "Allows using the scanner, changing warehouse movements, and syncing warehouse stock to Shopify.",
       can_view_suppliers:
         "Shows supplier lists, balances, and supplier activity without editing.",
       can_edit_suppliers:

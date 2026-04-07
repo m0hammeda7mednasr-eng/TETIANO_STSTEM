@@ -8,6 +8,8 @@ export const PERMISSION_KEYS = [
   "can_view_dashboard",
   "can_view_products",
   "can_edit_products",
+  "can_view_warehouse",
+  "can_edit_warehouse",
   "can_view_suppliers",
   "can_edit_suppliers",
   "can_view_orders",
@@ -27,6 +29,8 @@ export const DEFAULT_PERMISSIONS = {
   can_view_dashboard: true,
   can_view_products: true,
   can_edit_products: false,
+  can_view_warehouse: true,
+  can_edit_warehouse: false,
   can_view_suppliers: true,
   can_edit_suppliers: false,
   can_view_orders: true,
@@ -40,6 +44,11 @@ export const DEFAULT_PERMISSIONS = {
   can_view_all_reports: false,
   can_view_activity_log: false,
   can_print_barcode_labels: true,
+};
+
+const PERMISSION_FALLBACK_KEYS = {
+  can_view_warehouse: ["can_view_products"],
+  can_edit_warehouse: ["can_edit_products"],
 };
 
 const USER_ACCESS_CACHE_TTL_MS = 60 * 1000;
@@ -103,6 +112,16 @@ export const normalizePermissions = (permissionsRow = null) => {
   for (const key of PERMISSION_KEYS) {
     if (Object.prototype.hasOwnProperty.call(permissionsRow, key)) {
       normalized[key] = Boolean(permissionsRow[key]);
+      continue;
+    }
+
+    const fallbackKeys = PERMISSION_FALLBACK_KEYS[key] || [];
+    const fallbackKey = fallbackKeys.find((candidateKey) =>
+      Object.prototype.hasOwnProperty.call(permissionsRow, candidateKey),
+    );
+
+    if (fallbackKey) {
+      normalized[key] = Boolean(permissionsRow[fallbackKey]);
     }
   }
 

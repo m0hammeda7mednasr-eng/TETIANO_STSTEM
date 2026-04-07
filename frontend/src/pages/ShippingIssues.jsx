@@ -15,11 +15,18 @@ import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
 import { buildCsvFilename, downloadCsvSections } from "../utils/csv";
 import { useLocale } from "../context/LocaleContext";
+import { useStore } from "../context/StoreContext";
 import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
 import { extractArray, extractObject } from "../utils/response";
+import {
+  buildShippingIssueDraftRecord,
+  readShippingIssueDrafts,
+  resolveShippingIssueDraft,
+  writeShippingIssueDrafts,
+} from "../utils/shippingIssueDrafts";
 import {
   getShippingIssueBadgeClassName,
   getShippingIssueReasonLabel,
@@ -226,6 +233,7 @@ function ShippingIssueNoteField({
 
 export default function ShippingIssues() {
   const navigate = useNavigate();
+  const { currentStoreId } = useStore();
   const { select, isRTL, formatDateTime, formatNumber, formatTime } =
     useLocale();
   const [orders, setOrders] = useState([]);
@@ -239,6 +247,7 @@ export default function ShippingIssues() {
   const [updatingOrderIds, setUpdatingOrderIds] = useState({});
   const [noteDrafts, setNoteDrafts] = useState({});
   const [noteSaveStatusByOrderId, setNoteSaveStatusByOrderId] = useState({});
+  const [draftHydrationReady, setDraftHydrationReady] = useState(false);
 
   const reasonOptions = useMemo(() => getShippingIssueReasonOptions(select), [
     select,
@@ -368,7 +377,13 @@ export default function ShippingIssues() {
 
   useEffect(() => {
     fetchShippingIssues();
-  }, [fetchShippingIssues]);
+  }, [currentStoreId, fetchShippingIssues]);
+
+  useEffect(() => {
+    setNoteDrafts({});
+    setNoteSaveStatusByOrderId({});
+    setDraftHydrationReady(false);
+  }, [currentStoreId]);
 
   useEffect(() => {
     const unsubscribe = subscribeToSharedDataUpdates(() => {
@@ -377,6 +392,84 @@ export default function ShippingIssues() {
 
     return () => unsubscribe();
   }, [fetchShippingIssues]);
+
+  useEffect(() => {
+    if (loading || draftHydrationReady) {
+      return;
+    }
+
+    const storedDrafts = readShippingIssueDrafts();
+    const nextHydratedDrafts = {};
+    let hasStorageChanges = false;
+
+    for (const order of orders) {
+      const orderId = String(order?.id || "");
+      if (!orderId || !storedDrafts[orderId]) {
+        continue;
+      }
+
+      const resolution = resolveShippingIssueDraft(order, storedDrafts[orderId]);
+      if (resolution.status === "hydrate") {
+        nextHydratedDrafts[orderId] = storedDrafts[orderId];
+        continue;
+      }
+
+      delete storedDrafts[orderId];
+      hasStorageChanges = true;
+    }
+
+    if (hasStorageChanges) {
+      writeShippingIssueDrafts(storedDrafts);
+    }
+
+    if (Object.keys(nextHydratedDrafts).length > 0) {
+      setNoteDrafts(nextHydratedDrafts);
+    }
+
+    setDraftHydrationReady(true);
+  }, [draftHydrationReady, loading, orders]);
+
+  useEffect(() => {
+    if (!draftHydrationReady) {
+      return;
+    }
+
+    const ordersById = new Map(
+      orders
+        .filter((order) => order?.id !== undefined && order?.id !== null)
+        .map((order) => [String(order.id), order]),
+    );
+
+    setNoteDrafts((current) => {
+      let changed = false;
+      const nextDrafts = { ...current };
+
+      for (const [orderId, draft] of Object.entries(current)) {
+        const order = ordersById.get(orderId);
+        if (!order) {
+          continue;
+        }
+
+        const resolution = resolveShippingIssueDraft(order, draft);
+        if (resolution.status === "hydrate") {
+          continue;
+        }
+
+        delete nextDrafts[orderId];
+        changed = true;
+      }
+
+      return changed ? nextDrafts : current;
+    });
+  }, [draftHydrationReady, orders]);
+
+  useEffect(() => {
+    if (!draftHydrationReady) {
+      return;
+    }
+
+    writeShippingIssueDrafts(noteDrafts);
+  }, [draftHydrationReady, noteDrafts]);
 
   const filteredOrders = useMemo(
     () =>
@@ -487,14 +580,55 @@ export default function ShippingIssues() {
     }));
   };
 
-  const updateNoteDraft = (orderId, field, value) => {
-    setNoteDrafts((current) => ({
-      ...current,
-      [orderId]: {
-        ...current[orderId],
-        [field]: value,
-      },
-    }));
+  const updateNoteDraft = (order, field, value) => {
+    const orderId = String(order?.id || "");
+    if (!orderId) {
+      return;
+    }
+
+    const existingDraft = noteDrafts[orderId];
+    const nextDraftValues = {
+      shipping_company_note:
+        field === "shipping_company_note"
+          ? value
+          : String(
+              existingDraft?.shipping_company_note ??
+                order?.shipping_issue?.shipping_company_note ??
+                "",
+            ),
+      customer_service_note:
+        field === "customer_service_note"
+          ? value
+          : String(
+              existingDraft?.customer_service_note ??
+                order?.shipping_issue?.customer_service_note ??
+                "",
+            ),
+    };
+    const nextDraft = existingDraft
+      ? {
+          ...existingDraft,
+          ...nextDraftValues,
+          updated_at: new Date().toISOString(),
+        }
+      : buildShippingIssueDraftRecord(order, nextDraftValues);
+
+    setNoteDrafts((current) => {
+      if (!nextDraft) {
+        if (!current[orderId]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[orderId];
+        return next;
+      }
+
+      return {
+        ...current,
+        [orderId]: nextDraft,
+      };
+    });
     setNoteSaveStatusByOrderId((current) => {
       if (!current[orderId]) {
         return current;
@@ -507,13 +641,18 @@ export default function ShippingIssues() {
   };
 
   const clearNoteDraft = (orderId) => {
+    const normalizedOrderId = String(orderId || "");
+    if (!normalizedOrderId) {
+      return;
+    }
+
     setNoteDrafts((current) => {
-      if (!current[orderId]) {
+      if (!current[normalizedOrderId]) {
         return current;
       }
 
       const next = { ...current };
-      delete next[orderId];
+      delete next[normalizedOrderId];
       return next;
     });
   };
@@ -618,7 +757,8 @@ export default function ShippingIssues() {
   ]);
 
   const getNoteDraftValue = (order, field) => {
-    const orderDraft = noteDrafts[order.id];
+    const orderId = String(order?.id || "");
+    const orderDraft = noteDrafts[orderId];
     if (orderDraft && Object.prototype.hasOwnProperty.call(orderDraft, field)) {
       return orderDraft[field];
     }
@@ -627,7 +767,8 @@ export default function ShippingIssues() {
   };
 
   const hasNoteDraftChanged = (order) => {
-    const orderDraft = noteDrafts[order.id];
+    const orderId = String(order?.id || "");
+    const orderDraft = noteDrafts[orderId];
     if (!orderDraft) {
       return false;
     }
@@ -1166,7 +1307,7 @@ export default function ShippingIssues() {
                             value={shippingCompanyNote}
                             onChange={(event) =>
                               updateNoteDraft(
-                                order.id,
+                                order,
                                 "shipping_company_note",
                                 event.target.value,
                               )
@@ -1191,7 +1332,7 @@ export default function ShippingIssues() {
                             value={customerServiceNote}
                             onChange={(event) =>
                               updateNoteDraft(
-                                order.id,
+                                order,
                                 "customer_service_note",
                                 event.target.value,
                               )
@@ -1227,6 +1368,14 @@ export default function ShippingIssues() {
                                   {select(
                                     "فشل تأكيد حفظ النوتس من السيرفر.",
                                     "Could not confirm note persistence from the server.",
+                                  )}
+                                </p>
+                              ) : null}
+                              {hasUnsavedNotes ? (
+                                <p className="mt-2 text-xs font-medium text-amber-700">
+                                  {select(
+                                    "Ø§Ù„ÙƒØªØ§Ø¨Ø© Ø§Ù„ØºÙŠØ± Ù…Ø­ÙÙˆØ¸Ø© Ø¹Ù„Ù‰ Ø§Ù„Ø³ÙŠØ±ÙØ± Ø¨ØªØªØ®Ø²Ù† Ù…Ø­Ù„ÙŠÙ‹Ø§ Ø¹Ù„Ù‰ Ù†ÙØ³ Ø§Ù„Ø¬Ù‡Ø§Ø² Ø­ØªÙ‰ Ù„Ùˆ Ø­ØµÙ„ refresh.",
+                                    "Unsaved text stays stored locally on this device even after a refresh.",
                                   )}
                                 </p>
                               ) : null}

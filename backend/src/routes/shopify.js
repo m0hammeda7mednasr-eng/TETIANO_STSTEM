@@ -41,6 +41,7 @@ import {
 } from "../helpers/missingOrders.js";
 import { extractOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
 import {
+  fetchLatestShippingIssueOperationsByOrderId,
   recoverShippingIssuesFromHistory,
 } from "../helpers/shippingIssueRecovery.js";
 import { loadWarehouseAvailabilityByStoreIds } from "../services/warehouseAvailabilityService.js";
@@ -52,7 +53,6 @@ const UUID_REGEX =
 const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const SHIPPING_ISSUE_HISTORY_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
-const SCOPED_ROWS_BATCH_SIZE = 500;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 200;
 const ORDER_LIST_PAGE_LIMIT = 4500;
@@ -605,29 +605,129 @@ const getListSortOptions = (
   };
 };
 
-const loadShippingIssueOrdersForRequest = async (req) => {
-  const scopedRowsResult = await getAllScopedEntityRows({
-    req,
-    tableName: "orders",
-    selects: ORDER_LIST_SELECTS,
-    sortOptions: {
-      sortBy: "created_at",
-      ascending: false,
-    },
-  });
-  if (scopedRowsResult?.error) {
-    throw scopedRowsResult.error;
+const buildScopedOrdersByIdsQuery = ({
+  req,
+  requestedStoreId,
+  isAdmin,
+  accessibleStoreIds = [],
+  orderIds = [],
+} = {}) => {
+  let query = db.from("orders").select("*").in("id", orderIds);
+
+  if (requestedStoreId) {
+    if (!isAdmin && !accessibleStoreIds.includes(requestedStoreId)) {
+      return null;
+    }
+
+    return query.eq("store_id", requestedStoreId);
   }
 
-  const shippingIssueRows = (scopedRowsResult?.data || []).filter((order) =>
-    Boolean(
-      extractOrderLocalMetadata(parseJsonField(order?.data))?.shipping_issue,
+  if (isAdmin) {
+    return query;
+  }
+
+  if (accessibleStoreIds.length > 0) {
+    return query.in("store_id", accessibleStoreIds);
+  }
+
+  return query.eq("user_id", req.user.id);
+};
+
+const fetchScopedOrdersByIds = async ({
+  req,
+  requestedStoreId,
+  isAdmin,
+  accessibleStoreIds = [],
+  orderIds = [],
+} = {}) => {
+  const normalizedIds = Array.from(
+    new Set((orderIds || []).map((value) => String(value || "").trim()).filter(Boolean)),
+  );
+
+  if (normalizedIds.length === 0) {
+    return [];
+  }
+
+  const rows = [];
+  const chunkSize = 200;
+
+  for (let index = 0; index < normalizedIds.length; index += chunkSize) {
+    const chunk = normalizedIds.slice(index, index + chunkSize);
+    const query = buildScopedOrdersByIdsQuery({
+      req,
+      requestedStoreId,
+      isAdmin,
+      accessibleStoreIds,
+      orderIds: chunk,
+    });
+
+    if (!query) {
+      return [];
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw error;
+    }
+
+    rows.push(...(data || []));
+  }
+
+  return rows;
+};
+
+const loadShippingIssueOrdersForRequest = async (req) => {
+  const requestedStoreId = getRequestedStoreId(req);
+  const isAdmin = await resolveIsAdmin(req);
+  const accessibleStoreIds = isAdmin
+    ? []
+    : await getAccessibleStoreIds(req.user.id);
+
+  if (
+    requestedStoreId &&
+    !isAdmin &&
+    !accessibleStoreIds.includes(requestedStoreId)
+  ) {
+    return {
+      rows: [],
+      repairedCount: 0,
+    };
+  }
+
+  const { data: historyRows, error: historyError } = await db
+    .from("sync_operations")
+    .select("entity_id")
+    .eq("operation_type", "order_shipping_issue_update");
+
+  if (historyError) {
+    throw historyError;
+  }
+
+  const candidateOrderIds = Array.from(
+    new Set(
+      (historyRows || [])
+        .map((row) => String(row?.entity_id || "").trim())
+        .filter(Boolean),
     ),
   );
 
+  const latestOperationByOrderId =
+    await fetchLatestShippingIssueOperationsByOrderId(db, candidateOrderIds);
+  const activeHistoryOrderIds = Array.from(latestOperationByOrderId.entries())
+    .filter(([, operation]) => Boolean(operation?.request_data?.new_shipping_issue))
+    .map(([orderId]) => orderId);
+  const scopedOrders = await fetchScopedOrdersByIds({
+    req,
+    requestedStoreId,
+    isAdmin,
+    accessibleStoreIds,
+    orderIds: activeHistoryOrderIds,
+  });
+
   const recoveryResult = await recoverShippingIssuesFromHistory({
     supabaseClient: db,
-    orders: shippingIssueRows,
+    orders: scopedOrders,
     persist: true,
   });
 
@@ -878,59 +978,6 @@ const getScopedEntityRows = async (req, entityModel) => {
 
   return {
     data: filterRowsByStoreId(sourceResult?.data || [], requestedStoreId),
-    error: null,
-    isAdmin,
-    requestedStoreId,
-  };
-};
-
-const getAllScopedEntityRows = async ({
-  req,
-  tableName,
-  selects,
-  sortOptions,
-  batchSize = SCOPED_ROWS_BATCH_SIZE,
-} = {}) => {
-  const rows = [];
-  let offset = 0;
-  let isAdmin = false;
-  let requestedStoreId = null;
-
-  while (true) {
-    const pageResult = await getScopedEntityPage({
-      req,
-      tableName,
-      selects,
-      pagination: {
-        limit: batchSize,
-        offset,
-      },
-      sortOptions,
-    });
-
-    if (pageResult?.error) {
-      return {
-        data: [],
-        error: pageResult.error,
-        isAdmin: pageResult.isAdmin,
-        requestedStoreId: pageResult.requestedStoreId,
-      };
-    }
-
-    const batch = Array.isArray(pageResult?.data) ? pageResult.data : [];
-    rows.push(...batch);
-    isAdmin = Boolean(pageResult?.isAdmin);
-    requestedStoreId = pageResult?.requestedStoreId || null;
-
-    if (batch.length < batchSize) {
-      break;
-    }
-
-    offset += batch.length;
-  }
-
-  return {
-    data: rows,
     error: null,
     isAdmin,
     requestedStoreId,

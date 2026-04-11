@@ -58,6 +58,10 @@ describe("helpers/orderScope", () => {
     expect(hasActiveOrderScopeFilters({ search: "1001" })).toBe(true);
     expect(hasActiveOrderScopeFilters({ date_from: "2026-03-01" })).toBe(true);
     expect(hasActiveOrderScopeFilters({ payment_status: "paid" })).toBe(true);
+    expect(hasActiveOrderScopeFilters({ shipping_issue: "active" })).toBe(true);
+    expect(
+      hasActiveOrderScopeFilters({ shipping_issue_reason: "confirm_return" }),
+    ).toBe(true);
     expect(hasActiveOrderScopeFilters({ refund_filter: "all" })).toBe(false);
   });
 });

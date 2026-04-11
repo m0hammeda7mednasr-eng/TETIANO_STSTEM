@@ -29,6 +29,8 @@ const DEFAULT_ORDER_SCOPE_FILTERS = {
   maxTotal: "",
   paymentStatus: "all",
   paymentMethod: "all",
+  shippingIssue: "all",
+  shippingIssueReason: "all",
   fulfillmentStatus: "all",
   refundFilter: "all",
   cancelledOnly: false,
@@ -103,6 +105,12 @@ export const normalizeOrderScopeFilters = (rawFilters = {}) => ({
     (normalizeText(rawFilters?.payment_method || rawFilters?.paymentMethod) === "all"
       ? "all"
       : "all"),
+  shippingIssue:
+    normalizeText(rawFilters?.shipping_issue || rawFilters?.shippingIssue) || "all",
+  shippingIssueReason:
+    normalizeText(
+      rawFilters?.shipping_issue_reason || rawFilters?.shippingIssueReason,
+    ) || "all",
   fulfillmentStatus:
     normalizeText(
       rawFilters?.fulfillment_status || rawFilters?.fulfillmentStatus,
@@ -142,6 +150,8 @@ export const getOrderScopeFiltersCacheKey = (rawFilters = {}) => {
     filters.maxTotal,
     filters.paymentStatus,
     filters.paymentMethod,
+    filters.shippingIssue,
+    filters.shippingIssueReason,
     filters.fulfillmentStatus,
     filters.refundFilter,
     filters.cancelledOnly ? "1" : "0",

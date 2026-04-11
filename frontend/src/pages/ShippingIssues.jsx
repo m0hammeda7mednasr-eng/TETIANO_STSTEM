@@ -332,6 +332,7 @@ export default function ShippingIssues() {
             params: {
               limit: FETCH_PAGE_LIMIT,
               offset,
+              search_all: "true",
               sort_by: "created_at",
               sort_dir: "desc",
               shipping_issue: "active",

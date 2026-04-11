@@ -26,6 +26,7 @@ import api from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import { useLocale } from "../context/LocaleContext";
+import { useStore } from "../context/StoreContext";
 import {
   HEAVY_VIEW_CACHE_FRESH_MS,
   shouldAutoRefreshView,
@@ -48,7 +49,8 @@ import {
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
 const ORDERS_PAGE_SIZE = 100;
-const ORDER_HISTORY_SEARCH_PAGE_SIZE = 200;
+const ORDER_HISTORY_SEARCH_PAGE_SIZE = 1000;
+const MISSING_ORDERS_FETCH_PAGE_SIZE = 4500;
 const ORDERS_VISIBLE_LIMIT = 4500;
 const ORDERS_PER_PAGE = 50;
 const ORDERS_PAGINATION_WINDOW = 5;
@@ -474,6 +476,7 @@ const resolveOrderDatePreset = (dateFrom, dateTo, now = new Date()) => {
 
 export default function Orders() {
   const navigate = useNavigate();
+  const { currentStoreId } = useStore();
   const {
     select,
     isRTL,
@@ -485,7 +488,10 @@ export default function Orders() {
   const tableHeaderAlignClass = isRTL ? "text-right" : "text-left";
   const stickyTableHeaderClass =
     "sticky top-0 z-20 bg-slate-50/95 backdrop-blur supports-[backdrop-filter]:bg-slate-50/85";
-  const cacheKey = useMemo(() => buildStoreScopedCacheKey("orders:list"), []);
+  const cacheKey = useMemo(
+    () => buildStoreScopedCacheKey("orders:list"),
+    [currentStoreId],
+  );
   const initialCachedSnapshot = useMemo(() => {
     const cached = peekCachedView(cacheKey);
     return {
@@ -563,6 +569,7 @@ export default function Orders() {
 
     setFullHistorySearchLoading(true);
     setFullHistorySearchError("");
+    setFullHistorySearchOrders(null);
     setLoadStatus({
       active: true,
       message: select(
@@ -651,7 +658,14 @@ export default function Orders() {
     return () => {
       active = false;
     };
-  }, [deferredSearchTerm, formatNumber, fullHistoryQueryParams, select, shouldUseFullHistory]);
+  }, [
+    currentStoreId,
+    deferredSearchTerm,
+    formatNumber,
+    fullHistoryQueryParams,
+    select,
+    shouldUseFullHistory,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -695,7 +709,7 @@ export default function Orders() {
               },
             }),
           {
-            limit: ORDERS_PAGE_SIZE,
+            limit: MISSING_ORDERS_FETCH_PAGE_SIZE,
           },
         );
 
@@ -729,7 +743,7 @@ export default function Orders() {
     } finally {
       missingFetchPromiseRef.current = null;
     }
-  }, []);
+  }, [currentStoreId]);
 
   const fetchOrders = useCallback(async ({ silent = false, forceSync = false } = {}) => {
     if (fetchPromiseRef.current) {
@@ -818,7 +832,7 @@ export default function Orders() {
     } finally {
       fetchPromiseRef.current = null;
     }
-  }, [cacheKey, fetchMissingOrderIds, formatNumber, select]);
+  }, [cacheKey, currentStoreId, fetchMissingOrderIds, formatNumber, select]);
 
   const scheduleSilentRefresh = useCallback(() => {
     if (refreshTimeoutRef.current) {

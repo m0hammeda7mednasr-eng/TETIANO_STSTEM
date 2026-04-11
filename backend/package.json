@@ -11,7 +11,8 @@
     "build": "echo 'No build step required'",
     "migrate": "node-pg-migrate",
     "db:repair": "node scripts/repair-shopify-data-links.js",
-    "db:reset-orders": "node scripts/reset-orders-data.js"
+    "db:reset-orders": "node scripts/reset-orders-data.js",
+    "repair:shipping-notes": "node scripts/restore-shipping-issue-notes.js"
   },
   "jest": {
     "transform": {}

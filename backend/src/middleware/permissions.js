@@ -31,7 +31,7 @@ export const DEFAULT_PERMISSIONS = {
   can_edit_products: false,
   can_view_warehouse: true,
   can_edit_warehouse: false,
-  can_view_suppliers: true,
+  can_view_suppliers: false,
   can_edit_suppliers: false,
   can_view_orders: true,
   can_edit_orders: false,
@@ -169,13 +169,14 @@ export const getUserRole = async (
     return cachedContext.role;
   }
 
-  const { data: user, error } = await withSupabaseRetry(() =>
-    supabase
-      .from("users")
-      .select("role")
-      .eq("id", userId)
-      .limit(1)
-      .maybeSingle(),
+  const { data: user, error } = await withSupabaseRetry(
+    () =>
+      supabase
+        .from("users")
+        .select("role")
+        .eq("id", userId)
+        .limit(1)
+        .maybeSingle(),
     retryOptions,
   );
 
@@ -205,13 +206,14 @@ export const getUserPermissions = async (
     return cachedContext.permissions;
   }
 
-  const { data: permissions, error } = await withSupabaseRetry(() =>
-    supabase
-      .from("permissions")
-      .select("*")
-      .eq("user_id", userId)
-      .limit(1)
-      .maybeSingle(),
+  const { data: permissions, error } = await withSupabaseRetry(
+    () =>
+      supabase
+        .from("permissions")
+        .select("*")
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle(),
     retryOptions,
   );
 

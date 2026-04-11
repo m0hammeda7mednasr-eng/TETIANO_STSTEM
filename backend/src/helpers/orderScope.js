@@ -61,9 +61,25 @@ const normalizePaymentMethod = (value) => {
 
 const normalizeBoolean = (value) => normalizeText(value) === "true";
 
+const parseLocalDateInput = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day));
+};
+
 const startOfDay = (value) => {
-  const date = new Date(String(value || ""));
-  if (Number.isNaN(date.getTime())) {
+  const date = parseLocalDateInput(value);
+  if (!date) {
     return null;
   }
 
@@ -72,8 +88,8 @@ const startOfDay = (value) => {
 };
 
 const endOfDay = (value) => {
-  const date = new Date(String(value || ""));
-  if (Number.isNaN(date.getTime())) {
+  const date = parseLocalDateInput(value);
+  if (!date) {
     return null;
   }
 

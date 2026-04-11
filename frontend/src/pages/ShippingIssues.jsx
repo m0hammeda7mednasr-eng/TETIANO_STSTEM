@@ -14,13 +14,13 @@ import {
 import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
 import { buildCsvFilename, downloadCsvSections } from "../utils/csv";
+import { fetchAllPagesProgressively } from "../utils/pagination";
 import { useLocale } from "../context/LocaleContext";
 import { useStore } from "../context/StoreContext";
 import {
   markSharedDataUpdated,
   subscribeToSharedDataUpdates,
 } from "../utils/realtime";
-import { extractArray, extractObject } from "../utils/response";
 import {
   buildShippingIssueDraftRecord,
   readShippingIssueDrafts,
@@ -37,7 +37,7 @@ import {
   normalizeShippingIssueReason,
 } from "../utils/shippingIssues";
 
-const FETCH_PAGE_LIMIT = 200;
+const FETCH_PAGE_LIMIT = 4500;
 const PAGE_SIZE = 50;
 const PAGINATION_WINDOW = 5;
 const DATE_PRESET_OPTIONS = [
@@ -56,6 +56,21 @@ const formatDateInputValue = (date) => {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+};
+const parseLocalDateInput = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day));
 };
 const shiftDateByDays = (date, amount) => {
   const next = new Date(date.getTime());
@@ -110,7 +125,14 @@ const normalizeDateRange = (range = {}) => {
   const dateFrom = normalizeText(range?.dateFrom);
   const dateTo = normalizeText(range?.dateTo);
 
-  if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
+  const parsedDateFrom = parseLocalDateInput(dateFrom);
+  const parsedDateTo = parseLocalDateInput(dateTo);
+
+  if (
+    parsedDateFrom &&
+    parsedDateTo &&
+    parsedDateFrom.getTime() > parsedDateTo.getTime()
+  ) {
     return {
       dateFrom: dateTo,
       dateTo: dateFrom,
@@ -143,7 +165,11 @@ const resolveDatePreset = (range = {}, now = new Date()) => {
   return "custom";
 };
 const parseDateValue = (value) => {
-  const parsed = new Date(value);
+  const parsed = parseLocalDateInput(value);
+  if (!parsed) {
+    return null;
+  }
+
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 const matchesDateRange = (value, range = {}) => {
@@ -323,49 +349,24 @@ export default function ShippingIssues() {
       }
 
       try {
-        let offset = 0;
-        let hasMore = true;
-        const rows = [];
+        const rows = await fetchAllPagesProgressively(
+          ({ limit, offset }) =>
+            api.get("/shopify/orders", {
+              params: {
+                limit,
+                offset,
+                search_all: "true",
+                sort_by: "created_at",
+                sort_dir: "desc",
+                shipping_issue: "active",
+              },
+            }),
+          {
+            limit: FETCH_PAGE_LIMIT,
+          },
+        );
 
-        while (hasMore) {
-          const response = await api.get("/shopify/orders", {
-            params: {
-              limit: FETCH_PAGE_LIMIT,
-              offset,
-              search_all: "true",
-              sort_by: "created_at",
-              sort_dir: "desc",
-              shipping_issue: "active",
-            },
-          });
-
-          const payload = extractObject(response?.data);
-          const pageRows = extractArray(payload);
-          const batch = pageRows.filter((order) =>
-            isShippingIssueActive(order),
-          );
-          const pagination =
-            payload?.pagination && typeof payload.pagination === "object"
-              ? payload.pagination
-              : {};
-
-          rows.push(...batch);
-
-          if (pageRows.length === 0) {
-            break;
-          }
-
-          hasMore =
-            typeof pagination.has_more === "boolean"
-              ? pagination.has_more
-              : pageRows.length === FETCH_PAGE_LIMIT;
-          offset =
-            typeof pagination.next_offset === "number"
-              ? pagination.next_offset
-              : offset + pageRows.length;
-        }
-
-        setOrders(rows);
+        setOrders(rows.filter((order) => isShippingIssueActive(order)));
         setLastUpdatedAt(new Date());
       } catch (requestError) {
         console.error("Error fetching shipping issues:", requestError);

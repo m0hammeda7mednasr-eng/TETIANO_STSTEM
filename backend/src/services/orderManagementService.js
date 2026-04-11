@@ -7,6 +7,7 @@ import {
   getEditableShippingAddressFromOrderData,
   mergeOrderLocalMetadata,
   normalizeShippingIssueReason,
+  preserveOrderLocalMetadata,
 } from "../helpers/orderLocalMetadata.js";
 
 const getShopifyTokenForStore = async (storeId, fallbackUserId) => {
@@ -1685,12 +1686,12 @@ export class OrderManagementService {
       });
 
       const responseOrderPayload = getShopifyOrderPayload(responseData);
-      const nextOrderData = applyTetianoControlValuesToOrderData(
-        responseOrderPayload || orderData,
-        {
+      const nextOrderData = preserveOrderLocalMetadata(
+        applyTetianoControlValuesToOrderData(responseOrderPayload || orderData, {
           status: statusForMirror,
           paymentMethod: methodValue,
-        },
+        }),
+        order.data,
       );
 
       const { supabase } = await import("../supabaseClient.js");
@@ -1951,13 +1952,13 @@ export class OrderManagementService {
         normalizeOrderStatus(responseOrderPayload?.financial_status) ||
         extractStatusFromOrderData(responseOrderPayload) ||
         normalizedStatus;
-      const nextOrderData = applyTetianoControlValuesToOrderData(
-        responseOrderPayload || orderData,
-        {
+      const nextOrderData = preserveOrderLocalMetadata(
+        applyTetianoControlValuesToOrderData(responseOrderPayload || orderData, {
           status: resolvedStatus,
           paymentMethod: paymentMethodForMirror,
           voidReason: options?.voidReason,
-        },
+        }),
+        order.data,
       );
 
       const { supabase } = await import("../supabaseClient.js");
@@ -2248,12 +2249,16 @@ export class OrderManagementService {
         refreshedOrderPayload?.fulfillment_status || currentFulfillmentStatus,
       );
 
+      const nextOrderData = preserveOrderLocalMetadata(
+        refreshedOrderPayload,
+        order.data,
+      );
       const { supabase } = await import("../supabaseClient.js");
       await supabase
         .from("orders")
         .update({
           fulfillment_status: refreshedOrderPayload?.fulfillment_status || null,
-          data: refreshedOrderPayload,
+          data: nextOrderData,
           pending_sync: false,
           last_synced_at: new Date().toISOString(),
           shopify_updated_at:
@@ -2270,7 +2275,7 @@ export class OrderManagementService {
         order: {
           ...order,
           fulfillment_status: refreshedOrderPayload?.fulfillment_status || null,
-          data: refreshedOrderPayload,
+          data: nextOrderData,
         },
       };
     } catch (error) {

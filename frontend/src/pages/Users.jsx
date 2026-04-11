@@ -24,7 +24,7 @@ const DEFAULT_PERMISSION_STATE = {
   can_edit_products: false,
   can_view_warehouse: true,
   can_edit_warehouse: false,
-  can_view_suppliers: true,
+  can_view_suppliers: false,
   can_edit_suppliers: false,
   can_view_orders: true,
   can_edit_orders: false,

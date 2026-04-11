@@ -444,11 +444,15 @@ const toBooleanQueryFlag = (value, fallback = false) => {
   return fallback;
 };
 
-const getListPagination = (query = {}, defaultLimit = DEFAULT_LIST_LIMIT) => {
+const getListPagination = (
+  query = {},
+  defaultLimit = DEFAULT_LIST_LIMIT,
+  maxLimit = MAX_LIST_LIMIT,
+) => {
   const requestedLimit = parseInt(query.limit, 10);
   const limit =
     Number.isFinite(requestedLimit) && requestedLimit > 0
-      ? Math.min(requestedLimit, MAX_LIST_LIMIT)
+      ? Math.min(requestedLimit, maxLimit)
       : defaultLimit;
 
   return {
@@ -3710,7 +3714,11 @@ router.get(
       const searchAllHistory =
         searchAllHistoryRequested && hasActiveOrderScopeFilters(req.query);
       const pagination = searchAllHistory
-        ? getListPagination(req.query)
+        ? getListPagination(
+            req.query,
+            DEFAULT_LIST_LIMIT,
+            ORDER_LIST_PAGE_LIMIT,
+          )
         : getOrdersListPagination(req.query);
       pagination.limit = Math.min(pagination.limit, ORDER_LIST_PAGE_LIMIT);
       const sortOptions = getListSortOptions(
@@ -3903,18 +3911,23 @@ router.get(
   requirePermission("can_view_orders"),
   async (req, res) => {
     try {
-      const pagination = getListPagination(req.query);
-      pagination.limit = Math.min(pagination.limit, ORDER_LIST_PAGE_LIMIT);
+      const pagination = getListPagination(
+        req.query,
+        DEFAULT_LIST_LIMIT,
+        ORDER_LIST_PAGE_LIMIT,
+      );
 
       const missingOrders = await getMissingOrdersForRequest(req);
 
-      try {
-        await ensureMissingOrderNotifications(missingOrders);
-      } catch (notificationError) {
-        console.error(
-          "Missing orders notification error (non-blocking):",
-          notificationError,
-        );
+      if (pagination.offset === 0) {
+        try {
+          await ensureMissingOrderNotifications(missingOrders);
+        } catch (notificationError) {
+          console.error(
+            "Missing orders notification error (non-blocking):",
+            notificationError,
+          );
+        }
       }
 
       const summary = {

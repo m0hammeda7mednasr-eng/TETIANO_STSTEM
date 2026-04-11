@@ -11,11 +11,12 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useLocale } from "../context/LocaleContext";
+import { useStore } from "../context/StoreContext";
 import api from "../utils/api";
+import { fetchAllPagesProgressively } from "../utils/pagination";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
-import { extractArray, extractObject } from "../utils/response";
 
-const FETCH_PAGE_LIMIT = 100;
+const FETCH_PAGE_LIMIT = 4500;
 const MISSING_ORDERS_PER_PAGE = 50;
 const MISSING_ORDERS_PAGINATION_WINDOW = 5;
 const MISSING_ORDER_REASON_NO_ACTION = "in_stock_without_action";
@@ -229,6 +230,7 @@ function EmptyState({ text }) {
 export default function MissingOrders() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { currentStoreId } = useStore();
   const { locale, isRTL, select, formatDateTime, formatNumber, formatTime } =
     useLocale();
   const [orders, setOrders] = useState([]);
@@ -334,40 +336,18 @@ export default function MissingOrders() {
     }
 
     try {
-      let offset = 0;
-      let hasMore = true;
-      const rows = [];
-
-      while (hasMore) {
-        const response = await api.get("/shopify/orders/missing", {
-          params: {
-            limit: FETCH_PAGE_LIMIT,
-            offset,
-          },
-        });
-
-        const payload = extractObject(response?.data);
-        const batch = extractArray(payload);
-        const pagination =
-          payload?.pagination && typeof payload.pagination === "object"
-            ? payload.pagination
-            : {};
-
-        rows.push(...batch);
-
-        if (batch.length === 0) {
-          break;
-        }
-
-        hasMore =
-          typeof pagination.has_more === "boolean"
-            ? pagination.has_more
-            : batch.length === FETCH_PAGE_LIMIT;
-        offset =
-          typeof pagination.next_offset === "number"
-            ? pagination.next_offset
-            : offset + batch.length;
-      }
+      const rows = await fetchAllPagesProgressively(
+        ({ limit, offset }) =>
+          api.get("/shopify/orders/missing", {
+            params: {
+              limit,
+              offset,
+            },
+          }),
+        {
+          limit: FETCH_PAGE_LIMIT,
+        },
+      );
 
       setOrders(rows);
       setLastUpdatedAt(new Date());
@@ -383,11 +363,11 @@ export default function MissingOrders() {
     } finally {
       setLoading(false);
     }
-  }, [select]);
+  }, [currentStoreId, select]);
 
   useEffect(() => {
     fetchMissingOrders();
-  }, [fetchMissingOrders]);
+  }, [currentStoreId, fetchMissingOrders]);
 
   useEffect(() => {
     const unsubscribe = subscribeToSharedDataUpdates((event) => {

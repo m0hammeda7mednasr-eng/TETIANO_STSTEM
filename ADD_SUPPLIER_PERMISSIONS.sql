@@ -2,11 +2,11 @@
 -- Run this SQL script on your Supabase database
 
 ALTER TABLE permissions
-ADD COLUMN IF NOT EXISTS can_view_suppliers BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN IF NOT EXISTS can_view_suppliers BOOLEAN NOT NULL DEFAULT false,
 ADD COLUMN IF NOT EXISTS can_edit_suppliers BOOLEAN NOT NULL DEFAULT false;
 
 UPDATE permissions
-SET can_view_suppliers = COALESCE(can_view_products, true),
+SET can_view_suppliers = COALESCE(can_view_products, false),
     can_edit_suppliers = COALESCE(can_edit_products, false);
 
 COMMENT ON COLUMN permissions.can_view_suppliers IS 'Allows user to view suppliers and supplier balances';

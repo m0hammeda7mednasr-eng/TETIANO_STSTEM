@@ -4,6 +4,7 @@ import {
   applyOrderLocalMetadata,
   extractOrderLocalMetadata,
   mergeOrderLocalMetadata,
+  preserveOrderLocalMetadata,
 } from "./orderLocalMetadata.js";
 
 describe("helpers/orderLocalMetadata", () => {
@@ -103,5 +104,43 @@ describe("helpers/orderLocalMetadata", () => {
 
     expect(extractOrderLocalMetadata(cleared).shipping_issue).toBeNull();
     expect(cleared._tetiano_local_order).toBeUndefined();
+  });
+
+  it("preserves local shipping notes when a fresh Shopify payload replaces order data", () => {
+    const existingOrderData = {
+      id: 101,
+      note: "Existing order note",
+      _tetiano_local_order: {
+        shipping_issue: {
+          reason: "part_with_phone",
+          shipping_company_note: "Courier asked for a reachable phone number.",
+          customer_service_note: "Customer confirmed availability tonight.",
+          updated_at: "2026-04-07T14:00:00.000Z",
+          updated_by: "user-9",
+          updated_by_name: "Ops",
+        },
+      },
+    };
+
+    const incomingShopifyPayload = {
+      id: 101,
+      note: "Fresh Shopify note",
+      fulfillment_status: "fulfilled",
+    };
+
+    const preserved = preserveOrderLocalMetadata(
+      incomingShopifyPayload,
+      existingOrderData,
+    );
+
+    expect(preserved.fulfillment_status).toBe("fulfilled");
+    expect(extractOrderLocalMetadata(preserved).shipping_issue).toEqual(
+      expect.objectContaining({
+        reason: "part_with_phone",
+        shipping_company_note: "Courier asked for a reachable phone number.",
+        customer_service_note: "Customer confirmed availability tonight.",
+        updated_by_name: "Ops",
+      }),
+    );
   });
 });

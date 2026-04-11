@@ -48,7 +48,6 @@ import {
 } from "../utils/shippingIssues";
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
-const ORDERS_PAGE_SIZE = 100;
 const ORDER_HISTORY_SEARCH_PAGE_SIZE = 1000;
 const MISSING_ORDERS_FETCH_PAGE_SIZE = 4500;
 const ORDERS_VISIBLE_LIMIT = 4500;
@@ -489,7 +488,7 @@ export default function Orders() {
   const stickyTableHeaderClass =
     "sticky top-0 z-20 bg-slate-50/95 backdrop-blur supports-[backdrop-filter]:bg-slate-50/85";
   const cacheKey = useMemo(
-    () => buildStoreScopedCacheKey("orders:list"),
+    () => buildStoreScopedCacheKey("orders:list", currentStoreId),
     [currentStoreId],
   );
   const initialCachedSnapshot = useMemo(() => {
@@ -743,7 +742,7 @@ export default function Orders() {
     } finally {
       missingFetchPromiseRef.current = null;
     }
-  }, [currentStoreId]);
+  }, []);
 
   const fetchOrders = useCallback(async ({ silent = false, forceSync = false } = {}) => {
     if (fetchPromiseRef.current) {
@@ -832,7 +831,7 @@ export default function Orders() {
     } finally {
       fetchPromiseRef.current = null;
     }
-  }, [cacheKey, currentStoreId, fetchMissingOrderIds, formatNumber, select]);
+  }, [cacheKey, fetchMissingOrderIds, formatNumber, select]);
 
   const scheduleSilentRefresh = useCallback(() => {
     if (refreshTimeoutRef.current) {

@@ -58,7 +58,7 @@ const writeToLocalStorage = (key, value) => {
   }
 };
 
-export const buildStoreScopedCacheKey = (scope) => {
+export const buildStoreScopedCacheKey = (scope, storeIdOverride = null) => {
   if (!isBrowser()) {
     return scope;
   }
@@ -73,8 +73,9 @@ export const buildStoreScopedCacheKey = (scope) => {
   }
 
   const currentStoreId =
-    String(window.localStorage.getItem("currentStoreId") || "").trim() ||
-    "global";
+    String(
+      (storeIdOverride ?? window.localStorage.getItem("currentStoreId")) || "",
+    ).trim() || "global";
   return `${scope}::${currentUserId}::${currentStoreId}`;
 };
 

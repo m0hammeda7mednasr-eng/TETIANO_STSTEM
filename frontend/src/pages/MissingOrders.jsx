@@ -363,7 +363,7 @@ export default function MissingOrders() {
     } finally {
       setLoading(false);
     }
-  }, [currentStoreId, select]);
+  }, [select]);
 
   useEffect(() => {
     fetchMissingOrders();

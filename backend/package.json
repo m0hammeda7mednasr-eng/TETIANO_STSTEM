@@ -12,6 +12,7 @@
     "migrate": "node-pg-migrate",
     "db:repair": "node scripts/repair-shopify-data-links.js",
     "db:reset-orders": "node scripts/reset-orders-data.js",
+    "audit:data-health": "node scripts/audit-shopify-data-health.js",
     "repair:shipping-notes": "node scripts/restore-shipping-issue-notes.js",
     "repair:shipping-issues": "node scripts/restore-shipping-issue-state.js"
   },

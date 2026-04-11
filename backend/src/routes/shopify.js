@@ -40,7 +40,9 @@ import {
   MISSING_ORDER_REASON_STOCK_SHORTAGE,
 } from "../helpers/missingOrders.js";
 import { extractOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
-import { recoverShippingIssuesFromHistory } from "../helpers/shippingIssueRecovery.js";
+import {
+  recoverShippingIssuesFromHistory,
+} from "../helpers/shippingIssueRecovery.js";
 import { loadWarehouseAvailabilityByStoreIds } from "../services/warehouseAvailabilityService.js";
 
 const router = express.Router();
@@ -50,6 +52,7 @@ const UUID_REGEX =
 const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const SHIPPING_ISSUE_HISTORY_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
+const SCOPED_ROWS_BATCH_SIZE = 500;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 200;
 const ORDER_LIST_PAGE_LIMIT = 4500;
@@ -525,6 +528,23 @@ const filterRowsByStoreId = (rows, requestedStoreId) => {
   );
 };
 
+const dedupeRowsById = (rows = []) => {
+  const uniqueRows = [];
+  const seenIds = new Set();
+
+  for (const row of rows || []) {
+    const rowId = String(row?.id || "").trim();
+    if (!rowId || seenIds.has(rowId)) {
+      continue;
+    }
+
+    seenIds.add(rowId);
+    uniqueRows.push(row);
+  }
+
+  return uniqueRows;
+};
+
 const toNonNegativeInteger = (value, fallback = 0) => {
   const parsed = parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
@@ -582,6 +602,38 @@ const getListSortOptions = (
   return {
     sortBy,
     ascending: sortDir === "asc",
+  };
+};
+
+const loadShippingIssueOrdersForRequest = async (req) => {
+  const scopedRowsResult = await getAllScopedEntityRows({
+    req,
+    tableName: "orders",
+    selects: ORDER_LIST_SELECTS,
+    sortOptions: {
+      sortBy: "created_at",
+      ascending: false,
+    },
+  });
+  if (scopedRowsResult?.error) {
+    throw scopedRowsResult.error;
+  }
+
+  const shippingIssueRows = (scopedRowsResult?.data || []).filter((order) =>
+    Boolean(
+      extractOrderLocalMetadata(parseJsonField(order?.data))?.shipping_issue,
+    ),
+  );
+
+  const recoveryResult = await recoverShippingIssuesFromHistory({
+    supabaseClient: db,
+    orders: shippingIssueRows,
+    persist: true,
+  });
+
+  return {
+    rows: recoveryResult.orders || [],
+    repairedCount: recoveryResult.repairedCount || 0,
   };
 };
 
@@ -826,6 +878,59 @@ const getScopedEntityRows = async (req, entityModel) => {
 
   return {
     data: filterRowsByStoreId(sourceResult?.data || [], requestedStoreId),
+    error: null,
+    isAdmin,
+    requestedStoreId,
+  };
+};
+
+const getAllScopedEntityRows = async ({
+  req,
+  tableName,
+  selects,
+  sortOptions,
+  batchSize = SCOPED_ROWS_BATCH_SIZE,
+} = {}) => {
+  const rows = [];
+  let offset = 0;
+  let isAdmin = false;
+  let requestedStoreId = null;
+
+  while (true) {
+    const pageResult = await getScopedEntityPage({
+      req,
+      tableName,
+      selects,
+      pagination: {
+        limit: batchSize,
+        offset,
+      },
+      sortOptions,
+    });
+
+    if (pageResult?.error) {
+      return {
+        data: [],
+        error: pageResult.error,
+        isAdmin: pageResult.isAdmin,
+        requestedStoreId: pageResult.requestedStoreId,
+      };
+    }
+
+    const batch = Array.isArray(pageResult?.data) ? pageResult.data : [];
+    rows.push(...batch);
+    isAdmin = Boolean(pageResult?.isAdmin);
+    requestedStoreId = pageResult?.requestedStoreId || null;
+
+    if (batch.length < batchSize) {
+      break;
+    }
+
+    offset += batch.length;
+  }
+
+  return {
+    data: rows,
     error: null,
     isAdmin,
     requestedStoreId,
@@ -3800,6 +3905,83 @@ router.get(
     } catch (e) {
       console.error("Exception fetching products:", e);
       res.status(500).json({ error: e.message });
+    }
+  },
+);
+router.get(
+  "/orders/shipping-issues",
+  verifyToken,
+  requirePermission("can_view_orders"),
+  async (req, res) => {
+    try {
+      const pagination = getListPagination(
+        req.query,
+        DEFAULT_LIST_LIMIT,
+        ORDER_LIST_PAGE_LIMIT,
+      );
+      const reasonFilter = String(req.query.reason || req.query.shipping_issue_reason || "")
+        .trim()
+        .toLowerCase();
+
+      const { rows, repairedCount } = await loadShippingIssueOrdersForRequest(req);
+      let normalizedOrders = dedupeRowsById(
+        (rows || []).map((order) => buildOrderListItem(order)),
+      ).filter(
+        (order) => order?.shipping_issue || order?.shipping_issue_reason,
+      );
+
+      if (reasonFilter && reasonFilter !== "all") {
+        normalizedOrders = normalizedOrders.filter(
+          (order) =>
+            String(order?.shipping_issue_reason || "")
+              .trim()
+              .toLowerCase() === reasonFilter,
+        );
+      }
+
+      normalizedOrders.sort((left, right) => {
+        const leftTimestamp = Date.parse(
+          left?.shipping_issue?.updated_at || left?.updated_at || left?.created_at || "",
+        );
+        const rightTimestamp = Date.parse(
+          right?.shipping_issue?.updated_at ||
+            right?.updated_at ||
+            right?.created_at ||
+            "",
+        );
+
+        if (Number.isNaN(leftTimestamp) && Number.isNaN(rightTimestamp)) {
+          return 0;
+        }
+        if (Number.isNaN(leftTimestamp)) {
+          return 1;
+        }
+        if (Number.isNaN(rightTimestamp)) {
+          return -1;
+        }
+
+        return rightTimestamp - leftTimestamp;
+      });
+
+      if (repairedCount > 0) {
+        res.setHeader(
+          "X-Orders-Shipping-Issue-Recovery",
+          String(repairedCount),
+        );
+      }
+
+      return res.json(
+        buildSlicedPaginatedCollection(normalizedOrders, pagination, {
+          summary: {
+            total_shipping_issues: normalizedOrders.length,
+          },
+        }),
+      );
+    } catch (error) {
+      console.error("Error fetching shipping issues orders:", error);
+      return res.status(500).json({
+        error: error.message || "Failed to fetch shipping issues",
+      });
     }
   },
 );

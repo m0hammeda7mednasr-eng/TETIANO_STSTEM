@@ -351,14 +351,10 @@ export default function ShippingIssues() {
       try {
         const rows = await fetchAllPagesProgressively(
           ({ limit, offset }) =>
-            api.get("/shopify/orders", {
+            api.get("/shopify/orders/shipping-issues", {
               params: {
                 limit,
                 offset,
-                search_all: "true",
-                sort_by: "created_at",
-                sort_dir: "desc",
-                shipping_issue: "active",
               },
             }),
           {

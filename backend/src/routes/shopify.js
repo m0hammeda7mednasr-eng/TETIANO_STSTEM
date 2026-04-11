@@ -36,6 +36,7 @@ import {
 import {
   DAY_MS,
   buildMissingOrdersFromStock,
+  MISSING_ORDER_GRACE_MS,
   MISSING_ORDER_REASON_NO_ACTION,
   MISSING_ORDER_REASON_STOCK_SHORTAGE,
 } from "../helpers/missingOrders.js";
@@ -210,6 +211,38 @@ const ORDER_LIST_SELECTS = [
     "payment_method",
     "manual_payment_method",
     "cancelled_at",
+    "created_at",
+    "updated_at",
+    "data",
+  ].join(","),
+  "*",
+];
+const MISSING_ORDER_SOURCE_SELECTS = [
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "total_price",
+    "status",
+    "fulfillment_status",
+    "created_at",
+    "updated_at",
+    "data",
+    "notes",
+  ].join(","),
+  [
+    "id",
+    "shopify_id",
+    "store_id",
+    "order_number",
+    "customer_name",
+    "customer_email",
+    "total_price",
+    "status",
+    "fulfillment_status",
     "created_at",
     "updated_at",
     "data",
@@ -802,6 +835,7 @@ const buildSlicedPaginatedCollection = (
 };
 
 const QUERY_RETRYABLE_ERROR_CODES = new Set(["57014"]);
+const MISSING_ORDER_SOURCE_BATCH_SIZE = 500;
 
 const isQueryRetryableError = (error) => {
   if (!error) {
@@ -979,6 +1013,177 @@ const getScopedEntityRows = async (req, entityModel) => {
   return {
     data: filterRowsByStoreId(sourceResult?.data || [], requestedStoreId),
     error: null,
+    isAdmin,
+    requestedStoreId,
+  };
+};
+
+const getMissingOrdersSourceCutoffIso = (nowTimestamp = Date.now()) =>
+  new Date(nowTimestamp - MISSING_ORDER_GRACE_MS).toISOString();
+
+const buildScopedMissingOrdersSourceQuery = ({
+  req,
+  selectedColumns,
+  rangeStart,
+  rangeEnd,
+  requestedStoreId,
+  isAdmin,
+  accessibleStoreIds = [],
+  useLegacyUserScope = false,
+  cutoffIso,
+} = {}) => {
+  let query = db
+    .from("orders")
+    .select(selectedColumns)
+    .lt("created_at", cutoffIso)
+    .or("fulfillment_status.is.null,fulfillment_status.neq.fulfilled")
+    .range(rangeStart, rangeEnd);
+
+  if (requestedStoreId) {
+    return query.eq("store_id", requestedStoreId);
+  }
+
+  if (isAdmin) {
+    return query;
+  }
+
+  if (!useLegacyUserScope && accessibleStoreIds.length > 0) {
+    return query.in("store_id", accessibleStoreIds);
+  }
+
+  return query.eq("user_id", req.user.id);
+};
+
+const executeScopedMissingOrdersSourceQuery = async ({
+  req,
+  selectedColumns,
+  requestedStoreId,
+  isAdmin,
+  accessibleStoreIds = [],
+  useLegacyUserScope = false,
+  cutoffIso,
+} = {}) => {
+  const rows = [];
+
+  for (
+    let offset = 0;
+    ;
+    offset += MISSING_ORDER_SOURCE_BATCH_SIZE
+  ) {
+    const { data, error } = await buildScopedMissingOrdersSourceQuery({
+      req,
+      selectedColumns,
+      rangeStart: offset,
+      rangeEnd: offset + MISSING_ORDER_SOURCE_BATCH_SIZE - 1,
+      requestedStoreId,
+      isAdmin,
+      accessibleStoreIds,
+      useLegacyUserScope,
+      cutoffIso,
+    });
+
+    if (error) {
+      return {
+        data: rows,
+        error,
+      };
+    }
+
+    const batch = Array.isArray(data) ? data : [];
+    rows.push(...batch);
+
+    if (batch.length < MISSING_ORDER_SOURCE_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  return {
+    data: rows,
+    error: null,
+  };
+};
+
+const loadMissingOrdersSourceRows = async (req) => {
+  const requestedStoreId = getRequestedStoreId(req);
+  const isAdmin = await resolveIsAdmin(req);
+  const accessibleStoreIds = isAdmin
+    ? []
+    : await getAccessibleStoreIds(req.user.id);
+
+  if (
+    requestedStoreId &&
+    !isAdmin &&
+    !accessibleStoreIds.includes(requestedStoreId)
+  ) {
+    return {
+      data: [],
+      error: null,
+      isAdmin,
+      requestedStoreId,
+    };
+  }
+
+  const cutoffIso = getMissingOrdersSourceCutoffIso();
+  let lastError = null;
+
+  for (const selectedColumns of MISSING_ORDER_SOURCE_SELECTS) {
+    let queryResult = await executeScopedMissingOrdersSourceQuery({
+      req,
+      selectedColumns,
+      requestedStoreId,
+      isAdmin,
+      accessibleStoreIds,
+      useLegacyUserScope: false,
+      cutoffIso,
+    });
+
+    if (
+      !queryResult.error &&
+      !isAdmin &&
+      !requestedStoreId &&
+      accessibleStoreIds.length > 0 &&
+      queryResult.data.length === 0
+    ) {
+      queryResult = await executeScopedMissingOrdersSourceQuery({
+        req,
+        selectedColumns,
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+        useLegacyUserScope: true,
+        cutoffIso,
+      });
+    }
+
+    if (!queryResult.error) {
+      return {
+        data: dedupeRowsById(queryResult.data || []),
+        error: null,
+        isAdmin,
+        requestedStoreId,
+      };
+    }
+
+    lastError = queryResult.error;
+    if (isSchemaCompatibilityError(queryResult.error)) {
+      continue;
+    }
+
+    if (isQueryRetryableError(queryResult.error)) {
+      continue;
+    }
+
+    return {
+      data: [],
+      error: queryResult.error,
+      isAdmin,
+      requestedStoreId,
+    };
+  }
+
+  return {
+    data: [],
+    error: lastError,
     isAdmin,
     requestedStoreId,
   };
@@ -2803,7 +3008,7 @@ const getMissingOrdersForRows = async (rows = []) => {
 };
 
 const getMissingOrdersForRequest = async (req) => {
-  const scopedRowsResult = await getScopedEntityRows(req, Order);
+  const scopedRowsResult = await loadMissingOrdersSourceRows(req);
   if (scopedRowsResult?.error) {
     throw scopedRowsResult.error;
   }

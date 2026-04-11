@@ -11,6 +11,7 @@ import api from "../utils/api";
 const AuthContext = createContext(null);
 const AUTH_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const MIN_AUTH_REFRESH_GAP_MS = 5000;
+const STORE_ID_UPDATED_EVENT = "tetiano:store-id-updated";
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_CLIENT_PERMISSIONS = {
@@ -53,6 +54,14 @@ const normalizeStoreId = (value) => {
   return UUID_REGEX.test(normalized) ? normalized : "";
 };
 
+const emitStoreIdUpdated = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(new Event(STORE_ID_UPDATED_EVENT));
+};
+
 const syncCurrentStoreId = (stores = []) => {
   const accessibleStoreIds = (Array.isArray(stores) ? stores : [])
     .map((store) => normalizeStoreId(store?.id))
@@ -64,16 +73,19 @@ const syncCurrentStoreId = (stores = []) => {
 
   if (accessibleStoreIds.length === 0) {
     localStorage.removeItem("currentStoreId");
+    emitStoreIdUpdated();
     return null;
   }
 
   if (currentStoreId && accessibleStoreIds.includes(currentStoreId)) {
     localStorage.setItem("currentStoreId", currentStoreId);
+    emitStoreIdUpdated();
     return currentStoreId;
   }
 
   const nextStoreId = accessibleStoreIds[0];
   localStorage.setItem("currentStoreId", nextStoreId);
+  emitStoreIdUpdated();
   return nextStoreId;
 };
 

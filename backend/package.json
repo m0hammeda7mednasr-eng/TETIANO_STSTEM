@@ -12,7 +12,8 @@
     "migrate": "node-pg-migrate",
     "db:repair": "node scripts/repair-shopify-data-links.js",
     "db:reset-orders": "node scripts/reset-orders-data.js",
-    "repair:shipping-notes": "node scripts/restore-shipping-issue-notes.js"
+    "repair:shipping-notes": "node scripts/restore-shipping-issue-notes.js",
+    "repair:shipping-issues": "node scripts/restore-shipping-issue-state.js"
   },
   "jest": {
     "transform": {}

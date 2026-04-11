@@ -9,6 +9,7 @@ import { measureAsync } from "../helpers/requestProfiler.js";
 const sortByCreatedAtDesc = { ascending: false };
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 const SHOPIFY_UPSERT_BATCH_SIZE = 200;
+const LIST_QUERY_BATCH_SIZE = 1000;
 const ACCESSIBLE_STORE_IDS_CACHE_TTL_MS = 60 * 1000;
 const UPSERT_FALLBACK_WARNING_TTL_MS = 5 * 60 * 1000;
 const LOCAL_PRODUCT_COST_FIELDS = [
@@ -220,7 +221,7 @@ const executeWithSchemaAndEmptyFallback = (
 const buildListQueryFallbacks = (tableName, applyFilter) => {
   const orderFields = ["created_at", "updated_at", "id", null];
 
-  return orderFields.map((field) => async () => {
+  return orderFields.map((field) => async (offset = 0) => {
     let query = supabase.from(tableName).select();
     if (field) {
       query = query.order(field, sortByCreatedAtDesc);
@@ -228,8 +229,49 @@ const buildListQueryFallbacks = (tableName, applyFilter) => {
     if (applyFilter) {
       query = applyFilter(query);
     }
-    return await query;
+    return await query.range(offset, offset + LIST_QUERY_BATCH_SIZE - 1);
   });
+};
+
+const executeBatchedListQueryFallbacks = async (
+  builders,
+  { continueOnUnexpectedError = false } = {},
+) => {
+  let lastError = null;
+  let lastData = null;
+
+  for (const build of builders) {
+    const rows = [];
+    let offset = 0;
+
+    while (true) {
+      const { data, error } = await build(offset);
+
+      if (error) {
+        lastError = error;
+        if (!continueOnUnexpectedError && !isSchemaCompatibilityError(error)) {
+          return { data: null, error };
+        }
+        break;
+      }
+
+      const batch = Array.isArray(data) ? data : [];
+      rows.push(...batch);
+      lastData = rows;
+      lastError = null;
+
+      if (batch.length < LIST_QUERY_BATCH_SIZE) {
+        if (hasMeaningfulData(rows)) {
+          return { data: rows, error: null };
+        }
+        break;
+      }
+
+      offset += batch.length;
+    }
+  }
+
+  return { data: lastData, error: lastError };
 };
 
 const getUniqueStoreIds = (rows) =>
@@ -349,7 +391,7 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
 
   // First try: rows linked to stores this user can access.
   if (storeIds.length > 0) {
-    primaryScopeResult = await executeWithSchemaAndEmptyFallback(
+    primaryScopeResult = await executeBatchedListQueryFallbacks(
       buildListQueryFallbacks(tableName, (query) =>
         query.in("store_id", storeIds),
       ),
@@ -367,7 +409,7 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
   }
 
   // Fallback for legacy rows that predate store_id backfill.
-  const result = await executeWithSchemaAndEmptyFallback(
+  const result = await executeBatchedListQueryFallbacks(
     buildListQueryFallbacks(tableName, (query) => query.eq("user_id", userId)),
   );
 
@@ -388,6 +430,17 @@ const findRowsByUserWithFallback = async (tableName, userId) => {
       error: null,
     };
   }
+
+  return {
+    data: Array.isArray(result.data) ? result.data : [],
+    error: result.error,
+  };
+};
+
+const findAllRows = async (tableName) => {
+  const result = await executeBatchedListQueryFallbacks(
+    buildListQueryFallbacks(tableName),
+  );
 
   return {
     data: Array.isArray(result.data) ? result.data : [],
@@ -1086,11 +1139,7 @@ export const Product = {
   },
 
   async findAll() {
-    // Return ALL products (shared data - no user filter)
-    return await supabase
-      .from("products")
-      .select()
-      .order("created_at", sortByCreatedAtDesc);
+    return await findAllRows("products");
   },
 
   async findByUser(userId) {
@@ -1137,11 +1186,7 @@ export const Order = {
   },
 
   async findAll() {
-    // Return ALL orders (shared data - no user filter)
-    return await supabase
-      .from("orders")
-      .select()
-      .order("created_at", sortByCreatedAtDesc);
+    return await findAllRows("orders");
   },
 
   async findByUser(userId) {
@@ -1179,11 +1224,7 @@ export const Customer = {
   },
 
   async findAll() {
-    // Return ALL customers (shared data - no user filter)
-    return await supabase
-      .from("customers")
-      .select()
-      .order("created_at", sortByCreatedAtDesc);
+    return await findAllRows("customers");
   },
 
   async findByUser(userId) {

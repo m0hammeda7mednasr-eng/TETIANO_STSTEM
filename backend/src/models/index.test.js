@@ -123,6 +123,8 @@ const createQueryBuilder = (table) => {
       table: state.table,
       filters: [...state.filters],
       orderBy: state.orderBy,
+      rangeValues: state.rangeValues,
+      limitCount: state.limitCount,
       mode,
       payload: state.payload,
       options: state.options,
@@ -551,6 +553,40 @@ describe("models/index Shopify scoping", () => {
       ],
       error: null,
     });
+  });
+
+  it("loads batched product rows beyond the first 1000 shared-store records", async () => {
+    tableData.stores = [{ id: "store-1" }];
+    tableData.products = Array.from({ length: 1205 }, (_, index) => ({
+      id: `shared-product-${index + 1}`,
+      shopify_id: `shared-shopify-${index + 1}`,
+      store_id: "store-1",
+      user_id: "owner-1",
+    }));
+
+    const result = await Product.findByUser("shared-store-products-user");
+
+    expect(result.error).toBeNull();
+    expect(result.data).toHaveLength(1205);
+
+    const scopedQueries = executedQueries.filter(
+      (query) =>
+        query.table === "products" &&
+        query.mode === "list" &&
+        query.filters.some(
+          (filter) =>
+            filter.type === "in" &&
+            filter.column === "store_id" &&
+            filter.values.includes("store-1"),
+        ),
+    );
+
+    expect(scopedQueries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rangeValues: [0, 999] }),
+        expect.objectContaining({ rangeValues: [1000, 1999] }),
+      ]),
+    );
   });
 
   it("does not fall back to legacy user-scoped rows when store access exists but the store has no matching products", async () => {

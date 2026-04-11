@@ -40,6 +40,7 @@ import {
   MISSING_ORDER_REASON_STOCK_SHORTAGE,
 } from "../helpers/missingOrders.js";
 import { extractOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
+import { recoverShippingIssuesFromHistory } from "../helpers/shippingIssueRecovery.js";
 import { loadWarehouseAvailabilityByStoreIds } from "../services/warehouseAvailabilityService.js";
 
 const router = express.Router();
@@ -48,6 +49,7 @@ const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
+const SHIPPING_ISSUE_HISTORY_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 200;
 const ORDER_LIST_PAGE_LIMIT = 4500;
@@ -325,6 +327,7 @@ const CUSTOMER_SORT_FIELDS = new Set([
   "email",
 ]);
 const orderBackgroundSyncState = new Map();
+const shippingIssueHistoryRecoveryState = new Map();
 const normalizeBaseUrl = (value) =>
   String(value || "")
     .trim()
@@ -411,6 +414,105 @@ const getRequestedStoreId = (req) => {
   }
 
   return normalized;
+};
+
+const buildShippingIssueHistoryRecoveryKey = ({
+  userId,
+  requestedStoreId,
+  searchAllHistory = false,
+}) =>
+  `${String(userId || "").trim()}::${String(requestedStoreId || "all").trim()}::${searchAllHistory ? "search_all" : "page"}`;
+
+const shouldRecoverShippingIssuesFromHistory = ({
+  query = {},
+  pagination,
+  searchAllHistory = false,
+}) => {
+  const hasShippingIssueFilter =
+    (query.shipping_issue && query.shipping_issue !== "all") ||
+    (query.shipping_issue_reason && query.shipping_issue_reason !== "all");
+
+  if (searchAllHistory) {
+    return Boolean(hasShippingIssueFilter);
+  }
+
+  return toNonNegativeInteger(pagination?.offset, 0) === 0;
+};
+
+const maybeRecoverShippingIssuesFromHistory = async ({
+  req,
+  orders = [],
+  requestedStoreId,
+  pagination,
+  searchAllHistory = false,
+} = {}) => {
+  if (
+    !shouldRecoverShippingIssuesFromHistory({
+      query: req?.query || {},
+      pagination,
+      searchAllHistory,
+    }) ||
+    !Array.isArray(orders) ||
+    orders.length === 0
+  ) {
+    return {
+      orders: Array.isArray(orders) ? orders : [],
+      repairedCount: 0,
+    };
+  }
+
+  const scopeKey = buildShippingIssueHistoryRecoveryKey({
+    userId: req?.user?.id,
+    requestedStoreId,
+    searchAllHistory,
+  });
+  const nowMs = Date.now();
+  const state = shippingIssueHistoryRecoveryState.get(scopeKey);
+
+  if (
+    state?.inFlight ||
+    (state?.lastRunMs &&
+      nowMs - state.lastRunMs < SHIPPING_ISSUE_HISTORY_RECOVERY_COOLDOWN_MS)
+  ) {
+    return {
+      orders,
+      repairedCount: 0,
+    };
+  }
+
+  shippingIssueHistoryRecoveryState.set(scopeKey, {
+    inFlight: true,
+    lastRunMs: state?.lastRunMs || 0,
+  });
+
+  try {
+    const recoveryResult = await recoverShippingIssuesFromHistory({
+      supabaseClient: db,
+      orders,
+      persist: true,
+    });
+
+    shippingIssueHistoryRecoveryState.set(scopeKey, {
+      inFlight: false,
+      lastRunMs: nowMs,
+    });
+
+    return recoveryResult;
+  } catch (error) {
+    console.error(
+      "Shipping issue history recovery failed:",
+      error?.message || error,
+    );
+    shippingIssueHistoryRecoveryState.set(scopeKey, {
+      inFlight: false,
+      lastRunMs: state?.lastRunMs || 0,
+    });
+
+    return {
+      orders,
+      repairedCount: 0,
+    };
+  }
 };
 
 const filterRowsByStoreId = (rows, requestedStoreId) => {
@@ -3778,8 +3880,16 @@ router.get(
           });
         }
 
+        const recoveryResult = await maybeRecoverShippingIssuesFromHistory({
+          req,
+          orders: scopedRowsResult?.data || [],
+          requestedStoreId,
+          pagination,
+          searchAllHistory: true,
+        });
+
         let matchedOrders = applyOrdersQueryFilters(
-          scopedRowsResult?.data || [],
+          recoveryResult.orders || [],
           req.query,
           {
             maxVisible: null,
@@ -3825,6 +3935,12 @@ router.get(
           res.setHeader(
             "X-Orders-Live-Sync",
             liveSyncResult.reason || "attempted",
+          );
+        }
+        if (recoveryResult.repairedCount > 0) {
+          res.setHeader(
+            "X-Orders-Shipping-Issue-Recovery",
+            String(recoveryResult.repairedCount),
           );
         }
 
@@ -3883,13 +3999,25 @@ router.get(
       console.log(
         `Returning ${data?.length || 0} orders for user ${req.user.id}`,
       );
-      const normalizedOrders = (data || []).map((order) =>
+      const recoveryResult = await maybeRecoverShippingIssuesFromHistory({
+        req,
+        orders: data || [],
+        requestedStoreId,
+        pagination,
+      });
+      const normalizedOrders = (recoveryResult.orders || []).map((order) =>
         buildOrderListItem(order),
       );
       if (liveSyncResult) {
         res.setHeader(
           "X-Orders-Live-Sync",
           liveSyncResult.reason || "attempted",
+        );
+      }
+      if (recoveryResult.repairedCount > 0) {
+        res.setHeader(
+          "X-Orders-Shipping-Issue-Recovery",
+          String(recoveryResult.repairedCount),
         );
       }
       res.json(

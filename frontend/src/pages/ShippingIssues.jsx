@@ -340,7 +340,8 @@ export default function ShippingIssues() {
           });
 
           const payload = extractObject(response?.data);
-          const batch = extractArray(payload).filter((order) =>
+          const pageRows = extractArray(payload);
+          const batch = pageRows.filter((order) =>
             isShippingIssueActive(order),
           );
           const pagination =
@@ -350,18 +351,18 @@ export default function ShippingIssues() {
 
           rows.push(...batch);
 
-          if (batch.length === 0) {
+          if (pageRows.length === 0) {
             break;
           }
 
           hasMore =
             typeof pagination.has_more === "boolean"
               ? pagination.has_more
-              : batch.length === FETCH_PAGE_LIMIT;
+              : pageRows.length === FETCH_PAGE_LIMIT;
           offset =
             typeof pagination.next_offset === "number"
               ? pagination.next_offset
-              : offset + batch.length;
+              : offset + pageRows.length;
         }
 
         setOrders(rows);

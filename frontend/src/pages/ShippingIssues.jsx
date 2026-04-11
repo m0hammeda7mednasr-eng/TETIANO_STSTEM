@@ -41,6 +41,7 @@ const FETCH_PAGE_LIMIT = 200;
 const PAGE_SIZE = 50;
 const PAGINATION_WINDOW = 5;
 const DATE_PRESET_OPTIONS = [
+  { id: "all", ar: "All dates", en: "All Dates" },
   { id: "today", ar: "اليوم", en: "Today" },
   { id: "yesterday", ar: "أمس", en: "Yesterday" },
   { id: "week", ar: "أسبوع", en: "Week" },
@@ -66,6 +67,11 @@ const getDatePresetRange = (presetId, now = new Date()) => {
   today.setHours(0, 0, 0, 0);
 
   switch (presetId) {
+    case "all":
+      return {
+        dateFrom: "",
+        dateTo: "",
+      };
     case "today":
       return {
         dateFrom: formatDateInputValue(today),
@@ -241,7 +247,7 @@ export default function ShippingIssues() {
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [reasonFilter, setReasonFilter] = useState("all");
-  const [dateRange, setDateRange] = useState(() => getDatePresetRange("quarter"));
+  const [dateRange, setDateRange] = useState(() => getDatePresetRange("all"));
   const [currentPage, setCurrentPage] = useState(1);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [updatingOrderIds, setUpdatingOrderIds] = useState({});
@@ -681,7 +687,7 @@ export default function ShippingIssues() {
   const handleResetFilters = () => {
     setSearchTerm("");
     setReasonFilter("all");
-    setDateRange(getDatePresetRange("quarter"));
+    setDateRange(getDatePresetRange("all"));
   };
 
   const handleExportShippingIssues = useCallback(() => {

@@ -53,6 +53,7 @@ const toIsoFileName = (value = new Date()) =>
 
 const normalizeIssueSignature = (issue) =>
   JSON.stringify({
+    active: issue?.active !== false,
     reason: String(issue?.reason || "").trim(),
     shipping_company_note: String(issue?.shipping_company_note || "").trim(),
     customer_service_note: String(issue?.customer_service_note || "").trim(),

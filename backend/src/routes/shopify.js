@@ -40,7 +40,10 @@ import {
   MISSING_ORDER_REASON_NO_ACTION,
   MISSING_ORDER_REASON_STOCK_SHORTAGE,
 } from "../helpers/missingOrders.js";
-import { extractOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
+import {
+  extractOrderLocalMetadata,
+  isShippingIssueActive,
+} from "../helpers/orderLocalMetadata.js";
 import {
   fetchLatestShippingIssueOperationsByOrderId,
   recoverShippingIssuesFromHistory,
@@ -748,7 +751,9 @@ const loadShippingIssueOrdersForRequest = async (req) => {
   const latestOperationByOrderId =
     await fetchLatestShippingIssueOperationsByOrderId(db, candidateOrderIds);
   const activeHistoryOrderIds = Array.from(latestOperationByOrderId.entries())
-    .filter(([, operation]) => Boolean(operation?.request_data?.new_shipping_issue))
+    .filter(([, operation]) =>
+      isShippingIssueActive(operation?.request_data?.new_shipping_issue),
+    )
     .map(([orderId]) => orderId);
   const scopedOrders = await fetchScopedOrdersByIds({
     req,
@@ -2302,7 +2307,9 @@ const buildOrderListItem = (order) => {
     is_fulfilled: fulfillmentStatus === "fulfilled",
     net_sales_amount: getOrderNetSalesAmount(order),
     shipping_issue: shippingIssue,
-    shipping_issue_reason: shippingIssue?.reason || null,
+    shipping_issue_reason: isShippingIssueActive(shippingIssue)
+      ? shippingIssue?.reason || null
+      : null,
   };
 };
 
@@ -2603,11 +2610,11 @@ const applyOrdersQueryFilters = (
         null;
 
       if (shippingIssueFilter === "active") {
-        return Boolean(shippingIssue);
+        return isShippingIssueActive(shippingIssue);
       }
 
       if (shippingIssueFilter === "none") {
-        return !shippingIssue;
+        return !isShippingIssueActive(shippingIssue);
       }
 
       return true;
@@ -2622,7 +2629,10 @@ const applyOrdersQueryFilters = (
       const shippingIssue =
         extractOrderLocalMetadata(parseJsonField(order?.data))?.shipping_issue ||
         null;
-      return shippingIssue?.reason === shippingIssueReason;
+      return (
+        isShippingIssueActive(shippingIssue) &&
+        shippingIssue?.reason === shippingIssueReason
+      );
     });
   }
 
@@ -4178,9 +4188,7 @@ router.get(
       const { rows, repairedCount } = await loadShippingIssueOrdersForRequest(req);
       let normalizedOrders = dedupeRowsById(
         (rows || []).map((order) => buildOrderListItem(order)),
-      ).filter(
-        (order) => order?.shipping_issue || order?.shipping_issue_reason,
-      );
+      ).filter((order) => isShippingIssueActive(order?.shipping_issue));
 
       if (reasonFilter && reasonFilter !== "all") {
         normalizedOrders = normalizedOrders.filter(

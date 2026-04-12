@@ -77,8 +77,13 @@ export const getShippingIssueReasonLabel = (reason, select) => {
   return select(option.ar, option.en);
 };
 
-export const isShippingIssueActive = (order) =>
-  Boolean(order?.shipping_issue || order?.shipping_issue_reason);
+export const isShippingIssueActive = (order) => {
+  if (order?.shipping_issue) {
+    return order.shipping_issue.active !== false;
+  }
+
+  return Boolean(order?.shipping_issue_reason);
+};
 
 export const isShippingIssueClosed = (reason) =>
   SHIPPING_ISSUE_CLOSED_REASON_SET.has(normalizeShippingIssueReason(reason));

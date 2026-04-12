@@ -23,6 +23,13 @@ const hasOwn = (value, key) =>
   Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
 
 const normalizeText = (value) => String(value ?? "").trim();
+const normalizeBoolean = (value, fallback = true) => {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  return value !== false;
+};
 export const normalizeShippingIssueReason = (
   value,
   fallback = DEFAULT_SHIPPING_ISSUE_REASON,
@@ -126,6 +133,7 @@ const normalizeShippingIssue = (value = {}) => {
   }
 
   return {
+    active: normalizeBoolean(source?.active, true),
     reason: normalizeShippingIssueReason(source?.reason),
     shipping_company_note: normalizeText(source?.shipping_company_note),
     customer_service_note: normalizeText(source?.customer_service_note),
@@ -202,6 +210,9 @@ export const extractOrderLocalMetadata = (orderData) => {
   const data = toPlainObject(orderData);
   return buildLocalMetadata(data?.[LOCAL_ORDER_METADATA_KEY]);
 };
+
+export const isShippingIssueActive = (shippingIssue) =>
+  Boolean(shippingIssue) && normalizeBoolean(shippingIssue?.active, true);
 
 export const applyOrderLocalMetadata = (
   orderData,
@@ -303,6 +314,9 @@ export const mergeOrderLocalMetadata = (
     } else {
       const shippingIssueInput = toPlainObject(updates.shipping_issue);
       nextShippingIssue = {
+        active: hasOwn(shippingIssueInput, "active")
+          ? normalizeBoolean(shippingIssueInput?.active, true)
+          : normalizeBoolean(nextShippingIssue?.active, true),
         reason: normalizeShippingIssueReason(shippingIssueInput?.reason),
         shipping_company_note: normalizeText(
           shippingIssueInput?.shipping_company_note,

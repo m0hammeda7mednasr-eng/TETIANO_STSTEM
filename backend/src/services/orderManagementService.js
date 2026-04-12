@@ -5,6 +5,7 @@ import {
   applyOrderLocalMetadata,
   extractOrderLocalMetadata,
   getEditableShippingAddressFromOrderData,
+  isShippingIssueActive,
   mergeOrderLocalMetadata,
   normalizeShippingIssueReason,
   preserveOrderLocalMetadata,
@@ -1332,6 +1333,8 @@ export class OrderManagementService {
       const currentOrderData = applyOrderLocalMetadata(parseOrderData(order));
       const currentMetadata = extractOrderLocalMetadata(currentOrderData);
       const currentShippingIssue = currentMetadata?.shipping_issue || null;
+      const currentShippingIssueActive =
+        isShippingIssueActive(currentShippingIssue);
       const shouldActivate = update?.active !== false;
       const hasUpdateField = (field) =>
         Object.prototype.hasOwnProperty.call(update || {}, field);
@@ -1341,30 +1344,30 @@ export class OrderManagementService {
       const currentCustomerServiceNote = String(
         currentShippingIssue?.customer_service_note || "",
       ).trim();
+      const currentReason =
+        currentShippingIssue?.reason || DEFAULT_SHIPPING_ISSUE_REASON;
       const nextReason = shouldActivate
         ? normalizeShippingIssueReason(
             hasUpdateField("reason")
               ? update?.reason
-              : currentShippingIssue?.reason || DEFAULT_SHIPPING_ISSUE_REASON,
-            currentShippingIssue?.reason || DEFAULT_SHIPPING_ISSUE_REASON,
+              : currentReason,
+            currentReason,
           )
-        : null;
+        : currentReason;
       const nextShippingCompanyNote = shouldActivate
         ? hasUpdateField("shipping_company_note")
           ? String(update?.shipping_company_note ?? "").trim()
           : currentShippingCompanyNote
-        : "";
+        : currentShippingCompanyNote;
       const nextCustomerServiceNote = shouldActivate
         ? hasUpdateField("customer_service_note")
           ? String(update?.customer_service_note ?? "").trim()
           : currentCustomerServiceNote
-        : "";
-      const currentReason =
-        currentShippingIssue?.reason || DEFAULT_SHIPPING_ISSUE_REASON;
+        : currentCustomerServiceNote;
 
       if (
-        (shouldActivate &&
-          currentShippingIssue &&
+        (currentShippingIssue &&
+          currentShippingIssueActive === shouldActivate &&
           currentReason === nextReason &&
           currentShippingCompanyNote === nextShippingCompanyNote &&
           currentCustomerServiceNote === nextCustomerServiceNote) ||
@@ -1387,13 +1390,15 @@ export class OrderManagementService {
       const nextOrderData = mergeOrderLocalMetadata(
         currentOrderData,
         {
-          shipping_issue: shouldActivate
-            ? {
-                reason: nextReason,
-                shipping_company_note: nextShippingCompanyNote,
-                customer_service_note: nextCustomerServiceNote,
-              }
-            : null,
+          shipping_issue:
+            shouldActivate || currentShippingIssue
+              ? {
+                  active: shouldActivate,
+                  reason: nextReason,
+                  shipping_company_note: nextShippingCompanyNote,
+                  customer_service_note: nextCustomerServiceNote,
+                }
+              : null,
         },
         {
           updatedBy: userId,

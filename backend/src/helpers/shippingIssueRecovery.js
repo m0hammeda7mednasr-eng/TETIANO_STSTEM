@@ -9,6 +9,8 @@ export const SHIPPING_ISSUE_UPDATE_OPERATION =
 const DEFAULT_FETCH_CHUNK_SIZE = 200;
 
 const normalizeText = (value) => String(value ?? "").trim();
+const hasOwn = (value, key) =>
+  Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
 
 const parseJsonField = (value) => {
   if (!value) {
@@ -32,6 +34,9 @@ const normalizeRecoveredShippingIssue = (issue, fallback = {}) => {
   }
 
   return {
+    active: hasOwn(issue, "active")
+      ? issue?.active !== false
+      : fallback?.active !== false,
     reason:
       normalizeText(issue?.reason) || DEFAULT_SHIPPING_ISSUE_REASON,
     shipping_company_note: normalizeText(issue?.shipping_company_note),
@@ -119,6 +124,7 @@ export const buildShippingIssueRecoveryPlan = (
     const nextIssue = normalizeRecoveredShippingIssue(
       latestOperation?.request_data?.new_shipping_issue,
       {
+        active: currentIssue?.active,
         updated_at: latestOperation?.created_at,
       },
     );

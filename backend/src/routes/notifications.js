@@ -75,14 +75,21 @@ router.get("/", async (req, res) => {
 
 router.get("/unread-count", async (req, res) => {
   try {
-    const { count, error } = await supabase
+    // timeout سريع للإشعارات
+    const timeoutPromise = new Promise((resolve) => {
+      setTimeout(() => resolve({ count: 0, error: { code: "TIMEOUT" } }), 3000);
+    });
+
+    const queryPromise = supabase
       .from("notifications")
       .select("id", { count: "exact", head: true })
       .eq("user_id", req.user.id)
       .eq("is_read", false);
 
+    const { count, error } = await Promise.race([queryPromise, timeoutPromise]);
+
     if (error) {
-      if (isNotificationsSchemaUnavailable(error)) {
+      if (error.code === "TIMEOUT" || isNotificationsSchemaUnavailable(error)) {
         return res.json({ unread_count: 0 });
       }
       throw error;
@@ -91,7 +98,7 @@ router.get("/unread-count", async (req, res) => {
     res.json({ unread_count: count || 0 });
   } catch (error) {
     console.error("Error fetching unread notification count:", error);
-    res.status(500).json({ error: "Failed to fetch unread notification count" });
+    res.json({ unread_count: 0 }); // إرجاع 0 بدل خطأ
   }
 });
 

@@ -17,7 +17,7 @@ import {
   hasActiveOrderScopeFilters,
   normalizeOrderScopeFilters,
 } from "../helpers/orderScope.js";
-import { calculateDashboardOrderStats } from "../helpers/dashboardStats.js";
+import { buildDashboardSummaryPayload } from "../helpers/dashboardStats.js";
 import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 import { ProductUpdateService } from "../services/productUpdateService.js";
 import {
@@ -44,6 +44,7 @@ const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
 const DASHBOARD_BATCH_SIZE = 250;
 const DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
 const DASHBOARD_ORDER_VISIBLE_LIMIT = 1200;
+const DASHBOARD_ORDER_STATS_HARD_LIMIT = 4000;
 const LOW_STOCK_THRESHOLD = 10;
 const LOW_STOCK_NOTIFICATION_TYPE = "low_stock";
 const LOW_STOCK_NOTIFICATION_LOOKBACK_MS = 24 * 60 * 60 * 1000;
@@ -79,34 +80,12 @@ const DASHBOARD_ORDER_STATS_SELECT = [
   "total_price",
   "total_refunded",
   "financial_status",
+  "fulfillment_status",
   "status",
   "cancelled_at",
   "created_at",
 ].join(",");
 const DASHBOARD_ORDER_STATS_SELECTS = [
-  ["id", "store_id", "user_id", "total_price", "status", "created_at"].join(
-    ",",
-  ),
-  [
-    "id",
-    "store_id",
-    "user_id",
-    "total_price",
-    "status",
-    "created_at",
-    "data",
-  ].join(","),
-  DASHBOARD_ORDER_STATS_SELECT,
-  [
-    "id",
-    "store_id",
-    "user_id",
-    "total_price",
-    "financial_status",
-    "status",
-    "cancelled_at",
-    "created_at",
-  ].join(","),
   [
     "id",
     "store_id",
@@ -114,8 +93,32 @@ const DASHBOARD_ORDER_STATS_SELECTS = [
     "total_price",
     "total_refunded",
     "financial_status",
+    "fulfillment_status",
     "status",
     "cancelled_at",
+    "created_at",
+  ].join(","),
+  DASHBOARD_ORDER_STATS_SELECT,
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "total_price",
+    "total_refunded",
+    "financial_status",
+    "fulfillment_status",
+    "status",
+    "cancelled_at",
+    "created_at",
+    "data",
+  ].join(","),
+  [
+    "id",
+    "store_id",
+    "user_id",
+    "total_price",
+    "fulfillment_status",
+    "status",
     "created_at",
     "data",
   ].join(","),
@@ -706,6 +709,7 @@ const getFreshCacheEntry = (cache, key) => {
   }
 
   if (Date.now() - entry.updatedAt > DASHBOARD_CACHE_TTL_MS) {
+    cache.delete(key);
     return null;
   }
 
@@ -2547,6 +2551,132 @@ const applyStoreFilter = (rows, storeId) => {
   return filtered;
 };
 
+const toPositiveInteger = (value) => {
+  const parsed = parseInt(String(value || "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const resolveDashboardOrderStatsLimit = (rawFilters = {}) => {
+  const filters = normalizeOrderScopeFilters(rawFilters);
+  const requestedLimit = toPositiveInteger(filters.ordersLimit);
+
+  return requestedLimit > 0
+    ? Math.min(DASHBOARD_ORDER_STATS_HARD_LIMIT, requestedLimit)
+    : DASHBOARD_ORDER_VISIBLE_LIMIT;
+};
+
+const shouldUseExactDashboardOrderCount = (rawFilters = {}) => {
+  const filters = normalizeOrderScopeFilters(rawFilters);
+
+  return !(
+    filters.ordersLimit ||
+    filters.paymentStatus !== "all" ||
+    filters.fulfillmentStatus !== "all" ||
+    filters.refundFilter !== "all"
+  );
+};
+
+const applyDashboardScopeToQuery = (
+  query,
+  {
+    req,
+    requestedStoreId = null,
+    isAdmin = false,
+    accessibleStoreIds = [],
+    useLegacyUserScope = false,
+  } = {},
+) => {
+  if (requestedStoreId) {
+    return query.eq("store_id", requestedStoreId);
+  }
+
+  if (isAdmin) {
+    return query;
+  }
+
+  if (!useLegacyUserScope && accessibleStoreIds.length > 0) {
+    return query.in("store_id", accessibleStoreIds);
+  }
+
+  return query.eq("user_id", req.user.id);
+};
+
+const getScopedDashboardCount = async ({
+  req,
+  tableName,
+  requestedStoreId = null,
+  isAdmin = false,
+  accessibleStoreIds = [],
+  applyFilters = null,
+} = {}) => {
+  if (
+    requestedStoreId &&
+    !isAdmin &&
+    accessibleStoreIds.length > 0 &&
+    !accessibleStoreIds.includes(requestedStoreId)
+  ) {
+    return 0;
+  }
+
+  const scopeModes =
+    !isAdmin && !requestedStoreId && accessibleStoreIds.length > 0
+      ? [false, true]
+      : [false];
+  let lastError = null;
+
+  for (const useLegacyUserScope of scopeModes) {
+    let query = supabase.from(tableName).select("id", {
+      count: "exact",
+      head: true,
+    });
+
+    query = applyDashboardScopeToQuery(query, {
+      req,
+      requestedStoreId,
+      isAdmin,
+      accessibleStoreIds,
+      useLegacyUserScope,
+    });
+
+    if (typeof applyFilters === "function") {
+      query = applyFilters(query) || query;
+    }
+
+    const { count, error } = await measureAsync(
+      `dashboard.${tableName}.count`,
+      () => query,
+      {
+        category: "db",
+        serverTimingKey: "db",
+        serverTimingDescription: "Database queries",
+      },
+    );
+
+    if (!error) {
+      const resolvedCount = Math.max(0, Number(count) || 0);
+      if (!useLegacyUserScope || resolvedCount > 0) {
+        return resolvedCount;
+      }
+      continue;
+    }
+
+    lastError = error;
+    if (isSchemaCompatibilityError(error)) {
+      break;
+    }
+
+    if (!isQueryRetryableError(error)) {
+      throw error;
+    }
+  }
+
+  if (lastError && !isSchemaCompatibilityError(lastError)) {
+    throw lastError;
+  }
+
+  return 0;
+};
+
 const getScopedRows = async (req, entityModel) => {
   const requestedStoreId = getRequestedStoreId(req);
   const isAdmin = req.user?.role === "admin";
@@ -2573,6 +2703,7 @@ const getScopedRowsBatched = async (
     orderField = "created_at",
     allowUnorderedFallback = false,
     scopeFilters = null,
+    maxRows = null,
   } = {},
 ) => {
   const tableName =
@@ -2593,6 +2724,7 @@ const getScopedRowsBatched = async (
   const accessibleStoreIds = isAdmin
     ? []
     : await getAccessibleStoreIds(req.user.id);
+  const normalizedMaxRows = toPositiveInteger(maxRows);
   const rows = [];
 
   const loadBatch = async (
@@ -2603,12 +2735,20 @@ const getScopedRowsBatched = async (
   ) => {
     const profiler = getRequestProfiler();
     let query = supabase.from(tableName).select(selectedColumns);
+    const batchLimit =
+      normalizedMaxRows > 0
+        ? Math.min(DASHBOARD_BATCH_SIZE, Math.max(0, normalizedMaxRows - offset))
+        : DASHBOARD_BATCH_SIZE;
+
+    if (batchLimit <= 0) {
+      return [];
+    }
 
     if (currentOrderField) {
       query = query.order(currentOrderField, { ascending: false });
     }
 
-    query = query.range(offset, offset + DASHBOARD_BATCH_SIZE - 1);
+    query = query.range(offset, offset + batchLimit - 1);
 
     if (!isAdmin) {
       if (!useLegacyUserScope && accessibleStoreIds.length > 0) {
@@ -2682,7 +2822,10 @@ const getScopedRowsBatched = async (
 
           rows.push(...batch);
 
-          if (batch.length < DASHBOARD_BATCH_SIZE) {
+          if (
+            (normalizedMaxRows > 0 && rows.length >= normalizedMaxRows) ||
+            batch.length < DASHBOARD_BATCH_SIZE
+          ) {
             return applyStoreFilter(dedupeRowsById(rows), requestedStoreId);
           }
 
@@ -2803,49 +2946,106 @@ router.get("/stats", authenticateToken, async (req, res) => {
   try {
     profiler.setMeta("dashboard.stats.cache", "miss");
 
-    // استعلام مبسط وأسرع - نجيب العدد بس مش كل البيانات
-    const [orderCount, productCount, customerCount] = await Promise.all([
-      // عدد الطلبات بس
-      supabase
-        .from("orders")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", req.user.id),
+    const orderScopeFilters = normalizeOrderScopeFilters(req.query || {});
+    const requestedStoreId = getRequestedStoreId(req);
+    const isAdmin = req.user?.role === "admin";
+    const accessibleStoreIds = isAdmin
+      ? []
+      : await getAccessibleStoreIds(req.user.id);
+    const orderStatsLimit = resolveDashboardOrderStatsLimit(orderScopeFilters);
+    const canUseExactOrderCount =
+      shouldUseExactDashboardOrderCount(orderScopeFilters);
 
-      // عدد المنتجات بس
-      supabase
-        .from("products")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", req.user.id),
+    if (
+      requestedStoreId &&
+      !isAdmin &&
+      accessibleStoreIds.length > 0 &&
+      !accessibleStoreIds.includes(requestedStoreId)
+    ) {
+      const emptyPayload = buildDashboardSummaryPayload({
+        orders: [],
+        totalOrders: 0,
+        totalProducts: 0,
+        totalCustomers: 0,
+        lowStockProducts: 0,
+        ordersWindowLimit: orderStatsLimit,
+      });
+      rememberCacheEntry(dashboardStatsCache, cacheKey, emptyPayload);
+      return res.json(emptyPayload);
+    }
 
-      // عدد العملاء بس
-      supabase
-        .from("customers")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", req.user.id),
+    const [
+      scopedOrders,
+      totalProducts,
+      totalCustomers,
+      lowStockProducts,
+      exactOrderCount,
+    ] = await Promise.all([
+      getScopedRowsBatched(req, Order, {
+        selects: DASHBOARD_ORDER_STATS_SELECTS,
+        allowUnorderedFallback: true,
+        scopeFilters: orderScopeFilters,
+        maxRows: orderStatsLimit,
+      }),
+      getScopedDashboardCount({
+        req,
+        tableName: "products",
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+      }),
+      getScopedDashboardCount({
+        req,
+        tableName: "customers",
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+      }),
+      getScopedDashboardCount({
+        req,
+        tableName: "products",
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+        applyFilters: (query) =>
+          query
+            .gt("inventory_quantity", 0)
+            .lt("inventory_quantity", LOW_STOCK_THRESHOLD),
+      }),
+      canUseExactOrderCount
+        ? getScopedDashboardCount({
+            req,
+            tableName: "orders",
+            requestedStoreId,
+            isAdmin,
+            accessibleStoreIds,
+            applyFilters: (query) =>
+              applyOrderDateRangeFilters(query, orderScopeFilters),
+          })
+        : Promise.resolve(null),
     ]);
 
-    // إحصائيات مبسطة
-    const payload = {
-      totalOrders: orderCount.count || 0,
-      totalProducts: productCount.count || 0,
-      totalCustomers: customerCount.count || 0,
-      totalOrderValue: 0, // هنحسبه لاحقاً
-      totalSales: 0,
-      pendingOrderValue: 0,
-      lowStockProductsCount: 0,
-      mode: "simplified", // علشان نعرف إن ده مبسط
-    };
-
-    console.log(`🔍 Dashboard route accessed: GET /stats`);
-    console.log(`🔍 Full URL: ${req.originalUrl}`);
-    console.log(
-      `🔍 Headers: ${req.headers.authorization ? "Token present" : "No token"}`,
+    const filteredOrders = filterOrdersByScope(scopedOrders, orderScopeFilters);
+    const payload = measureSync(
+      "dashboard.stats.compute",
+      () =>
+        buildDashboardSummaryPayload({
+          orders: filteredOrders,
+          totalOrders:
+            exactOrderCount === null ? filteredOrders.length : exactOrderCount,
+          totalProducts,
+          totalCustomers,
+          lowStockProducts,
+          ordersWindowLimit: orderStatsLimit,
+        }),
+      {
+        category: "app",
+        serverTimingKey: "app",
+        serverTimingDescription: "Server processing",
+      },
     );
-    console.log(
-      `Returning ${payload.totalOrders} orders for user ${req.user.id}`,
-    );
 
-    setCacheEntry(dashboardStatsCache, cacheKey, payload);
+    rememberCacheEntry(dashboardStatsCache, cacheKey, payload);
     res.json(payload);
   } catch (error) {
     console.error("Dashboard stats error:", error);
@@ -2855,17 +3055,14 @@ router.get("/stats", authenticateToken, async (req, res) => {
       return res.json(staleEntry.payload);
     }
 
-    // إحصائيات افتراضية في حالة الخطأ
-    const fallbackPayload = {
+    const fallbackPayload = buildDashboardSummaryPayload({
+      orders: [],
       totalOrders: 0,
       totalProducts: 0,
       totalCustomers: 0,
-      totalOrderValue: 0,
-      totalSales: 0,
-      pendingOrderValue: 0,
-      lowStockProductsCount: 0,
-      mode: "fallback",
-    };
+      lowStockProducts: 0,
+      ordersWindowLimit: resolveDashboardOrderStatsLimit(req.query || {}),
+    });
 
     res.json(fallbackPayload);
   }

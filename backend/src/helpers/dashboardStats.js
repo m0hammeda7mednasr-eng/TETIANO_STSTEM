@@ -59,3 +59,36 @@ export const calculateDashboardOrderStats = (orders = []) => {
     pendingOrderValue,
   };
 };
+
+const roundMetric = (value) => Number.parseFloat(Number(value || 0).toFixed(2));
+
+export const buildDashboardSummaryPayload = ({
+  orders = [],
+  totalOrders = null,
+  totalProducts = 0,
+  totalCustomers = 0,
+  lowStockProducts = 0,
+  ordersWindowLimit = 0,
+} = {}) => {
+  const normalizedOrders = Array.isArray(orders) ? orders : [];
+  const { saleOrders, totalOrderValue, totalSales, pendingOrderValue } =
+    calculateDashboardOrderStats(normalizedOrders);
+  const resolvedTotalOrders = Number.isFinite(Number(totalOrders))
+    ? Number(totalOrders)
+    : normalizedOrders.length;
+  const paidOrdersCount = saleOrders.length;
+
+  return {
+    total_sales: roundMetric(totalSales),
+    total_order_value: roundMetric(totalOrderValue),
+    pending_order_value: roundMetric(pendingOrderValue),
+    total_orders: Math.max(0, resolvedTotalOrders),
+    total_products: Math.max(0, Number(totalProducts) || 0),
+    total_customers: Math.max(0, Number(totalCustomers) || 0),
+    low_stock_products: Math.max(0, Number(lowStockProducts) || 0),
+    orders_window_limit: Math.max(0, Number(ordersWindowLimit) || 0),
+    paid_orders_count: paidOrdersCount,
+    avg_order_value:
+      paidOrdersCount > 0 ? roundMetric(totalSales / paidOrdersCount) : 0,
+  };
+};

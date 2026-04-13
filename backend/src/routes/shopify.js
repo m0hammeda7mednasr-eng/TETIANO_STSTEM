@@ -452,6 +452,24 @@ const getRequestedStoreId = (req) => {
   return normalized;
 };
 
+const getAuthorizedRequestedStoreId = ({
+  requestedStoreId,
+  isAdmin,
+  accessibleStoreIds = [],
+} = {}) => {
+  if (!requestedStoreId) {
+    return null;
+  }
+
+  if (isAdmin) {
+    return requestedStoreId;
+  }
+
+  return accessibleStoreIds.includes(requestedStoreId)
+    ? requestedStoreId
+    : null;
+};
+
 const buildShippingIssueHistoryRecoveryKey = ({
   userId,
   requestedStoreId,
@@ -648,10 +666,6 @@ const buildScopedOrdersByIdsQuery = ({
   let query = db.from("orders").select("*").in("id", orderIds);
 
   if (requestedStoreId) {
-    if (!isAdmin && !accessibleStoreIds.includes(requestedStoreId)) {
-      return null;
-    }
-
     return query.eq("store_id", requestedStoreId);
   }
 
@@ -711,22 +725,15 @@ const fetchScopedOrdersByIds = async ({
 };
 
 const loadShippingIssueOrdersForRequest = async (req) => {
-  const requestedStoreId = getRequestedStoreId(req);
   const isAdmin = await resolveIsAdmin(req);
   const accessibleStoreIds = isAdmin
     ? []
     : await getAccessibleStoreIds(req.user.id);
-
-  if (
-    requestedStoreId &&
-    !isAdmin &&
-    !accessibleStoreIds.includes(requestedStoreId)
-  ) {
-    return {
-      rows: [],
-      repairedCount: 0,
-    };
-  }
+  const requestedStoreId = getAuthorizedRequestedStoreId({
+    requestedStoreId: getRequestedStoreId(req),
+    isAdmin,
+    accessibleStoreIds,
+  });
 
   const { data: historyRows, error: historyError } = await db
     .from("sync_operations")
@@ -882,24 +889,15 @@ const getScopedEntityPage = async ({
   pagination,
   sortOptions,
 }) => {
-  const requestedStoreId = getRequestedStoreId(req);
   const isAdmin = await resolveIsAdmin(req);
   const accessibleStoreIds = isAdmin
     ? []
     : await getAccessibleStoreIds(req.user.id);
-
-  if (
-    requestedStoreId &&
-    !isAdmin &&
-    !accessibleStoreIds.includes(requestedStoreId)
-  ) {
-    return {
-      data: [],
-      error: null,
-      isAdmin,
-      requestedStoreId,
-    };
-  }
+  const requestedStoreId = getAuthorizedRequestedStoreId({
+    requestedStoreId: getRequestedStoreId(req),
+    isAdmin,
+    accessibleStoreIds,
+  });
 
   const { limit, offset } = pagination;
   const { sortBy, ascending } = sortOptions;
@@ -1104,24 +1102,15 @@ const executeScopedMissingOrdersSourceQuery = async ({
 };
 
 const loadMissingOrdersSourceRows = async (req) => {
-  const requestedStoreId = getRequestedStoreId(req);
   const isAdmin = await resolveIsAdmin(req);
   const accessibleStoreIds = isAdmin
     ? []
     : await getAccessibleStoreIds(req.user.id);
-
-  if (
-    requestedStoreId &&
-    !isAdmin &&
-    !accessibleStoreIds.includes(requestedStoreId)
-  ) {
-    return {
-      data: [],
-      error: null,
-      isAdmin,
-      requestedStoreId,
-    };
-  }
+  const requestedStoreId = getAuthorizedRequestedStoreId({
+    requestedStoreId: getRequestedStoreId(req),
+    isAdmin,
+    accessibleStoreIds,
+  });
 
   const cutoffIso = getMissingOrdersSourceCutoffIso();
   let lastError = null;
@@ -1197,15 +1186,17 @@ const resolveSyncToken = async ({ userId, requestedStoreId, isAdmin }) => {
     accessibleStoreIds = await getAccessibleStoreIds(userId);
   }
 
-  if (requestedStoreId) {
-    if (!isAdmin && !accessibleStoreIds.includes(requestedStoreId)) {
-      return null;
-    }
+  const scopedRequestedStoreId = getAuthorizedRequestedStoreId({
+    requestedStoreId,
+    isAdmin,
+    accessibleStoreIds,
+  });
 
+  if (scopedRequestedStoreId) {
     const { data: tokenByRequestedStore } = await supabase
       .from("shopify_tokens")
       .select("*")
-      .eq("store_id", requestedStoreId)
+      .eq("store_id", scopedRequestedStoreId)
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -1217,7 +1208,7 @@ const resolveSyncToken = async ({ userId, requestedStoreId, isAdmin }) => {
 
   const { data: tokenByUser } = await ShopifyToken.findByUser(
     userId,
-    requestedStoreId,
+    scopedRequestedStoreId,
   );
   if (tokenByUser) {
     return tokenByUser;

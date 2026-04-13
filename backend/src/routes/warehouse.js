@@ -244,14 +244,14 @@ const getAdminStoreIds = async () => {
 };
 
 const resolveStoreContext = async (req) => {
-  const requestedStoreId = getRequestedStoreId(req);
+  const rawRequestedStoreId = getRequestedStoreId(req);
   const isAdmin = resolveIsAdmin(req);
 
   if (isAdmin) {
-    if (requestedStoreId) {
+    if (rawRequestedStoreId) {
       return {
         isAdmin,
-        storeId: requestedStoreId,
+        storeId: rawRequestedStoreId,
         accessibleStoreIds: [],
       };
     }
@@ -273,18 +273,22 @@ const resolveStoreContext = async (req) => {
   }
 
   const accessibleStoreIds = await getAccessibleStoreIds(req.user?.id);
+  const requestedStoreId = accessibleStoreIds.includes(rawRequestedStoreId)
+    ? rawRequestedStoreId
+    : null;
 
   if (requestedStoreId) {
-    if (
-      accessibleStoreIds.length === 0 ||
-      !accessibleStoreIds.includes(requestedStoreId)
-    ) {
-      throw createHttpError(403, "Access denied for the selected store");
-    }
-
     return {
       isAdmin,
       storeId: requestedStoreId,
+      accessibleStoreIds,
+    };
+  }
+
+  if (rawRequestedStoreId && accessibleStoreIds.length > 0) {
+    return {
+      isAdmin,
+      storeId: accessibleStoreIds[0],
       accessibleStoreIds,
     };
   }

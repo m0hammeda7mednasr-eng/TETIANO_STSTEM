@@ -124,7 +124,7 @@ export const AuthProvider = ({ children }) => {
   const [permissions, setPermissions] = useState(() =>
     buildCachedPermissions(cachedUser, readJsonFromStorage("permissions")),
   );
-  const [loading, setLoading] = useState(!cachedUser);
+  const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(cachedUser?.role === "admin");
 
   const authRefreshInFlight = useRef(false);
@@ -134,6 +134,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("user");
     localStorage.removeItem("permissions");
     localStorage.removeItem("currentStoreId");
+    emitStoreIdUpdated();
     setUser(null);
     setPermissions({});
     setIsAdmin(false);
@@ -212,6 +213,9 @@ export const AuthProvider = ({ children }) => {
         try {
           if (Array.isArray(userData?.stores)) {
             syncCurrentStoreId(userData.stores);
+          } else {
+            const storesResponse = await api.get("/users/me/stores");
+            syncCurrentStoreId(storesResponse?.data);
           }
         } catch (storesError) {
           console.error("Failed to sync current store", storesError);

@@ -42,6 +42,7 @@ const STOCK_SORT_FIELDS = new Set([
   "price",
 ]);
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
+const QUERY_RETRYABLE_ERROR_CODES = new Set(["57014"]);
 const PRODUCT_LOOKUP_SELECT = [
   "id",
   "shopify_id",
@@ -82,6 +83,20 @@ const isSchemaCompatibilityError = (error) => {
     text.includes("relation") ||
     text.includes("column")
   );
+};
+
+const isQueryRetryableError = (error) => {
+  if (!error) {
+    return false;
+  }
+
+  if (QUERY_RETRYABLE_ERROR_CODES.has(String(error.code || ""))) {
+    return true;
+  }
+
+  const text =
+    `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+  return text.includes("statement timeout") || text.includes("timeout");
 };
 
 const getRequestedStoreId = (req) => {
@@ -562,7 +577,10 @@ const loadWarehouseInventoryState = async (storeId) => {
   try {
     inventoryRows = await getInventoryRowsForStore(storeId);
   } catch (inventoryError) {
-    if (!isSchemaCompatibilityError(inventoryError)) {
+    if (
+      !isSchemaCompatibilityError(inventoryError) &&
+      !isQueryRetryableError(inventoryError)
+    ) {
       throw inventoryError;
     }
 
@@ -1233,7 +1251,7 @@ router.get("/stock", requirePermission("can_view_warehouse"), async (req, res) =
   } catch (error) {
     console.error("Error fetching warehouse stock:", error);
 
-    if (isSchemaCompatibilityError(error)) {
+    if (isSchemaCompatibilityError(error) || isQueryRetryableError(error)) {
       return res.json(
         buildWarehouseSetupResponse({
           limit: getPagination(req.query).limit,

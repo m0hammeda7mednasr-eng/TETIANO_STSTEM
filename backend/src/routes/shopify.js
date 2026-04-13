@@ -42,6 +42,9 @@ import {
 } from "../helpers/missingOrders.js";
 import { extractOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
 import {
+  applyShippingIssueRecoveryPlan,
+  applyShippingIssueRecoveryPlanToRows,
+  buildShippingIssueRecoveryPlan,
   fetchLatestShippingIssueOperationsByOrderId,
   recoverShippingIssuesFromHistory,
 } from "../helpers/shippingIssueRecovery.js";
@@ -65,6 +68,9 @@ const MISSING_ORDER_NOTIFICATION_TYPES = new Set([
   "order_missing",
   "order_missing_escalated",
 ]);
+const SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE = 1000;
+const SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS = 1000;
+const SHIPPING_ISSUE_OPERATION_BATCH_SIZE = 1000;
 const MAX_EXPORT_ORDER_IDS = 10000;
 const PAID_LIKE_STATUSES = new Set([
   "paid",
@@ -735,25 +741,119 @@ const loadShippingIssueOrdersForRequest = async (req) => {
     accessibleStoreIds,
   });
 
-  const { data: historyRows, error: historyError } = await db
-    .from("sync_operations")
-    .select("entity_id")
-    .eq("operation_type", "order_shipping_issue_update");
+  const loadOrdersFastPath = async () => {
+    let lastError = null;
 
-  if (historyError) {
-    throw historyError;
+    for (const selectedColumns of ORDER_LIST_SELECTS) {
+      const rows = [];
+
+      for (
+        let offset = 0;
+        offset < Math.min(ORDER_LIST_MAX_VISIBLE, SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS);
+        offset += SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE
+      ) {
+        let query = db
+          .from("orders")
+          .select(selectedColumns)
+          .order("updated_at", { ascending: false })
+          .range(
+            offset,
+            Math.min(
+              offset + SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE - 1,
+              Math.min(
+                ORDER_LIST_MAX_VISIBLE,
+                SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS,
+              ) - 1,
+            ),
+          );
+
+        if (requestedStoreId) {
+          query = query.eq("store_id", requestedStoreId);
+        } else if (!isAdmin) {
+          query =
+            accessibleStoreIds.length > 0
+              ? query.in("store_id", accessibleStoreIds)
+              : query.eq("user_id", req.user.id);
+        }
+
+        const { data, error } = await query;
+        if (error) {
+          lastError = error;
+          rows.length = 0;
+          break;
+        }
+
+        const batch = Array.isArray(data) ? data : [];
+        rows.push(...batch);
+
+        if (batch.length < SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE) {
+          return dedupeRowsById(rows);
+        }
+      }
+
+      if (rows.length > 0) {
+        return dedupeRowsById(rows);
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+
+    return [];
+  };
+
+  try {
+    const fastPathRows = await loadOrdersFastPath();
+    const fastPathMatches = dedupeRowsById(
+      fastPathRows.map((order) => buildOrderListItem(order)),
+    ).filter((order) => order?.shipping_issue || order?.shipping_issue_reason);
+
+    if (fastPathMatches.length > 0) {
+      return {
+        rows: fastPathMatches,
+        repairedCount: 0,
+      };
+    }
+  } catch (fastPathError) {
+    if (!isQueryRetryableError(fastPathError)) {
+      throw fastPathError;
+    }
   }
 
-  const candidateOrderIds = Array.from(
-    new Set(
-      (historyRows || [])
-        .map((row) => String(row?.entity_id || "").trim())
-        .filter(Boolean),
-    ),
-  );
+  const latestOperationByOrderId = new Map();
 
-  const latestOperationByOrderId =
-    await fetchLatestShippingIssueOperationsByOrderId(db, candidateOrderIds);
+  for (
+    let offset = 0;
+    ;
+    offset += SHIPPING_ISSUE_OPERATION_BATCH_SIZE
+  ) {
+    const { data, error } = await db
+      .from("sync_operations")
+      .select("entity_id, created_at, request_data")
+      .eq("operation_type", "order_shipping_issue_update")
+      .order("created_at", { ascending: false })
+      .range(offset, offset + SHIPPING_ISSUE_OPERATION_BATCH_SIZE - 1);
+
+    if (error) {
+      throw error;
+    }
+
+    const batch = Array.isArray(data) ? data : [];
+    for (const row of batch) {
+      const entityId = String(row?.entity_id || "").trim();
+      if (!entityId || latestOperationByOrderId.has(entityId)) {
+        continue;
+      }
+
+      latestOperationByOrderId.set(entityId, row);
+    }
+
+    if (batch.length < SHIPPING_ISSUE_OPERATION_BATCH_SIZE) {
+      break;
+    }
+  }
+
   const activeHistoryOrderIds = Array.from(latestOperationByOrderId.entries())
     .filter(([, operation]) => Boolean(operation?.request_data?.new_shipping_issue))
     .map(([orderId]) => orderId);
@@ -765,15 +865,18 @@ const loadShippingIssueOrdersForRequest = async (req) => {
     orderIds: activeHistoryOrderIds,
   });
 
-  const recoveryResult = await recoverShippingIssuesFromHistory({
-    supabaseClient: db,
-    orders: scopedOrders,
-    persist: true,
-  });
+  const recoveryPlan = buildShippingIssueRecoveryPlan(
+    scopedOrders,
+    latestOperationByOrderId,
+  );
+
+  if (recoveryPlan.length > 0) {
+    await applyShippingIssueRecoveryPlan(db, recoveryPlan);
+  }
 
   return {
-    rows: recoveryResult.orders || [],
-    repairedCount: recoveryResult.repairedCount || 0,
+    rows: applyShippingIssueRecoveryPlanToRows(scopedOrders, recoveryPlan),
+    repairedCount: recoveryPlan.length,
   };
 };
 

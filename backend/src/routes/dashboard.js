@@ -41,9 +41,10 @@ const PAID_LIKE_STATUSES = new Set([
 const REFUNDED_STATUSES = new Set(["refunded", "partially_refunded"]);
 const PENDING_STATUSES = new Set(["pending", "authorized"]);
 const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
-const DASHBOARD_BATCH_SIZE = 250;
+const DASHBOARD_BATCH_SIZE = 1000;
 const DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
 const DASHBOARD_ORDER_VISIBLE_LIMIT = 4500;
+const DASHBOARD_STATS_ORDER_SCAN_LIMIT = 500;
 const LOW_STOCK_THRESHOLD = 10;
 const LOW_STOCK_NOTIFICATION_TYPE = "low_stock";
 const LOW_STOCK_NOTIFICATION_LOOKBACK_MS = 24 * 60 * 60 * 1000;
@@ -2452,6 +2453,85 @@ const getRequestedStoreId = (req) => {
   return normalized;
 };
 
+const discoverSingleDashboardStoreId = async () => {
+  const discoveredStoreIds = new Set();
+  const rememberStoreId = (value) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return;
+    }
+
+    discoveredStoreIds.add(normalized);
+  };
+
+  const strategies = [
+    async () => {
+      const { data, error } = await supabase
+        .from("stores")
+        .select("id")
+        .limit(2);
+      if (error) {
+        throw error;
+      }
+      return data || [];
+    },
+    async () => {
+      const { data, error } = await supabase
+        .from("shopify_tokens")
+        .select("store_id")
+        .not("store_id", "is", null)
+        .limit(2);
+      if (error) {
+        throw error;
+      }
+      return data || [];
+    },
+  ];
+
+  for (const strategy of strategies) {
+    try {
+      const rows = await strategy();
+      for (const row of rows) {
+        rememberStoreId(row?.id || row?.store_id);
+        if (discoveredStoreIds.size > 1) {
+          return null;
+        }
+      }
+    } catch (error) {
+      if (!isSchemaCompatibilityError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  return discoveredStoreIds.size === 1
+    ? Array.from(discoveredStoreIds)[0]
+    : null;
+};
+
+const resolveDashboardScopedStoreId = async ({
+  req,
+  isAdmin = false,
+  accessibleStoreIds = [],
+} = {}) => {
+  const requestedStoreId = getRequestedStoreId(req);
+  if (requestedStoreId) {
+    if (isAdmin) {
+      return requestedStoreId;
+    }
+
+    return accessibleStoreIds.includes(requestedStoreId)
+      ? requestedStoreId
+      : null;
+  }
+
+  if (!isAdmin) {
+    return null;
+  }
+
+  return await discoverSingleDashboardStoreId();
+};
+
 const applyStoreFilter = (rows, storeId) => {
   if (!storeId) return rows;
 
@@ -2472,8 +2552,15 @@ const applyStoreFilter = (rows, storeId) => {
 };
 
 const getScopedRows = async (req, entityModel) => {
-  const requestedStoreId = getRequestedStoreId(req);
   const isAdmin = req.user?.role === "admin";
+  const accessibleStoreIds = isAdmin
+    ? []
+    : await getAccessibleStoreIds(req.user.id);
+  const requestedStoreId = await resolveDashboardScopedStoreId({
+    req,
+    isAdmin,
+    accessibleStoreIds,
+  });
 
   let sourceResult;
 
@@ -2497,6 +2584,7 @@ const getScopedRowsBatched = async (
     orderField = "created_at",
     allowUnorderedFallback = false,
     scopeFilters = null,
+    maxRows = null,
   } = {},
 ) => {
   const tableName =
@@ -2517,6 +2605,11 @@ const getScopedRowsBatched = async (
   const accessibleStoreIds = isAdmin
     ? []
     : await getAccessibleStoreIds(req.user.id);
+  const scopedStoreId = await resolveDashboardScopedStoreId({
+    req,
+    isAdmin,
+    accessibleStoreIds,
+  });
   const rows = [];
 
   const loadBatch = async (
@@ -2524,6 +2617,7 @@ const getScopedRowsBatched = async (
     currentOrderField,
     offset,
     useLegacyUserScope,
+    batchSize,
   ) => {
     const profiler = getRequestProfiler();
     let query = supabase.from(tableName).select(selectedColumns);
@@ -2532,9 +2626,11 @@ const getScopedRowsBatched = async (
       query = query.order(currentOrderField, { ascending: false });
     }
 
-    query = query.range(offset, offset + DASHBOARD_BATCH_SIZE - 1);
+    query = query.range(offset, offset + batchSize - 1);
 
-    if (!isAdmin) {
+    if (scopedStoreId) {
+      query = query.eq("store_id", scopedStoreId);
+    } else if (!isAdmin) {
       if (!useLegacyUserScope && accessibleStoreIds.length > 0) {
         query = query.in("store_id", accessibleStoreIds);
       } else {
@@ -2588,6 +2684,9 @@ const getScopedRowsBatched = async (
             currentOrderField,
             offset,
             useLegacyUserScope,
+            Number.isFinite(maxRows) && maxRows > 0
+              ? Math.max(1, Math.min(DASHBOARD_BATCH_SIZE, maxRows - offset))
+              : DASHBOARD_BATCH_SIZE,
           );
 
           if (
@@ -2603,8 +2702,15 @@ const getScopedRowsBatched = async (
 
           rows.push(...batch);
 
+          if (Number.isFinite(maxRows) && maxRows > 0 && rows.length >= maxRows) {
+            return applyStoreFilter(
+              dedupeRowsById(rows.slice(0, maxRows)),
+              scopedStoreId,
+            );
+          }
+
           if (batch.length < DASHBOARD_BATCH_SIZE) {
-            return applyStoreFilter(dedupeRowsById(rows), requestedStoreId);
+            return applyStoreFilter(dedupeRowsById(rows), scopedStoreId);
           }
 
           offset += batch.length;
@@ -2628,7 +2734,7 @@ const getScopedRowsBatched = async (
     throw lastError;
   }
 
-  return applyStoreFilter(dedupeRowsById(rows), requestedStoreId);
+  return applyStoreFilter(dedupeRowsById(rows), scopedStoreId);
 };
 
 const getSingleScopedProduct = async (req, productId, selectCandidates = []) => {
@@ -2717,7 +2823,7 @@ router.get("/stats", authenticateToken, async (req, res) => {
   try {
     profiler.setMeta("dashboard.stats.cache", "miss");
     const hasScopedOrderFilters = hasActiveOrderScopeFilters(req.query || {});
-    const [products, orders, customers] = await Promise.all([
+    const [productsResult, ordersResult, customersResult] = await Promise.allSettled([
       getScopedRowsBatched(req, Product, {
         selects: DASHBOARD_PRODUCT_COUNT_SELECTS,
         allowUnorderedFallback: true,
@@ -2728,12 +2834,32 @@ router.get("/stats", authenticateToken, async (req, res) => {
           : DASHBOARD_ORDER_STATS_SELECTS,
         allowUnorderedFallback: true,
         scopeFilters: req.query || {},
+        maxRows: DASHBOARD_STATS_ORDER_SCAN_LIMIT,
       }),
       getScopedRowsBatched(req, Customer, {
         select: DASHBOARD_CUSTOMER_COUNT_SELECT,
         allowUnorderedFallback: true,
       }),
     ]);
+    const products =
+      productsResult.status === "fulfilled" ? productsResult.value : [];
+    const orders = ordersResult.status === "fulfilled" ? ordersResult.value : [];
+    const customers =
+      customersResult.status === "fulfilled" ? customersResult.value : [];
+    const dataGaps = [];
+
+    if (productsResult.status === "rejected") {
+      console.error("Dashboard products stats query failed:", productsResult.reason);
+      dataGaps.push("products");
+    }
+    if (ordersResult.status === "rejected") {
+      console.error("Dashboard orders stats query failed:", ordersResult.reason);
+      dataGaps.push("orders");
+    }
+    if (customersResult.status === "rejected") {
+      console.error("Dashboard customers stats query failed:", customersResult.reason);
+      dataGaps.push("customers");
+    }
 
     const payload = measureSync(
       "dashboard.stats.compute",
@@ -2746,7 +2872,13 @@ router.get("/stats", authenticateToken, async (req, res) => {
           ? buildFilteredOrderEntitySummary(filteredOrders)
           : {
               totalProducts: products.length,
-              totalCustomers: customers.length,
+              totalCustomers:
+                customers.length ||
+                new Set(
+                  filteredOrders
+                    .map((order) => getOrderCustomerKey(order))
+                    .filter(Boolean),
+                ).size,
             };
 
         return {
@@ -2757,12 +2889,14 @@ router.get("/stats", authenticateToken, async (req, res) => {
           total_products: filteredEntitySummary.totalProducts,
           total_customers: filteredEntitySummary.totalCustomers,
           low_stock_products: lowStockProductsCount,
-          orders_window_limit: DASHBOARD_ORDER_VISIBLE_LIMIT,
+          orders_window_limit: DASHBOARD_STATS_ORDER_SCAN_LIMIT,
           paid_orders_count: saleOrders.length,
           avg_order_value:
             saleOrders.length > 0
               ? parseFloat((totalSales / saleOrders.length).toFixed(2))
               : 0,
+          degraded: dataGaps.length > 0,
+          data_gaps: dataGaps,
         };
       },
       {

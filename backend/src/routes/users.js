@@ -32,8 +32,14 @@ const USER_PROFILE_QUERY_TIMEOUT_MS = Math.max(
   500,
   Number(process.env.USER_PROFILE_QUERY_TIMEOUT_MS) || 2500,
 );
+const ADMIN_VISIBLE_STORES_CACHE_TTL_MS = 60 * 1000;
+const ADMIN_VISIBLE_STORES_STALE_TTL_MS = 5 * 60 * 1000;
 const unsupportedPermissionColumns = new Set();
 const userProfileCache = new Map();
+const adminVisibleStoresCache = {
+  cachedAt: 0,
+  payload: [],
+};
 
 const getUserProfileCacheKey = (userId, includeStores) =>
   `${String(userId || "").trim()}::stores:${includeStores ? "1" : "0"}`;
@@ -59,6 +65,34 @@ const rememberUserProfileCacheEntry = (cacheKey, payload) => {
     cachedAt: Date.now(),
     payload,
   });
+};
+
+const getCachedAdminVisibleStores = ({ allowStale = false } = {}) => {
+  const age = Date.now() - Number(adminVisibleStoresCache.cachedAt || 0);
+  if (age <= ADMIN_VISIBLE_STORES_CACHE_TTL_MS) {
+    return Array.isArray(adminVisibleStoresCache.payload)
+      ? [...adminVisibleStoresCache.payload]
+      : [];
+  }
+
+  if (allowStale && age <= ADMIN_VISIBLE_STORES_STALE_TTL_MS) {
+    return Array.isArray(adminVisibleStoresCache.payload)
+      ? [...adminVisibleStoresCache.payload]
+      : [];
+  }
+
+  return null;
+};
+
+const rememberAdminVisibleStores = (stores = []) => {
+  adminVisibleStoresCache.cachedAt = Date.now();
+  adminVisibleStoresCache.payload = Array.isArray(stores) ? [...stores] : [];
+};
+
+export const clearUsersRouteCaches = () => {
+  userProfileCache.clear();
+  adminVisibleStoresCache.cachedAt = 0;
+  adminVisibleStoresCache.payload = [];
 };
 
 const invalidateUserProfileCache = (userId) => {
@@ -250,27 +284,12 @@ const listAccessibleStoresForUser = async (userId, normalizedRole = "user") => {
 };
 
 export const getAdminVisibleStores = async () => {
-  const discoveredStores = new Map();
-
-  try {
-    const { data, error } = await runUserProfileQuery(
-      supabase
-        .from("stores")
-        .select("id, name")
-        .order("name", { ascending: true }),
-      "ADMIN_STORES_QUERY_TIMEOUT",
-    );
-
-    if (error) {
-      console.error("Error fetching admin stores:", error);
-    } else {
-      (data || []).forEach((store) =>
-        rememberDiscoveredStore(discoveredStores, store?.id, store?.name),
-      );
-    }
-  } catch (error) {
-    console.error("Admin stores lookup failed:", error);
+  const cachedStores = getCachedAdminVisibleStores();
+  if (cachedStores) {
+    return cachedStores;
   }
+
+  const discoveredStores = new Map();
 
   try {
     const { data, error } = await runUserProfileQuery(
@@ -278,8 +297,7 @@ export const getAdminVisibleStores = async () => {
         .from("shopify_tokens")
         .select("store_id, shop")
         .not("store_id", "is", null)
-        .order("updated_at", { ascending: false })
-        .limit(200),
+        .limit(50),
       "ADMIN_TOKEN_STORES_QUERY_TIMEOUT",
     );
 
@@ -298,50 +316,88 @@ export const getAdminVisibleStores = async () => {
     console.error("Admin token-based store lookup failed:", error);
   }
 
-  try {
-    const inferredResults = await Promise.all([
-      runUserProfileQuery(
-        supabase
-          .from("products")
-          .select("store_id")
-          .not("store_id", "is", null)
-          .limit(200),
-        "ADMIN_PRODUCT_STORES_QUERY_TIMEOUT",
-      ),
-      runUserProfileQuery(
-        supabase
-          .from("orders")
-          .select("store_id")
-          .not("store_id", "is", null)
-          .limit(200),
-        "ADMIN_ORDER_STORES_QUERY_TIMEOUT",
-      ),
-      runUserProfileQuery(
-        supabase
-          .from("customers")
-          .select("store_id")
-          .not("store_id", "is", null)
-          .limit(200),
-        "ADMIN_CUSTOMER_STORES_QUERY_TIMEOUT",
-      ),
-    ]);
-
-    inferredResults.forEach((result) => {
-      if (result?.error) {
-        throw result.error;
-      }
-
-      (result?.data || []).forEach((row) =>
-        rememberDiscoveredStore(discoveredStores, row?.store_id),
-      );
-    });
-  } catch (error) {
-    console.error("Admin data-based store inference failed:", error);
+  if (discoveredStores.size > 0) {
+    const resolvedStores = Array.from(discoveredStores.values()).sort(
+      (left, right) => left.name.localeCompare(right.name),
+    );
+    rememberAdminVisibleStores(resolvedStores);
+    return resolvedStores;
   }
 
-  return Array.from(discoveredStores.values()).sort((left, right) =>
+  try {
+    const { data, error } = await runUserProfileQuery(
+      supabase
+        .from("stores")
+        .select("id, name")
+        .order("name", { ascending: true })
+        .limit(50),
+      "ADMIN_STORES_QUERY_TIMEOUT",
+    );
+
+    if (error) {
+      console.error("Error fetching admin stores:", error);
+    } else {
+      (data || []).forEach((store) =>
+        rememberDiscoveredStore(discoveredStores, store?.id, store?.name),
+      );
+    }
+  } catch (error) {
+    console.error("Admin stores lookup failed:", error);
+  }
+
+  if (discoveredStores.size === 0) {
+    try {
+      const inferredResults = await Promise.all([
+        runUserProfileQuery(
+          supabase
+            .from("products")
+            .select("store_id")
+            .not("store_id", "is", null)
+            .limit(200),
+          "ADMIN_PRODUCT_STORES_QUERY_TIMEOUT",
+        ),
+        runUserProfileQuery(
+          supabase
+            .from("orders")
+            .select("store_id")
+            .not("store_id", "is", null)
+            .limit(200),
+          "ADMIN_ORDER_STORES_QUERY_TIMEOUT",
+        ),
+        runUserProfileQuery(
+          supabase
+            .from("customers")
+            .select("store_id")
+            .not("store_id", "is", null)
+            .limit(200),
+          "ADMIN_CUSTOMER_STORES_QUERY_TIMEOUT",
+        ),
+      ]);
+
+      inferredResults.forEach((result) => {
+        if (result?.error) {
+          throw result.error;
+        }
+
+        (result?.data || []).forEach((row) =>
+          rememberDiscoveredStore(discoveredStores, row?.store_id),
+        );
+      });
+    } catch (error) {
+      console.error("Admin data-based store inference failed:", error);
+    }
+  }
+
+  const resolvedStores = Array.from(discoveredStores.values()).sort((left, right) =>
     left.name.localeCompare(right.name),
   );
+  if (resolvedStores.length > 0) {
+    rememberAdminVisibleStores(resolvedStores);
+    return resolvedStores;
+  }
+
+  const staleStores = getCachedAdminVisibleStores({ allowStale: true });
+  return staleStores || [];
 };
 
 // Get all users (Admin only)

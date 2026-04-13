@@ -96,7 +96,7 @@ jest.unstable_mockModule("../models/index.js", () => ({
   getAccessibleStoreIds: jest.fn(async () => []),
 }));
 
-const { getAdminVisibleStores } = await import("./users.js");
+const { clearUsersRouteCaches, getAdminVisibleStores } = await import("./users.js");
 
 describe("routes/users getAdminVisibleStores", () => {
   beforeEach(() => {
@@ -108,6 +108,7 @@ describe("routes/users getAdminVisibleStores", () => {
       customers: [],
     };
     supabaseMock.from.mockClear();
+    clearUsersRouteCaches();
   });
 
   it("falls back to Shopify token store mappings when the stores table is empty", async () => {

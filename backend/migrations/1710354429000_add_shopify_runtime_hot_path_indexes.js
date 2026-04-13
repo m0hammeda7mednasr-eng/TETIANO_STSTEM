@@ -143,6 +143,18 @@ const guardedIndexes = [
       "ON public.sync_operations (entity_id, operation_type, created_at DESC)",
   },
   {
+    tableName: "shopify_tokens",
+    indexName: "idx_shopify_tokens_shop_updated_at_hot_path",
+    requiredColumns: ["shop", "updated_at"],
+    definition: "ON public.shopify_tokens (shop, updated_at DESC)",
+  },
+  {
+    tableName: "shopify_credentials",
+    indexName: "idx_shopify_credentials_user_id",
+    requiredColumns: ["user_id"],
+    definition: "ON public.shopify_credentials (user_id)",
+  },
+  {
     tableName: "stores",
     indexName: "idx_stores_name",
     requiredColumns: ["name"],

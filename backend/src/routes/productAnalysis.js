@@ -27,6 +27,7 @@ const RETURNED_ORDER_STATUSES = new Set(["restocked"]);
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CACHE_TTL_MS = 3 * 60 * 1000;
+const SCOPED_ROWS_BATCH_SIZE = 1000;
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 const PRODUCTS_SELECT = [
   "id",
@@ -799,33 +800,98 @@ const rememberCacheEntry = (key, payload) => {
   });
 };
 
+const parseScopeDateBoundary = (value, endOfDay = false) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  if (endOfDay) {
+    date.setHours(23, 59, 59, 999);
+  } else {
+    date.setHours(0, 0, 0, 0);
+  }
+
+  return date.toISOString();
+};
+
 const loadScopedRowsWithFallback = async ({
   tableName,
   selectCandidates,
   storeId,
   orderBy,
   ascending,
+  maxRows = null,
+  applyQuery = null,
 }) => {
   let lastError = null;
 
   for (const selectColumns of selectCandidates) {
-    let query = db
-      .from(tableName)
-      .select(selectColumns)
-      .eq("store_id", storeId);
+    const rows = [];
 
-    if (orderBy) {
-      query = query.order(orderBy, { ascending });
-    }
+    for (let offset = 0; ; offset += SCOPED_ROWS_BATCH_SIZE) {
+      const remainingRows =
+        Number.isFinite(maxRows) && maxRows > 0
+          ? Math.max(0, maxRows - rows.length)
+          : SCOPED_ROWS_BATCH_SIZE;
 
-    const { data, error } = await query;
-    if (!error) {
-      return data || [];
-    }
+      if (remainingRows === 0) {
+        return rows;
+      }
 
-    lastError = error;
-    if (!isSchemaCompatibilityError(error)) {
-      throw error;
+      const batchSize = Math.max(
+        1,
+        Math.min(SCOPED_ROWS_BATCH_SIZE, remainingRows),
+      );
+
+      let query = db
+        .from(tableName)
+        .select(selectColumns)
+        .eq("store_id", storeId);
+
+      if (typeof applyQuery === "function") {
+        query = applyQuery(query) || query;
+      }
+
+      if (orderBy) {
+        query = query.order(orderBy, { ascending });
+      }
+
+      const supportsRange = typeof query?.range === "function";
+      if (supportsRange) {
+        query = query.range(offset, offset + batchSize - 1);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        lastError = error;
+        if (!isSchemaCompatibilityError(error)) {
+          throw error;
+        }
+        break;
+      }
+
+      const batch = data || [];
+      rows.push(...batch);
+
+      if (!supportsRange) {
+        return Number.isFinite(maxRows) && maxRows > 0
+          ? rows.slice(0, maxRows)
+          : rows;
+      }
+
+      if (batch.length < batchSize) {
+        return rows;
+      }
+
+      if (Number.isFinite(maxRows) && maxRows > 0 && rows.length >= maxRows) {
+        return rows.slice(0, maxRows);
+      }
     }
   }
 
@@ -845,14 +911,37 @@ const loadScopedProducts = async (storeId) =>
     ascending: true,
   });
 
-const loadScopedOrders = async (storeId) =>
-  loadScopedRowsWithFallback({
+const loadScopedOrders = async (storeId, rawOrderFilters = {}) => {
+  const normalizedOrderFilters = normalizeOrderScopeFilters(rawOrderFilters);
+  const maxRows = Math.max(
+    0,
+    parseInt(normalizedOrderFilters.ordersLimit, 10) || 0,
+  );
+  const fromIso = parseScopeDateBoundary(normalizedOrderFilters.dateFrom, false);
+  const toIso = parseScopeDateBoundary(normalizedOrderFilters.dateTo, true);
+
+  return loadScopedRowsWithFallback({
     tableName: "orders",
     selectCandidates: ORDERS_SELECTS,
     storeId,
     orderBy: "created_at",
     ascending: false,
+    maxRows: maxRows > 0 ? maxRows : null,
+    applyQuery: (query) => {
+      let scopedQuery = query;
+
+      if (fromIso) {
+        scopedQuery = scopedQuery.gte("created_at", fromIso);
+      }
+
+      if (toIso) {
+        scopedQuery = scopedQuery.lte("created_at", toIso);
+      }
+
+      return scopedQuery;
+    },
   });
+};
 
 const loadScopedTasks = async (req, storeId) => {
   let query = db.from("tasks").select(TASKS_SELECT).order("updated_at", {
@@ -995,12 +1084,12 @@ const buildOrderLineEntries = (order, refundDetails, fulfillmentDetails) => {
 };
 
 export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) => {
+  const normalizedOrderFilters = normalizeOrderScopeFilters(rawOrderFilters);
   const [products, orders] = await Promise.all([
     loadScopedProducts(storeId),
-    loadScopedOrders(storeId),
+    loadScopedOrders(storeId, normalizedOrderFilters),
   ]);
   const scopedOrderFiltersActive = hasActiveOrderScopeFilters(rawOrderFilters);
-  const normalizedOrderFilters = normalizeOrderScopeFilters(rawOrderFilters);
   const ordersInScope = filterOrdersByScope(orders, {
     ...normalizedOrderFilters,
     ordersLimit: "",

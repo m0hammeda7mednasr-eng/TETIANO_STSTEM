@@ -35,7 +35,7 @@ const EMPTY_SUMMARY = {
 
 const PRODUCT_ANALYSIS_DEFAULT_SCOPE_FILTERS = {
   ...INITIAL_ORDER_SCOPE_FILTERS,
-  ordersLimit: "",
+  ordersLimit: "1000",
 };
 
 const toNumber = (value) => {

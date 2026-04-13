@@ -52,7 +52,7 @@ import {
   toNumber,
 } from "../utils/productsView";
 
-const PRODUCTS_PAGE_SIZE = 100;
+const PRODUCTS_PAGE_SIZE = 200;
 const PRODUCTS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const PRODUCTS_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
 

@@ -42,6 +42,7 @@ const REFUNDED_STATUSES = new Set(["refunded", "partially_refunded"]);
 const PENDING_STATUSES = new Set(["pending", "authorized"]);
 const CANCELLED_STATUSES = new Set(["voided", "cancelled"]);
 const DASHBOARD_BATCH_SIZE = 1000;
+const DASHBOARD_LARGE_BATCH_SIZE = 5000;
 const DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
 const DASHBOARD_ORDER_VISIBLE_LIMIT = 4500;
 const DASHBOARD_STATS_ORDER_SCAN_LIMIT = 500;
@@ -2185,6 +2186,7 @@ const buildGrowthOrderSummary = (
 const buildGrowthHealthSnapshot = ({
   products = [],
   customers = [],
+  trackedCustomersCount = null,
   productMetrics = [],
   replenishment = {},
   retention = {},
@@ -2195,6 +2197,7 @@ const buildGrowthHealthSnapshot = ({
 }) => {
   const trackedProducts = productMetrics.length || dedupeRowsById(products).length;
   const trackedCustomers = Math.max(
+    toNumber(trackedCustomersCount),
     dedupeRowsById(customers).length,
     toNumber(retention?.summary?.tracked_customers),
   );
@@ -2575,6 +2578,69 @@ const getScopedRows = async (req, entityModel) => {
   return applyStoreFilter(sourceResult.data || [], requestedStoreId);
 };
 
+const getScopedEntityCount = async (
+  req,
+  tableName,
+  { applyQuery = null } = {},
+) => {
+  const isAdmin = req.user?.role === "admin";
+  const accessibleStoreIds = isAdmin
+    ? []
+    : await getAccessibleStoreIds(req.user.id);
+  const scopedStoreId = await resolveDashboardScopedStoreId({
+    req,
+    isAdmin,
+    accessibleStoreIds,
+  });
+  let useLegacyUserScope = false;
+
+  while (true) {
+    let query = supabase
+      .from(tableName)
+      .select("id", { count: "exact", head: true });
+
+    if (scopedStoreId) {
+      query = query.eq("store_id", scopedStoreId);
+    } else if (!isAdmin) {
+      if (!useLegacyUserScope && accessibleStoreIds.length > 0) {
+        query = query.in("store_id", accessibleStoreIds);
+      } else {
+        query = query.eq("user_id", req.user.id);
+      }
+    }
+
+    if (typeof applyQuery === "function") {
+      query = applyQuery(query) || query;
+    }
+
+    const { count, error } = await measureAsync(
+      `dashboard.${tableName}.count`,
+      () => query,
+      {
+        category: "db",
+        serverTimingKey: "db",
+        serverTimingDescription: "Database queries",
+      },
+    );
+
+    if (!error) {
+      return Number.isFinite(Number(count)) ? Number(count) : 0;
+    }
+
+    if (
+      !isAdmin &&
+      accessibleStoreIds.length > 0 &&
+      !scopedStoreId &&
+      !useLegacyUserScope
+    ) {
+      useLegacyUserScope = true;
+      continue;
+    }
+
+    throw error;
+  }
+};
+
 const getScopedRowsBatched = async (
   req,
   entityModel,
@@ -2585,6 +2651,8 @@ const getScopedRowsBatched = async (
     allowUnorderedFallback = false,
     scopeFilters = null,
     maxRows = null,
+    applyQuery = null,
+    batchSize = DASHBOARD_BATCH_SIZE,
   } = {},
 ) => {
   const tableName =
@@ -2611,6 +2679,9 @@ const getScopedRowsBatched = async (
     accessibleStoreIds,
   });
   const rows = [];
+  const resolvedBatchSize = Number.isFinite(Number(batchSize))
+    ? Math.max(1, Math.floor(Number(batchSize)))
+    : DASHBOARD_BATCH_SIZE;
 
   const loadBatch = async (
     selectedColumns,
@@ -2626,8 +2697,6 @@ const getScopedRowsBatched = async (
       query = query.order(currentOrderField, { ascending: false });
     }
 
-    query = query.range(offset, offset + batchSize - 1);
-
     if (scopedStoreId) {
       query = query.eq("store_id", scopedStoreId);
     } else if (!isAdmin) {
@@ -2640,6 +2709,15 @@ const getScopedRowsBatched = async (
 
     if (tableName === "orders") {
       query = applyOrderDateRangeFilters(query, scopeFilters);
+    }
+
+    if (typeof applyQuery === "function") {
+      query = applyQuery(query) || query;
+    }
+
+    const supportsRange = typeof query?.range === "function";
+    if (supportsRange) {
+      query = query.range(offset, offset + batchSize - 1);
     }
 
     const { data, error } = await measureAsync(
@@ -2658,7 +2736,10 @@ const getScopedRowsBatched = async (
     profiler.incrementCounter(`${tableName}_batches`, 1);
     profiler.incrementCounter(`${tableName}_rows`, Array.isArray(data) ? data.length : 0);
 
-    return data || [];
+    return {
+      rows: data || [],
+      supportsRange,
+    };
   };
 
   const selectCandidates = [
@@ -2679,28 +2760,30 @@ const getScopedRowsBatched = async (
 
       try {
         while (true) {
+          const currentBatchSize =
+            Number.isFinite(maxRows) && maxRows > 0
+              ? Math.max(1, Math.min(resolvedBatchSize, maxRows - offset))
+              : resolvedBatchSize;
           const batch = await loadBatch(
             selectedColumns,
             currentOrderField,
             offset,
             useLegacyUserScope,
-            Number.isFinite(maxRows) && maxRows > 0
-              ? Math.max(1, Math.min(DASHBOARD_BATCH_SIZE, maxRows - offset))
-              : DASHBOARD_BATCH_SIZE,
+            currentBatchSize,
           );
 
           if (
             !isAdmin &&
             accessibleStoreIds.length > 0 &&
             offset === 0 &&
-            batch.length === 0 &&
+            batch.rows.length === 0 &&
             !useLegacyUserScope
           ) {
             useLegacyUserScope = true;
             continue;
           }
 
-          rows.push(...batch);
+          rows.push(...batch.rows);
 
           if (Number.isFinite(maxRows) && maxRows > 0 && rows.length >= maxRows) {
             return applyStoreFilter(
@@ -2709,11 +2792,11 @@ const getScopedRowsBatched = async (
             );
           }
 
-          if (batch.length < DASHBOARD_BATCH_SIZE) {
+          if (!batch.supportsRange || batch.rows.length < currentBatchSize) {
             return applyStoreFilter(dedupeRowsById(rows), scopedStoreId);
           }
 
-          offset += batch.length;
+          offset += batch.rows.length;
         }
       } catch (error) {
         lastError = error;
@@ -2823,10 +2906,21 @@ router.get("/stats", authenticateToken, async (req, res) => {
   try {
     profiler.setMeta("dashboard.stats.cache", "miss");
     const hasScopedOrderFilters = hasActiveOrderScopeFilters(req.query || {});
-    const [productsResult, ordersResult, customersResult] = await Promise.allSettled([
+    const [
+      lowStockProductsResult,
+      ordersResult,
+      totalProductsResult,
+      totalCustomersResult,
+    ] = await Promise.allSettled([
       getScopedRowsBatched(req, Product, {
         selects: DASHBOARD_PRODUCT_COUNT_SELECTS,
         allowUnorderedFallback: true,
+        orderField: "updated_at",
+        applyQuery: (query) =>
+          query.gt("inventory_quantity", 0).lt(
+            "inventory_quantity",
+            LOW_STOCK_THRESHOLD,
+          ),
       }),
       getScopedRowsBatched(req, Order, {
         selects: hasScopedOrderFilters
@@ -2836,28 +2930,51 @@ router.get("/stats", authenticateToken, async (req, res) => {
         scopeFilters: req.query || {},
         maxRows: DASHBOARD_STATS_ORDER_SCAN_LIMIT,
       }),
-      getScopedRowsBatched(req, Customer, {
-        select: DASHBOARD_CUSTOMER_COUNT_SELECT,
-        allowUnorderedFallback: true,
-      }),
+      hasScopedOrderFilters
+        ? Promise.resolve(null)
+        : getScopedEntityCount(req, "products"),
+      hasScopedOrderFilters
+        ? Promise.resolve(null)
+        : getScopedEntityCount(req, "customers"),
     ]);
-    const products =
-      productsResult.status === "fulfilled" ? productsResult.value : [];
+    const lowStockProducts =
+      lowStockProductsResult.status === "fulfilled"
+        ? lowStockProductsResult.value
+        : [];
     const orders = ordersResult.status === "fulfilled" ? ordersResult.value : [];
-    const customers =
-      customersResult.status === "fulfilled" ? customersResult.value : [];
+    const totalProducts =
+      totalProductsResult.status === "fulfilled"
+        ? Number(totalProductsResult.value || 0)
+        : null;
+    const totalCustomers =
+      totalCustomersResult.status === "fulfilled"
+        ? Number(totalCustomersResult.value || 0)
+        : null;
     const dataGaps = [];
 
-    if (productsResult.status === "rejected") {
-      console.error("Dashboard products stats query failed:", productsResult.reason);
-      dataGaps.push("products");
+    if (lowStockProductsResult.status === "rejected") {
+      console.error(
+        "Dashboard low-stock stats query failed:",
+        lowStockProductsResult.reason,
+      );
+      dataGaps.push("low_stock_products");
     }
     if (ordersResult.status === "rejected") {
       console.error("Dashboard orders stats query failed:", ordersResult.reason);
       dataGaps.push("orders");
     }
-    if (customersResult.status === "rejected") {
-      console.error("Dashboard customers stats query failed:", customersResult.reason);
+    if (totalProductsResult.status === "rejected") {
+      console.error(
+        "Dashboard products count query failed:",
+        totalProductsResult.reason,
+      );
+      dataGaps.push("products");
+    }
+    if (totalCustomersResult.status === "rejected") {
+      console.error(
+        "Dashboard customers count query failed:",
+        totalCustomersResult.reason,
+      );
       dataGaps.push("customers");
     }
 
@@ -2867,18 +2984,20 @@ router.get("/stats", authenticateToken, async (req, res) => {
         const filteredOrders = filterOrdersByScope(orders, req.query || {});
         const { saleOrders, totalOrderValue, totalSales, pendingOrderValue } =
           calculateDashboardOrderStats(filteredOrders);
-        const lowStockProductsCount = countLowStockProducts(products);
+        const lowStockProductsCount = countLowStockProducts(lowStockProducts);
         const filteredEntitySummary = hasScopedOrderFilters
           ? buildFilteredOrderEntitySummary(filteredOrders)
           : {
-              totalProducts: products.length,
-              totalCustomers:
-                customers.length ||
-                new Set(
-                  filteredOrders
-                    .map((order) => getOrderCustomerKey(order))
-                    .filter(Boolean),
-                ).size,
+              totalProducts: Number.isFinite(totalProducts)
+                ? totalProducts
+                : 0,
+              totalCustomers: Number.isFinite(totalCustomers)
+                ? totalCustomers
+                : new Set(
+                    filteredOrders
+                      .map((order) => getOrderCustomerKey(order))
+                      .filter(Boolean),
+                  ).size,
             };
 
         return {
@@ -2907,7 +3026,7 @@ router.get("/stats", authenticateToken, async (req, res) => {
     );
 
     rememberCacheEntry(dashboardStatsCache, cacheKey, payload);
-    ensureLowStockNotifications(products).catch((notificationError) => {
+    ensureLowStockNotifications(lowStockProducts).catch((notificationError) => {
       console.error(
         "Low-stock notification dispatch failed:",
         notificationError,
@@ -2953,21 +3072,28 @@ router.get(
         date_to: referenceDate.toISOString().slice(0, 10),
       };
 
-      const [products, orders, customers] = await Promise.all([
-        getScopedRowsBatched(req, Product, {
-          selects: GROWTH_CENTER_PRODUCT_SELECTS,
-          allowUnorderedFallback: true,
-        }),
-        getScopedRowsBatched(req, Order, {
-          selects: GROWTH_CENTER_ORDER_SELECTS,
-          allowUnorderedFallback: true,
-          scopeFilters: orderScopeFilters,
-        }),
-        getScopedRowsBatched(req, Customer, {
-          selects: GROWTH_CENTER_CUSTOMER_SELECTS,
-          allowUnorderedFallback: true,
-        }),
-      ]);
+      const [products, orders, recentCustomers, trackedCustomersCount] =
+        await Promise.all([
+          getScopedRowsBatched(req, Product, {
+            selects: GROWTH_CENTER_PRODUCT_SELECTS,
+            allowUnorderedFallback: true,
+            batchSize: DASHBOARD_LARGE_BATCH_SIZE,
+          }),
+          getScopedRowsBatched(req, Order, {
+            selects: GROWTH_CENTER_ORDER_SELECTS,
+            allowUnorderedFallback: true,
+            scopeFilters: orderScopeFilters,
+            batchSize: DASHBOARD_LARGE_BATCH_SIZE,
+          }),
+          getScopedRowsBatched(req, Customer, {
+            selects: GROWTH_CENTER_CUSTOMER_SELECTS,
+            allowUnorderedFallback: true,
+            orderField: "updated_at",
+            maxRows: 1,
+            batchSize: 1,
+          }),
+          getScopedEntityCount(req, "customers"),
+        ]);
 
       const payload = measureSync(
         "dashboard.growth-center.compute",
@@ -2992,15 +3118,19 @@ router.get(
           );
           const freshestActivityAt = getFreshestTimestamp(
             products.map((product) => product?.updated_at),
-            customers.flatMap((customer) => [customer?.updated_at, customer?.created_at]),
+            recentCustomers.flatMap((customer) => [
+              customer?.updated_at,
+              customer?.created_at,
+            ]),
             orders.flatMap((order) => [order?.updated_at, order?.created_at]),
           );
           const health = buildGrowthHealthSnapshot({
-            products,
-            customers,
-            productMetrics,
-            replenishment,
-            retention,
+              products,
+              customers: recentCustomers,
+              trackedCustomersCount,
+              productMetrics,
+              replenishment,
+              retention,
             profitability,
             orderSummary,
             freshestActivityAt,
@@ -3074,6 +3204,7 @@ router.get(
         selects: DASHBOARD_ORDER_ANALYTICS_SELECTS,
         allowUnorderedFallback: true,
         scopeFilters: orderScopeFilters,
+        batchSize: DASHBOARD_LARGE_BATCH_SIZE,
       });
 
       const payload = measureSync(

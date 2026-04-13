@@ -48,9 +48,10 @@ import {
 } from "../utils/shippingIssues";
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
+const ORDERS_PAGE_FETCH_SIZE = 200;
 const ORDER_HISTORY_SEARCH_PAGE_SIZE = 1000;
 const MISSING_ORDERS_FETCH_PAGE_SIZE = 4500;
-const ORDERS_VISIBLE_LIMIT = 4500;
+const ORDERS_VISIBLE_LIMIT = 1000;
 const ORDERS_PER_PAGE = 50;
 const ORDERS_PAGINATION_WINDOW = 5;
 const ORDERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
@@ -773,34 +774,51 @@ export default function Orders() {
       });
 
       try {
-        const [ordersResponse] = await Promise.all([
-          api.get("/shopify/orders", {
-            params: {
-              limit: ORDERS_VISIBLE_LIMIT,
-              offset: 0,
-              sort_by: "created_at",
-              sort_dir: "desc",
-              sync_recent: forceSync ? "force" : "false",
+        void fetchMissingOrderIds();
+
+        const rows = await fetchAllPagesProgressively(
+          ({ limit, offset }) =>
+            api.get("/shopify/orders", {
+              params: {
+                limit,
+                offset,
+                sort_by: "created_at",
+                sort_dir: "desc",
+                sync_recent: forceSync && offset === 0 ? "force" : "false",
+              },
+            }),
+          {
+            limit: ORDERS_PAGE_FETCH_SIZE,
+            onPage: ({ rows: accumulatedRows, hasMore }) => {
+              const visibleRows = accumulatedRows.slice(0, ORDERS_VISIBLE_LIMIT);
+
+              setOrders(visibleRows);
+              setLastUpdatedAt(new Date());
+              setLoadStatus({
+                active: hasMore && visibleRows.length < ORDERS_VISIBLE_LIMIT,
+                message: hasMore && visibleRows.length < ORDERS_VISIBLE_LIMIT
+                  ? `Loaded ${formatNumber(visibleRows.length, { maximumFractionDigits: 0 })} recent orders so far...`
+                  : `Loaded ${formatNumber(visibleRows.length, { maximumFractionDigits: 0 })} recent orders`,
+              });
+
+              return visibleRows.length < ORDERS_VISIBLE_LIMIT;
             },
-          }),
-          fetchMissingOrderIds(),
-        ]);
+          },
+        );
 
-        const rows = Array.isArray(ordersResponse?.data?.data)
-          ? ordersResponse.data.data.slice(0, ORDERS_VISIBLE_LIMIT)
-          : [];
+        const visibleRows = rows.slice(0, ORDERS_VISIBLE_LIMIT);
 
-        setOrders(rows);
+        setOrders(visibleRows);
         setLastUpdatedAt(new Date());
         setLoadStatus({
           active: false,
           message:
-            rows.length > 0
-              ? `Loaded ${formatNumber(rows.length, { maximumFractionDigits: 0 })} recent orders`
+            visibleRows.length > 0
+              ? `Loaded ${formatNumber(visibleRows.length, { maximumFractionDigits: 0 })} recent orders`
               : "No orders found",
         });
         await writeCachedView(cacheKey, {
-          rows: rows.slice(0, ORDERS_VISIBLE_LIMIT),
+          rows: visibleRows,
         });
       } catch (requestError) {
         console.error("Error fetching orders:", requestError);

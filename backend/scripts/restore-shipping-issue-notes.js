@@ -48,8 +48,6 @@ const APPLY_MODE = process.argv.includes("--apply");
 const CHUNK_SIZE = 200;
 
 const normalizeText = (value) => String(value ?? "").trim();
-const hasOwn = (value, key) =>
-  Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
 
 const parseJsonField = (value) => {
   if (!value) return {};
@@ -168,11 +166,6 @@ const buildRestorePlan = (orders, recoverableByOrderId) =>
     }
 
     const nextIssue = {
-      active: currentIssue
-        ? currentIssue?.active !== false
-        : hasOwn(recoverable.issue, "active")
-          ? recoverable.issue?.active !== false
-          : false,
       reason:
         normalizeText(currentIssue?.reason) ||
         normalizeText(recoverable.issue?.reason) ||

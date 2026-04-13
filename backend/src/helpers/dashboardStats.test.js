@@ -1,7 +1,6 @@
 import { describe, expect, it } from "@jest/globals";
 
 import {
-  buildDashboardSummaryPayload,
   calculateDashboardOrderStats,
   getOrderGrossSalesAmount,
   getOrderNetSalesAmount,
@@ -54,40 +53,5 @@ describe("helpers/dashboardStats", () => {
 
     expect(getOrderGrossSalesAmount(refundedOrder)).toBe(180);
     expect(getOrderNetSalesAmount(refundedOrder)).toBe(0);
-  });
-
-  it("builds the dashboard summary payload using the snake_case fields expected by the frontend", () => {
-    const payload = buildDashboardSummaryPayload({
-      orders: [
-        {
-          id: "paid-1",
-          total_price: 120,
-          financial_status: "paid",
-        },
-        {
-          id: "pending-1",
-          total_price: 80,
-          financial_status: "pending",
-        },
-      ],
-      totalOrders: 24,
-      totalProducts: 11,
-      totalCustomers: 7,
-      lowStockProducts: 3,
-      ordersWindowLimit: 1200,
-    });
-
-    expect(payload).toEqual({
-      total_sales: 120,
-      total_order_value: 120,
-      pending_order_value: 80,
-      total_orders: 24,
-      total_products: 11,
-      total_customers: 7,
-      low_stock_products: 3,
-      orders_window_limit: 1200,
-      paid_orders_count: 1,
-      avg_order_value: 120,
-    });
   });
 });

@@ -15,10 +15,6 @@ import {
   isTransientSupabaseError,
   withSupabaseRetry,
 } from "../helpers/supabaseRetry.js";
-import {
-  isSupabaseQueryTimeoutError,
-  runSupabaseQueryWithTimeout,
-} from "../helpers/supabaseQueryTimeout.js";
 import { getAccessibleStoreIds } from "../models/index.js";
 
 const router = express.Router();
@@ -26,89 +22,7 @@ const MAX_USERS_LIST_LIMIT = 200;
 const FAST_AUTH_QUERY_RETRY_OPTIONS = {
   attempts: 1,
 };
-const USER_PROFILE_CACHE_TTL_MS = 30 * 1000;
-const USER_PROFILE_STALE_TTL_MS = 2 * 60 * 1000;
-const USER_PROFILE_QUERY_TIMEOUT_MS = Math.max(
-  500,
-  Number(process.env.USER_PROFILE_QUERY_TIMEOUT_MS) || 2500,
-);
-const ADMIN_VISIBLE_STORES_CACHE_TTL_MS = 60 * 1000;
-const ADMIN_VISIBLE_STORES_STALE_TTL_MS = 5 * 60 * 1000;
 const unsupportedPermissionColumns = new Set();
-const userProfileCache = new Map();
-const adminVisibleStoresCache = {
-  cachedAt: 0,
-  payload: [],
-};
-
-const getUserProfileCacheKey = (userId, includeStores) =>
-  `${String(userId || "").trim()}::stores:${includeStores ? "1" : "0"}`;
-
-const getUserProfileCacheEntry = (cacheKey, { allowStale = false } = {}) => {
-  const entry = userProfileCache.get(cacheKey);
-  if (!entry) return null;
-
-  const age = Date.now() - entry.cachedAt;
-  if (age <= USER_PROFILE_CACHE_TTL_MS) {
-    return entry.payload;
-  }
-  if (allowStale && age <= USER_PROFILE_STALE_TTL_MS) {
-    return entry.payload;
-  }
-
-  userProfileCache.delete(cacheKey);
-  return null;
-};
-
-const rememberUserProfileCacheEntry = (cacheKey, payload) => {
-  userProfileCache.set(cacheKey, {
-    cachedAt: Date.now(),
-    payload,
-  });
-};
-
-const getCachedAdminVisibleStores = ({ allowStale = false } = {}) => {
-  const age = Date.now() - Number(adminVisibleStoresCache.cachedAt || 0);
-  if (age <= ADMIN_VISIBLE_STORES_CACHE_TTL_MS) {
-    return Array.isArray(adminVisibleStoresCache.payload)
-      ? [...adminVisibleStoresCache.payload]
-      : [];
-  }
-
-  if (allowStale && age <= ADMIN_VISIBLE_STORES_STALE_TTL_MS) {
-    return Array.isArray(adminVisibleStoresCache.payload)
-      ? [...adminVisibleStoresCache.payload]
-      : [];
-  }
-
-  return null;
-};
-
-const rememberAdminVisibleStores = (stores = []) => {
-  adminVisibleStoresCache.cachedAt = Date.now();
-  adminVisibleStoresCache.payload = Array.isArray(stores) ? [...stores] : [];
-};
-
-export const clearUsersRouteCaches = () => {
-  userProfileCache.clear();
-  adminVisibleStoresCache.cachedAt = 0;
-  adminVisibleStoresCache.payload = [];
-};
-
-const invalidateUserProfileCache = (userId) => {
-  const prefix = `${String(userId || "").trim()}::`;
-  for (const cacheKey of userProfileCache.keys()) {
-    if (cacheKey.startsWith(prefix)) {
-      userProfileCache.delete(cacheKey);
-    }
-  }
-};
-
-const runUserProfileQuery = (query, code = "USER_PROFILE_QUERY_TIMEOUT") =>
-  runSupabaseQueryWithTimeout(query, {
-    timeoutMs: USER_PROFILE_QUERY_TIMEOUT_MS,
-    code,
-  });
 
 const buildPermissionsPayload = (input = {}, { includeUpdatedAt = false } = {}) => {
   const normalized = normalizePermissions(input);
@@ -260,14 +174,11 @@ const listAccessibleStoresForUser = async (userId, normalizedRole = "user") => {
     return [];
   }
 
-  const { data, error } = await runUserProfileQuery(
-    supabase
-      .from("stores")
-      .select("*")
-      .in("id", accessibleStoreIds)
-      .order("name", { ascending: true }),
-    "USER_STORES_QUERY_TIMEOUT",
-  );
+  const { data, error } = await supabase
+    .from("stores")
+    .select("*")
+    .in("id", accessibleStoreIds)
+    .order("name", { ascending: true });
 
   if (!error && Array.isArray(data) && data.length > 0) {
     return data;
@@ -284,22 +195,32 @@ const listAccessibleStoresForUser = async (userId, normalizedRole = "user") => {
 };
 
 export const getAdminVisibleStores = async () => {
-  const cachedStores = getCachedAdminVisibleStores();
-  if (cachedStores) {
-    return cachedStores;
-  }
-
   const discoveredStores = new Map();
 
   try {
-    const { data, error } = await runUserProfileQuery(
-      supabase
-        .from("shopify_tokens")
-        .select("store_id, shop")
-        .not("store_id", "is", null)
-        .limit(50),
-      "ADMIN_TOKEN_STORES_QUERY_TIMEOUT",
-    );
+    const { data, error } = await supabase
+      .from("stores")
+      .select("id, name")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching admin stores:", error);
+    } else {
+      (data || []).forEach((store) =>
+        rememberDiscoveredStore(discoveredStores, store?.id, store?.name),
+      );
+    }
+  } catch (error) {
+    console.error("Admin stores lookup failed:", error);
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("shopify_tokens")
+      .select("store_id, shop")
+      .not("store_id", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(200);
 
     if (error) {
       console.error("Error inferring admin stores from Shopify tokens:", error);
@@ -316,88 +237,41 @@ export const getAdminVisibleStores = async () => {
     console.error("Admin token-based store lookup failed:", error);
   }
 
-  if (discoveredStores.size > 0) {
-    const resolvedStores = Array.from(discoveredStores.values()).sort(
-      (left, right) => left.name.localeCompare(right.name),
-    );
-    rememberAdminVisibleStores(resolvedStores);
-    return resolvedStores;
-  }
-
   try {
-    const { data, error } = await runUserProfileQuery(
+    const inferredResults = await Promise.all([
       supabase
-        .from("stores")
-        .select("id, name")
-        .order("name", { ascending: true })
-        .limit(50),
-      "ADMIN_STORES_QUERY_TIMEOUT",
-    );
+        .from("products")
+        .select("store_id")
+        .not("store_id", "is", null)
+        .limit(200),
+      supabase
+        .from("orders")
+        .select("store_id")
+        .not("store_id", "is", null)
+        .limit(200),
+      supabase
+        .from("customers")
+        .select("store_id")
+        .not("store_id", "is", null)
+        .limit(200),
+    ]);
 
-    if (error) {
-      console.error("Error fetching admin stores:", error);
-    } else {
-      (data || []).forEach((store) =>
-        rememberDiscoveredStore(discoveredStores, store?.id, store?.name),
+    inferredResults.forEach((result) => {
+      if (result?.error) {
+        throw result.error;
+      }
+
+      (result?.data || []).forEach((row) =>
+        rememberDiscoveredStore(discoveredStores, row?.store_id),
       );
-    }
+    });
   } catch (error) {
-    console.error("Admin stores lookup failed:", error);
+    console.error("Admin data-based store inference failed:", error);
   }
 
-  if (discoveredStores.size === 0) {
-    try {
-      const inferredResults = await Promise.all([
-        runUserProfileQuery(
-          supabase
-            .from("products")
-            .select("store_id")
-            .not("store_id", "is", null)
-            .limit(200),
-          "ADMIN_PRODUCT_STORES_QUERY_TIMEOUT",
-        ),
-        runUserProfileQuery(
-          supabase
-            .from("orders")
-            .select("store_id")
-            .not("store_id", "is", null)
-            .limit(200),
-          "ADMIN_ORDER_STORES_QUERY_TIMEOUT",
-        ),
-        runUserProfileQuery(
-          supabase
-            .from("customers")
-            .select("store_id")
-            .not("store_id", "is", null)
-            .limit(200),
-          "ADMIN_CUSTOMER_STORES_QUERY_TIMEOUT",
-        ),
-      ]);
-
-      inferredResults.forEach((result) => {
-        if (result?.error) {
-          throw result.error;
-        }
-
-        (result?.data || []).forEach((row) =>
-          rememberDiscoveredStore(discoveredStores, row?.store_id),
-        );
-      });
-    } catch (error) {
-      console.error("Admin data-based store inference failed:", error);
-    }
-  }
-
-  const resolvedStores = Array.from(discoveredStores.values()).sort((left, right) =>
+  return Array.from(discoveredStores.values()).sort((left, right) =>
     left.name.localeCompare(right.name),
   );
-  if (resolvedStores.length > 0) {
-    rememberAdminVisibleStores(resolvedStores);
-    return resolvedStores;
-  }
-
-  const staleStores = getCachedAdminVisibleStores({ allowStale: true });
-  return staleStores || [];
 };
 
 // Get all users (Admin only)
@@ -590,7 +464,6 @@ router.put(
         }
       }
 
-      invalidateUserProfileCache(userId);
       res.json({ success: true, message: "User updated successfully" });
     } catch (error) {
       console.error("Error updating user:", error);
@@ -631,7 +504,6 @@ router.delete(
 
       if (error) throw error;
 
-      invalidateUserProfileCache(userId);
       res.json({ success: true, message: "User deleted successfully" });
     } catch (error) {
       console.error("Error deleting user:", error);
@@ -655,37 +527,19 @@ router.get("/me/stores", authenticateToken, async (req, res) => {
 
 // Get current user info (no admin required) - MUST be before /:userId
 router.get("/me", authenticateToken, async (req, res) => {
-  const includeStores = shouldIncludeRelatedStores(req.query.include_stores);
-  const cacheKey = getUserProfileCacheKey(req.user.id, includeStores);
-
   try {
-    const cachedProfile = getUserProfileCacheEntry(cacheKey);
-    if (cachedProfile) {
-      primeUserAccessContext(req.user.id, {
-        role: cachedProfile.role,
-        permissions: cachedProfile.permissions,
-      });
-      res.setHeader("X-User-Profile-Cache", "hit");
-      return res.json(cachedProfile);
-    }
-
+    const includeStores = shouldIncludeRelatedStores(req.query.include_stores);
     const { data: user, error } = await withSupabaseRetry(() =>
-      runUserProfileQuery(
-        supabase
-          .from("users")
-          .select("id, email, name, role, is_active, created_at")
-          .eq("id", req.user.id)
-          .limit(1)
-          .maybeSingle(),
-        "USER_ME_QUERY_TIMEOUT",
-      ),
+      supabase
+        .from("users")
+        .select("id, email, name, role, is_active, created_at")
+        .eq("id", req.user.id)
+        .limit(1)
+        .maybeSingle(),
       FAST_AUTH_QUERY_RETRY_OPTIONS,
     );
 
-    if (
-      error &&
-      (isTransientSupabaseError(error) || isSupabaseQueryTimeoutError(error))
-    ) {
+    if (error && isTransientSupabaseError(error)) {
       const degradedResponse = {
         id: req.user.id,
         email: req.user.email,
@@ -698,7 +552,18 @@ router.get("/me", authenticateToken, async (req, res) => {
       };
 
       if (includeStores) {
-        degradedResponse.stores = [];
+        try {
+          degradedResponse.stores = await listAccessibleStoresForUser(
+            req.user.id,
+            degradedResponse.role,
+          );
+        } catch (storesError) {
+          console.error(
+            "Error fetching user stores for degraded profile:",
+            storesError,
+          );
+          degradedResponse.stores = [];
+        }
       }
 
       primeUserAccessContext(req.user.id, {
@@ -706,7 +571,6 @@ router.get("/me", authenticateToken, async (req, res) => {
         permissions: degradedResponse.permissions,
       });
 
-      rememberUserProfileCacheEntry(cacheKey, degradedResponse);
       return res.json(degradedResponse);
     }
 
@@ -724,23 +588,16 @@ router.get("/me", authenticateToken, async (req, res) => {
     } else {
       const { data: permissionsData, error: permissionsError } =
         await withSupabaseRetry(() =>
-          runUserProfileQuery(
-            supabase
-              .from("permissions")
-              .select("*")
-              .eq("user_id", req.user.id)
-              .limit(1)
-              .maybeSingle(),
-            "USER_PERMISSIONS_QUERY_TIMEOUT",
-          ),
+          supabase
+            .from("permissions")
+            .select("*")
+            .eq("user_id", req.user.id)
+            .limit(1)
+            .maybeSingle(),
           FAST_AUTH_QUERY_RETRY_OPTIONS,
         );
 
-      if (
-        permissionsError &&
-        (isTransientSupabaseError(permissionsError) ||
-          isSupabaseQueryTimeoutError(permissionsError))
-      ) {
+      if (permissionsError && isTransientSupabaseError(permissionsError)) {
         normalizedPermissions = buildPermissionsForRole(normalizedUserRole);
       } else {
         if (permissionsError && permissionsError.code !== "PGRST116") {
@@ -777,25 +634,9 @@ router.get("/me", authenticateToken, async (req, res) => {
       permissions: normalizedPermissions,
     });
 
-    rememberUserProfileCacheEntry(cacheKey, responsePayload);
     res.json(responsePayload);
   } catch (error) {
     console.error("Error fetching user:", error);
-    const staleProfile = getUserProfileCacheEntry(cacheKey, {
-      allowStale: true,
-    });
-    if (staleProfile) {
-      primeUserAccessContext(req.user.id, {
-        role: staleProfile.role,
-        permissions: staleProfile.permissions,
-      });
-      res.setHeader("X-User-Profile-Cache", "stale");
-      return res.json({
-        ...staleProfile,
-        degraded: true,
-      });
-    }
-
     res.status(isTransientSupabaseError(error) ? 503 : 500).json({
       error: isTransientSupabaseError(error)
         ? "User profile is temporarily unavailable"

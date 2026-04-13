@@ -39,27 +39,6 @@ export class FileUploadService {
         });
       }
     } catch (error) {
-      // Bucket admin APIs require elevated credentials (service role).
-      // In environments where we only have an anon key, we still want uploads to work
-      // as long as the bucket already exists.
-      const code = String(error?.code || "");
-      const message = String(error?.message || "");
-      const status = Number(error?.status || error?.statusCode || 0) || 0;
-      const isPermissionError =
-        status === 401 ||
-        status === 403 ||
-        code.toLowerCase().includes("not_authorized") ||
-        message.toLowerCase().includes("not authorized") ||
-        message.toLowerCase().includes("permission");
-
-      if (isPermissionError) {
-        console.warn(
-          `Bucket admin operations are not permitted for "${bucketName}". ` +
-            "Skipping bucket initialization and attempting upload anyway.",
-        );
-        return;
-      }
-
       console.error(`Error initializing bucket ${bucketName}:`, error);
       throw new Error(
         `Failed to prepare storage bucket "${bucketName}": ${error.message}`,
@@ -98,38 +77,17 @@ export class FileUploadService {
 
       if (error) throw error;
 
-      // Prefer public URLs when bucket is public.
-      // If the bucket is private, fall back to a signed URL so the frontend can still open the file.
-      let publicUrl = "";
-      try {
-        const { data } = supabase.storage
-          .from(targetBucket)
-          .getPublicUrl(uniqueFileName);
-        publicUrl = String(data?.publicUrl || "");
-      } catch {
-        publicUrl = "";
-      }
-
-      let signedUrl = "";
-      if (!publicUrl) {
-        try {
-          const { data: signed, error: signedError } = await supabase.storage
-            .from(targetBucket)
-            .createSignedUrl(uniqueFileName, 7 * 24 * 60 * 60);
-          if (!signedError) {
-            signedUrl = String(signed?.signedUrl || "");
-          }
-        } catch {
-          signedUrl = "";
-        }
-      }
+      // Get public URL
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from(targetBucket).getPublicUrl(uniqueFileName);
 
       return {
         success: true,
         fileName: fileName,
         bucket: targetBucket,
         storagePath: data.path,
-        url: publicUrl || signedUrl,
+        url: publicUrl,
         size: fileBuffer.length,
         mimeType: mimeType,
       };

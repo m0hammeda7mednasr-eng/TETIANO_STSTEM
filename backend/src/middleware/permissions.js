@@ -3,7 +3,6 @@ import {
   isTransientSupabaseError,
   withSupabaseRetry,
 } from "../helpers/supabaseRetry.js";
-import { runSupabaseQueryWithTimeout } from "../helpers/supabaseQueryTimeout.js";
 
 export const PERMISSION_KEYS = [
   "can_view_dashboard",
@@ -53,10 +52,6 @@ const PERMISSION_FALLBACK_KEYS = {
 };
 
 const USER_ACCESS_CACHE_TTL_MS = 60 * 1000;
-const DEFAULT_ACCESS_CONTEXT_QUERY_TIMEOUT_MS = Math.max(
-  500,
-  Number(process.env.ACCESS_CONTEXT_QUERY_TIMEOUT_MS) || 1500,
-);
 const userAccessCache = new Map();
 
 const getUserAccessCacheKey = (userId) => String(userId || "").trim();
@@ -161,21 +156,9 @@ export const normalizeRole = (role) => {
   return "user";
 };
 
-const runAccessContextQuery = (
-  query,
-  {
-    timeoutMs = DEFAULT_ACCESS_CONTEXT_QUERY_TIMEOUT_MS,
-    code = "ACCESS_CONTEXT_QUERY_TIMEOUT",
-  } = {},
-) =>
-  runSupabaseQueryWithTimeout(query, {
-    timeoutMs,
-    code,
-  });
-
 export const getUserRole = async (
   userId,
-  { retryOptions = undefined, timeoutMs = DEFAULT_ACCESS_CONTEXT_QUERY_TIMEOUT_MS } = {},
+  { retryOptions = undefined } = {},
 ) => {
   if (!userId) {
     return null;
@@ -188,18 +171,12 @@ export const getUserRole = async (
 
   const { data: user, error } = await withSupabaseRetry(
     () =>
-      runAccessContextQuery(
-        supabase
-          .from("users")
-          .select("role")
-          .eq("id", userId)
-          .limit(1)
-          .maybeSingle(),
-        {
-          timeoutMs,
-          code: "USER_ROLE_QUERY_TIMEOUT",
-        },
-      ),
+      supabase
+        .from("users")
+        .select("role")
+        .eq("id", userId)
+        .limit(1)
+        .maybeSingle(),
     retryOptions,
   );
 
@@ -218,7 +195,7 @@ export const getUserRole = async (
 
 export const getUserPermissions = async (
   userId,
-  { retryOptions = undefined, timeoutMs = DEFAULT_ACCESS_CONTEXT_QUERY_TIMEOUT_MS } = {},
+  { retryOptions = undefined } = {},
 ) => {
   if (!userId) {
     return { ...DEFAULT_PERMISSIONS };
@@ -231,18 +208,12 @@ export const getUserPermissions = async (
 
   const { data: permissions, error } = await withSupabaseRetry(
     () =>
-      runAccessContextQuery(
-        supabase
-          .from("permissions")
-          .select("*")
-          .eq("user_id", userId)
-          .limit(1)
-          .maybeSingle(),
-        {
-          timeoutMs,
-          code: "USER_PERMISSIONS_QUERY_TIMEOUT",
-        },
-      ),
+      supabase
+        .from("permissions")
+        .select("*")
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle(),
     retryOptions,
   );
 
@@ -289,14 +260,10 @@ export const requirePermission = (permissionName) => {
       const retryOptions = isSafeMethod
         ? { attempts: 1 }
         : { attempts: 2, baseDelayMs: 150 };
-      const timeoutMs = isSafeMethod
-        ? DEFAULT_ACCESS_CONTEXT_QUERY_TIMEOUT_MS
-        : Math.max(DEFAULT_ACCESS_CONTEXT_QUERY_TIMEOUT_MS, 3000);
       const role = normalizeRole(
         req.user?.role ||
           (await getUserRole(req.user?.id, {
             retryOptions,
-            timeoutMs,
           })),
       );
 
@@ -314,7 +281,6 @@ export const requirePermission = (permissionName) => {
 
       const permissions = await getUserPermissions(req.user?.id, {
         retryOptions,
-        timeoutMs,
       });
 
       if (!permissions[permissionName]) {
@@ -332,29 +298,6 @@ export const requirePermission = (permissionName) => {
       });
       next();
     } catch (error) {
-      const isSafeMethod = ["GET", "HEAD", "OPTIONS"].includes(
-        String(req.method || "").toUpperCase(),
-      );
-      if (isSafeMethod && isTransientSupabaseError(error)) {
-        const fallbackRole = normalizeRole(req.user?.role || "user");
-        const fallbackPermissions = buildPermissionsForRole(fallbackRole);
-
-        if (!fallbackPermissions[permissionName]) {
-          return res.status(403).json({
-            error: "Access denied: insufficient permissions",
-          });
-        }
-
-        req.user.role = fallbackRole;
-        req.user.isAdmin = fallbackRole === "admin";
-        req.user.permissions = fallbackPermissions;
-        primeUserAccessContext(req.user?.id, {
-          role: fallbackRole,
-          permissions: fallbackPermissions,
-        });
-        return next();
-      }
-
       console.error("Permission check error:", error);
       res.status(isTransientSupabaseError(error) ? 503 : 500).json({
         error: isTransientSupabaseError(error)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -13,10 +13,10 @@ import Sidebar from "../components/Sidebar";
 import { useLocale } from "../context/LocaleContext";
 import { useStore } from "../context/StoreContext";
 import api from "../utils/api";
+import { fetchAllPagesProgressively } from "../utils/pagination";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
-const FOLLOW_UP_VISIBLE_LIMIT = 500;
-const FOLLOW_UP_REFRESH_DEBOUNCE_MS = 750;
+const FETCH_PAGE_LIMIT = 4500;
 const MISSING_ORDERS_PER_PAGE = 50;
 const MISSING_ORDERS_PAGINATION_WINDOW = 5;
 const MISSING_ORDER_REASON_NO_ACTION = "in_stock_without_action";
@@ -239,7 +239,6 @@ export default function MissingOrders() {
   const [searchTerm, setSearchTerm] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const refreshTimeoutRef = useRef(null);
   const isInStockFollowUpView =
     location.pathname === "/orders/in-stock-follow-up";
 
@@ -337,18 +336,18 @@ export default function MissingOrders() {
     }
 
     try {
-      const response = await api.get("/shopify/orders/missing", {
-        params: {
-          limit: FOLLOW_UP_VISIBLE_LIMIT,
-          offset: 0,
-          reason: isInStockFollowUpView
-            ? MISSING_ORDER_REASON_NO_ACTION
-            : "stock_shortage",
+      const rows = await fetchAllPagesProgressively(
+        ({ limit, offset }) =>
+          api.get("/shopify/orders/missing", {
+            params: {
+              limit,
+              offset,
+            },
+          }),
+        {
+          limit: FETCH_PAGE_LIMIT,
         },
-      });
-      const rows = Array.isArray(response?.data?.data)
-        ? response.data.data
-        : [];
+      );
 
       setOrders(rows);
       setLastUpdatedAt(new Date());
@@ -364,38 +363,21 @@ export default function MissingOrders() {
     } finally {
       setLoading(false);
     }
-  }, [isInStockFollowUpView, select]);
+  }, [select]);
 
   useEffect(() => {
     fetchMissingOrders();
   }, [currentStoreId, fetchMissingOrders]);
 
   useEffect(() => {
-    const scheduleRefresh = () => {
-      if (refreshTimeoutRef.current) {
-        return;
-      }
-
-      refreshTimeoutRef.current = window.setTimeout(() => {
-        refreshTimeoutRef.current = null;
-        fetchMissingOrders({ silent: true });
-      }, FOLLOW_UP_REFRESH_DEBOUNCE_MS);
-    };
-
     const unsubscribe = subscribeToSharedDataUpdates((event) => {
       if (String(event?.resource || "").toLowerCase() === "notifications") {
         return;
       }
-      scheduleRefresh();
+      fetchMissingOrders({ silent: true });
     });
 
-    return () => {
-      unsubscribe();
-      if (refreshTimeoutRef.current) {
-        window.clearTimeout(refreshTimeoutRef.current);
-        refreshTimeoutRef.current = null;
-      }
-    };
+    return () => unsubscribe();
   }, [fetchMissingOrders]);
 
   const scopedOrders = useMemo(

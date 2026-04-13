@@ -7,16 +7,9 @@ import {
   afterEach,
 } from "@jest/globals";
 import jwt from "jsonwebtoken";
+import { authenticateToken } from "./auth.js";
 
-jest.unstable_mockModule("../server.js", () => ({}));
-jest.unstable_mockModule("./permissions.js", () => ({
-  getUserRole: jest.fn(),
-  normalizeRole: jest.fn((role) =>
-    String(role || "").trim().toLowerCase() === "admin" ? "admin" : "user",
-  ),
-}));
-
-const { authenticateToken } = await import("./auth.js");
+jest.mock("../server.js", () => ({}));
 
 describe("Authentication Middleware", () => {
   let req;

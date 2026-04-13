@@ -27,9 +27,6 @@ const RETURNED_ORDER_STATUSES = new Set(["restocked"]);
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CACHE_TTL_MS = 3 * 60 * 1000;
-const DEFAULT_ORDERS_LIMIT = 2000;
-const HARD_ORDERS_LIMIT_CAP = 10000;
-const ORDERS_BATCH_SIZE = 750;
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 const PRODUCTS_SELECT = [
   "id",
@@ -137,50 +134,6 @@ const parseJsonField = (value) => {
 };
 
 const normalizeKey = (value) => String(value || "").trim();
-
-const toIsoStartOfDay = (value) => {
-  const normalized = String(value || "").trim();
-  if (!normalized) {
-    return "";
-  }
-
-  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (match) {
-    const [, year, month, day] = match;
-    const date = new Date(Number(year), Number(month) - 1, Number(day));
-    date.setHours(0, 0, 0, 0);
-    return date.toISOString();
-  }
-
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) {
-    return "";
-  }
-  parsed.setHours(0, 0, 0, 0);
-  return parsed.toISOString();
-};
-
-const toIsoEndOfDay = (value) => {
-  const normalized = String(value || "").trim();
-  if (!normalized) {
-    return "";
-  }
-
-  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (match) {
-    const [, year, month, day] = match;
-    const date = new Date(Number(year), Number(month) - 1, Number(day));
-    date.setHours(23, 59, 59, 999);
-    return date.toISOString();
-  }
-
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) {
-    return "";
-  }
-  parsed.setHours(23, 59, 59, 999);
-  return parsed.toISOString();
-};
 
 const normalizeIdentifier = (value) =>
   String(value || "")
@@ -852,63 +805,27 @@ const loadScopedRowsWithFallback = async ({
   storeId,
   orderBy,
   ascending,
-  applyFilters,
-  batchSize,
-  maxRows,
 }) => {
   let lastError = null;
 
   for (const selectColumns of selectCandidates) {
-    const rows = [];
-    const desiredLimit = Math.max(0, parseInt(String(maxRows || ""), 10) || 0);
-    const rangeBatchSize = Math.max(
-      1,
-      parseInt(String(batchSize || ""), 10) || ORDERS_BATCH_SIZE,
-    );
-    let offset = 0;
+    let query = db
+      .from(tableName)
+      .select(selectColumns)
+      .eq("store_id", storeId);
 
-    while (true) {
-      let query = db
-        .from(tableName)
-        .select(selectColumns)
-        .eq("store_id", storeId);
+    if (orderBy) {
+      query = query.order(orderBy, { ascending });
+    }
 
-      if (orderBy) {
-        query = query.order(orderBy, { ascending });
-      }
+    const { data, error } = await query;
+    if (!error) {
+      return data || [];
+    }
 
-      if (typeof applyFilters === "function") {
-        query = applyFilters(query) || query;
-      }
-
-      if (desiredLimit > 0) {
-        const remaining = desiredLimit - rows.length;
-        if (remaining <= 0) {
-          return rows;
-        }
-
-        const take = Math.min(rangeBatchSize, remaining);
-        query = query.range(offset, offset + take - 1);
-      } else {
-        query = query.range(offset, offset + rangeBatchSize - 1);
-      }
-
-      const { data, error } = await query;
-      if (error) {
-        lastError = error;
-        if (!isSchemaCompatibilityError(error)) {
-          throw error;
-        }
-        break;
-      }
-
-      const batch = data || [];
-      rows.push(...batch);
-      if (batch.length === 0 || batch.length < rangeBatchSize) {
-        return rows;
-      }
-
-      offset += desiredLimit > 0 ? Math.min(rangeBatchSize, desiredLimit - rows.length) : rangeBatchSize;
+    lastError = error;
+    if (!isSchemaCompatibilityError(error)) {
+      throw error;
     }
   }
 
@@ -928,37 +845,14 @@ const loadScopedProducts = async (storeId) =>
     ascending: true,
   });
 
-const loadScopedOrders = async (storeId, rawOrderFilters = {}) => {
-  const filters = normalizeOrderScopeFilters(rawOrderFilters);
-  const requestedLimit = Math.max(0, parseInt(filters.ordersLimit || "", 10) || 0);
-  const safeDefaultLimit = DEFAULT_ORDERS_LIMIT;
-  const desiredLimit = Math.min(
-    HARD_ORDERS_LIMIT_CAP,
-    requestedLimit > 0 ? requestedLimit : safeDefaultLimit,
-  );
-  const fromIso = filters.dateFrom ? toIsoStartOfDay(filters.dateFrom) : "";
-  const toIso = filters.dateTo ? toIsoEndOfDay(filters.dateTo) : "";
-
-  return loadScopedRowsWithFallback({
+const loadScopedOrders = async (storeId) =>
+  loadScopedRowsWithFallback({
     tableName: "orders",
     selectCandidates: ORDERS_SELECTS,
     storeId,
     orderBy: "created_at",
     ascending: false,
-    maxRows: desiredLimit,
-    batchSize: ORDERS_BATCH_SIZE,
-    applyFilters: (query) => {
-      let q = query;
-      if (fromIso) {
-        q = q.gte("created_at", fromIso);
-      }
-      if (toIso) {
-        q = q.lte("created_at", toIso);
-      }
-      return q;
-    },
   });
-};
 
 const loadScopedTasks = async (req, storeId) => {
   let query = db.from("tasks").select(TASKS_SELECT).order("updated_at", {
@@ -1103,7 +997,7 @@ const buildOrderLineEntries = (order, refundDetails, fulfillmentDetails) => {
 export const buildAnalyticsPayload = async (req, storeId, rawOrderFilters = {}) => {
   const [products, orders] = await Promise.all([
     loadScopedProducts(storeId),
-    loadScopedOrders(storeId, rawOrderFilters),
+    loadScopedOrders(storeId),
   ]);
   const scopedOrderFiltersActive = hasActiveOrderScopeFilters(rawOrderFilters);
   const normalizedOrderFilters = normalizeOrderScopeFilters(rawOrderFilters);

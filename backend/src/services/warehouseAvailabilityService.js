@@ -3,7 +3,6 @@ import {
   buildWarehouseVariantCatalog,
   normalizeWarehouseCode,
 } from "../helpers/warehouseCatalog.js";
-import { runSupabaseQueryWithTimeout } from "../helpers/supabaseQueryTimeout.js";
 
 const PRODUCT_LOOKUP_SELECT = [
   "id",
@@ -21,10 +20,6 @@ const PRODUCT_LOOKUP_SELECT = [
   "data",
 ].join(",");
 const PRODUCT_PAGE_SIZE = 500;
-const WAREHOUSE_AVAILABILITY_QUERY_TIMEOUT_MS = Math.max(
-  1000,
-  Number(process.env.WAREHOUSE_AVAILABILITY_QUERY_TIMEOUT_MS) || 4500,
-);
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
 
 const normalizeId = (value) => String(value || "").trim();
@@ -35,15 +30,6 @@ const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-
-const runWarehouseAvailabilityQuery = (
-  query,
-  code = "WAREHOUSE_AVAILABILITY_QUERY_TIMEOUT",
-) =>
-  runSupabaseQueryWithTimeout(query, {
-    timeoutMs: WAREHOUSE_AVAILABILITY_QUERY_TIMEOUT_MS,
-    code,
-  });
 
 const isSchemaCompatibilityError = (error) => {
   if (!error) {
@@ -75,15 +61,12 @@ const loadProductsForStoreIds = async (storeIds = []) => {
   const rows = [];
 
   for (let offset = 0; ; offset += PRODUCT_PAGE_SIZE) {
-    const { data, error } = await runWarehouseAvailabilityQuery(
-      db
-        .from("products")
-        .select(PRODUCT_LOOKUP_SELECT)
-        .in("store_id", normalizedStoreIds)
-        .order("updated_at", { ascending: false })
-        .range(offset, offset + PRODUCT_PAGE_SIZE - 1),
-      "WAREHOUSE_PRODUCT_LOOKUP_QUERY_TIMEOUT",
-    );
+    const { data, error } = await db
+      .from("products")
+      .select(PRODUCT_LOOKUP_SELECT)
+      .in("store_id", normalizedStoreIds)
+      .order("updated_at", { ascending: false })
+      .range(offset, offset + PRODUCT_PAGE_SIZE - 1);
 
     if (error) {
       throw error;
@@ -108,13 +91,10 @@ const loadInventoryRowsForStoreIds = async (storeIds = []) => {
     return [];
   }
 
-  const { data, error } = await runWarehouseAvailabilityQuery(
-    db
-      .from("warehouse_inventory")
-      .select("id, store_id, product_id, sku, quantity")
-      .in("store_id", normalizedStoreIds),
-    "WAREHOUSE_INVENTORY_QUERY_TIMEOUT",
-  );
+  const { data, error } = await db
+    .from("warehouse_inventory")
+    .select("id, store_id, product_id, sku, quantity")
+    .in("store_id", normalizedStoreIds);
 
   if (error) {
     throw error;

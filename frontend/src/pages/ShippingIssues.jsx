@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -14,6 +14,7 @@ import {
 import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
 import { buildCsvFilename, downloadCsvSections } from "../utils/csv";
+import { fetchAllPagesProgressively } from "../utils/pagination";
 import { useLocale } from "../context/LocaleContext";
 import { useStore } from "../context/StoreContext";
 import {
@@ -36,8 +37,7 @@ import {
   normalizeShippingIssueReason,
 } from "../utils/shippingIssues";
 
-const SHIPPING_ISSUES_VISIBLE_LIMIT = 500;
-const SHIPPING_ISSUES_REFRESH_DEBOUNCE_MS = 750;
+const FETCH_PAGE_LIMIT = 4500;
 const PAGE_SIZE = 50;
 const PAGINATION_WINDOW = 5;
 const DATE_PRESET_OPTIONS = [
@@ -280,7 +280,6 @@ export default function ShippingIssues() {
   const [noteDrafts, setNoteDrafts] = useState({});
   const [noteSaveStatusByOrderId, setNoteSaveStatusByOrderId] = useState({});
   const [draftHydrationReady, setDraftHydrationReady] = useState(false);
-  const refreshTimeoutRef = useRef(null);
 
   const reasonOptions = useMemo(() => getShippingIssueReasonOptions(select), [
     select,
@@ -350,18 +349,18 @@ export default function ShippingIssues() {
       }
 
       try {
-        const response = await api.get("/shopify/orders/shipping-issues", {
-          params: {
-            limit: SHIPPING_ISSUES_VISIBLE_LIMIT,
-            offset: 0,
-            reason: reasonFilter,
-            updated_from: normalizedDateRange.dateFrom,
-            updated_to: normalizedDateRange.dateTo,
+        const rows = await fetchAllPagesProgressively(
+          ({ limit, offset }) =>
+            api.get("/shopify/orders/shipping-issues", {
+              params: {
+                limit,
+                offset,
+              },
+            }),
+          {
+            limit: FETCH_PAGE_LIMIT,
           },
-        });
-        const rows = Array.isArray(response?.data?.data)
-          ? response.data.data
-          : [];
+        );
 
         setOrders(rows.filter((order) => isShippingIssueActive(order)));
         setLastUpdatedAt(new Date());
@@ -378,7 +377,7 @@ export default function ShippingIssues() {
         setLoading(false);
       }
     },
-    [normalizedDateRange.dateFrom, normalizedDateRange.dateTo, reasonFilter, select],
+    [select],
   );
 
   useEffect(() => {
@@ -393,23 +392,10 @@ export default function ShippingIssues() {
 
   useEffect(() => {
     const unsubscribe = subscribeToSharedDataUpdates(() => {
-      if (refreshTimeoutRef.current) {
-        return;
-      }
-
-      refreshTimeoutRef.current = window.setTimeout(() => {
-        refreshTimeoutRef.current = null;
-        fetchShippingIssues({ silent: true });
-      }, SHIPPING_ISSUES_REFRESH_DEBOUNCE_MS);
+      fetchShippingIssues({ silent: true });
     });
 
-    return () => {
-      unsubscribe();
-      if (refreshTimeoutRef.current) {
-        window.clearTimeout(refreshTimeoutRef.current);
-        refreshTimeoutRef.current = null;
-      }
-    };
+    return () => unsubscribe();
   }, [fetchShippingIssues]);
 
   useEffect(() => {

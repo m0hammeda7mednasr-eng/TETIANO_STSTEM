@@ -3,11 +3,6 @@ import { getUserRole, normalizeRole } from "./permissions.js";
 import { getJwtSecret } from "../helpers/jwt.js";
 import { isTransientSupabaseError } from "../helpers/supabaseRetry.js";
 
-const SAFE_AUTH_ROLE_QUERY_TIMEOUT_MS = Math.max(
-  500,
-  Number(process.env.SAFE_AUTH_ROLE_QUERY_TIMEOUT_MS) || 1200,
-);
-
 /**
  * Centralized JWT validation middleware
  * Extracts JWT from Authorization header, validates it, and attaches user info to req.user
@@ -83,7 +78,6 @@ export const authenticateToken = async (req, res, next) => {
         // Always resolve current role from DB to avoid stale JWT role privileges.
         const dbRole = await getUserRole(decoded.id, {
           retryOptions: roleRetryOptions,
-          timeoutMs: isSafeMethod ? SAFE_AUTH_ROLE_QUERY_TIMEOUT_MS : 3000,
         });
         if (!dbRole) {
           return res.status(401).json({

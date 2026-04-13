@@ -3,7 +3,6 @@ import {
   DEFAULT_SHIPPING_ISSUE_REASON,
   applyOrderLocalMetadata,
   extractOrderLocalMetadata,
-  isShippingIssueActive,
   mergeOrderLocalMetadata,
   preserveOrderLocalMetadata,
 } from "./orderLocalMetadata.js";
@@ -26,7 +25,6 @@ describe("helpers/orderLocalMetadata", () => {
 
     expect(metadata.shipping_issue).toEqual(
       expect.objectContaining({
-        active: true,
         reason: "confirm_return",
         shipping_company_note: "Courier confirmed a return pickup window.",
         customer_service_note: "Customer agreed to keep the phone available.",
@@ -55,7 +53,6 @@ describe("helpers/orderLocalMetadata", () => {
 
     expect(extractOrderLocalMetadata(updated).shipping_issue).toEqual(
       expect.objectContaining({
-        active: true,
         reason: DEFAULT_SHIPPING_ISSUE_REASON,
         shipping_company_note: "",
         customer_service_note: "",
@@ -85,7 +82,6 @@ describe("helpers/orderLocalMetadata", () => {
 
     expect(extractOrderLocalMetadata(updated).shipping_issue).toEqual(
       expect.objectContaining({
-        active: true,
         reason: "part_with_phone",
         shipping_company_note: "Driver requested a reachable phone number.",
         customer_service_note: "CS confirmed the customer will answer today.",
@@ -108,37 +104,6 @@ describe("helpers/orderLocalMetadata", () => {
 
     expect(extractOrderLocalMetadata(cleared).shipping_issue).toBeNull();
     expect(cleared._tetiano_local_order).toBeUndefined();
-  });
-
-  it("keeps shipping issue notes when the issue is marked inactive", () => {
-    const withInactiveIssue = mergeOrderLocalMetadata(
-      {},
-      {
-        shipping_issue: {
-          active: false,
-          reason: "cancel",
-          shipping_company_note: "Customer cancelled with courier.",
-          customer_service_note: "Cancellation confirmed by support.",
-        },
-      },
-      {
-        updatedAt: "2026-04-12T09:30:00.000Z",
-        updatedBy: "user-3",
-        updatedByName: "Support",
-      },
-    );
-
-    const shippingIssue = extractOrderLocalMetadata(withInactiveIssue).shipping_issue;
-
-    expect(shippingIssue).toEqual(
-      expect.objectContaining({
-        active: false,
-        reason: "cancel",
-        shipping_company_note: "Customer cancelled with courier.",
-        customer_service_note: "Cancellation confirmed by support.",
-      }),
-    );
-    expect(isShippingIssueActive(shippingIssue)).toBe(false);
   });
 
   it("preserves local shipping notes when a fresh Shopify payload replaces order data", () => {
@@ -171,7 +136,6 @@ describe("helpers/orderLocalMetadata", () => {
     expect(preserved.fulfillment_status).toBe("fulfilled");
     expect(extractOrderLocalMetadata(preserved).shipping_issue).toEqual(
       expect.objectContaining({
-        active: true,
         reason: "part_with_phone",
         shipping_company_note: "Courier asked for a reachable phone number.",
         customer_service_note: "Customer confirmed availability tonight.",

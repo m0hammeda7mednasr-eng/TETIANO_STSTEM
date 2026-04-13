@@ -3,19 +3,12 @@ import {
   DEFAULT_SHIPPING_ISSUE_REASON,
   extractOrderLocalMetadata,
 } from "./orderLocalMetadata.js";
-import { runSupabaseQueryWithTimeout } from "./supabaseQueryTimeout.js";
 
 export const SHIPPING_ISSUE_UPDATE_OPERATION =
   "order_shipping_issue_update";
 const DEFAULT_FETCH_CHUNK_SIZE = 200;
-const SHIPPING_ISSUE_RECOVERY_QUERY_TIMEOUT_MS = Math.max(
-  1000,
-  Number(process.env.SHIPPING_ISSUE_RECOVERY_QUERY_TIMEOUT_MS) || 4500,
-);
 
 const normalizeText = (value) => String(value ?? "").trim();
-const hasOwn = (value, key) =>
-  Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
 
 const parseJsonField = (value) => {
   if (!value) {
@@ -39,9 +32,6 @@ const normalizeRecoveredShippingIssue = (issue, fallback = {}) => {
   }
 
   return {
-    active: hasOwn(issue, "active")
-      ? issue?.active !== false
-      : fallback?.active !== false,
     reason:
       normalizeText(issue?.reason) || DEFAULT_SHIPPING_ISSUE_REASON,
     shipping_company_note: normalizeText(issue?.shipping_company_note),
@@ -64,15 +54,6 @@ const normalizeRecoveredShippingIssue = (issue, fallback = {}) => {
 const serializeIssue = (issue) =>
   JSON.stringify(issue || null);
 
-const runShippingIssueRecoveryQuery = (
-  query,
-  code = "SHIPPING_ISSUE_RECOVERY_QUERY_TIMEOUT",
-) =>
-  runSupabaseQueryWithTimeout(query, {
-    timeoutMs: SHIPPING_ISSUE_RECOVERY_QUERY_TIMEOUT_MS,
-    code,
-  });
-
 export const fetchLatestShippingIssueOperationsByOrderId = async (
   supabaseClient,
   orderIds = [],
@@ -93,15 +74,12 @@ export const fetchLatestShippingIssueOperationsByOrderId = async (
 
   for (let index = 0; index < normalizedIds.length; index += chunkSize) {
     const chunk = normalizedIds.slice(index, index + chunkSize);
-    const { data, error } = await runShippingIssueRecoveryQuery(
-      supabaseClient
-        .from("sync_operations")
-        .select("entity_id, created_at, request_data")
-        .eq("operation_type", SHIPPING_ISSUE_UPDATE_OPERATION)
-        .in("entity_id", chunk)
-        .order("created_at", { ascending: false }),
-      "SHIPPING_ISSUE_OPERATION_QUERY_TIMEOUT",
-    );
+    const { data, error } = await supabaseClient
+      .from("sync_operations")
+      .select("entity_id, created_at, request_data")
+      .eq("operation_type", SHIPPING_ISSUE_UPDATE_OPERATION)
+      .in("entity_id", chunk)
+      .order("created_at", { ascending: false });
 
     if (error) {
       throw error;
@@ -141,7 +119,6 @@ export const buildShippingIssueRecoveryPlan = (
     const nextIssue = normalizeRecoveredShippingIssue(
       latestOperation?.request_data?.new_shipping_issue,
       {
-        active: currentIssue?.active,
         updated_at: latestOperation?.created_at,
       },
     );
@@ -183,13 +160,10 @@ export const applyShippingIssueRecoveryPlan = async (
       local_updated_at: new Date().toISOString(),
     };
 
-    const { error } = await runShippingIssueRecoveryQuery(
-      supabaseClient
-        .from("orders")
-        .update(updatePayload)
-        .eq("id", item.order_id),
-      "SHIPPING_ISSUE_RECOVERY_UPDATE_TIMEOUT",
-    );
+    const { error } = await supabaseClient
+      .from("orders")
+      .update(updatePayload)
+      .eq("id", item.order_id);
 
     if (error) {
       throw error;

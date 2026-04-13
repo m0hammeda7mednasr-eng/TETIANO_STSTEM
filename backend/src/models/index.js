@@ -5,7 +5,6 @@ import {
 } from "../helpers/productLocalMetadata.js";
 import { preserveOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
 import { measureAsync } from "../helpers/requestProfiler.js";
-import { runSupabaseQueryWithTimeout } from "../helpers/supabaseQueryTimeout.js";
 
 const sortByCreatedAtDesc = { ascending: false };
 const SCHEMA_ERROR_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
@@ -13,15 +12,6 @@ const SHOPIFY_UPSERT_BATCH_SIZE = 200;
 const LIST_QUERY_BATCH_SIZE = 1000;
 const ACCESSIBLE_STORE_IDS_CACHE_TTL_MS = 60 * 1000;
 const UPSERT_FALLBACK_WARNING_TTL_MS = 5 * 60 * 1000;
-const BULK_SYNC_LOOKUP_CHUNK_SIZE = 200;
-const ACCESS_SCOPE_QUERY_TIMEOUT_MS = Math.max(
-  500,
-  Number(process.env.ACCESS_SCOPE_QUERY_TIMEOUT_MS) || 2500,
-);
-const SHOPIFY_MUTATION_LOOKUP_TIMEOUT_MS = Math.max(
-  1000,
-  Number(process.env.SHOPIFY_MUTATION_LOOKUP_TIMEOUT_MS) || 4500,
-);
 const LOCAL_PRODUCT_COST_FIELDS = [
   "cost_price",
   "ads_cost",
@@ -30,22 +20,6 @@ const LOCAL_PRODUCT_COST_FIELDS = [
 ];
 const accessibleStoreIdsCache = new Map();
 const upsertFallbackWarningCache = new Map();
-const unsupportedUpsertConflictTargets = new Set();
-
-const runAccessScopeQuery = (query, code = "ACCESS_SCOPE_QUERY_TIMEOUT") =>
-  runSupabaseQueryWithTimeout(query, {
-    timeoutMs: ACCESS_SCOPE_QUERY_TIMEOUT_MS,
-    code,
-  });
-
-const runShopifyMutationLookupQuery = (
-  query,
-  code = "SHOPIFY_MUTATION_LOOKUP_QUERY_TIMEOUT",
-) =>
-  runSupabaseQueryWithTimeout(query, {
-    timeoutMs: SHOPIFY_MUTATION_LOOKUP_TIMEOUT_MS,
-    code,
-  });
 
 const isSchemaCompatibilityError = (error) => {
   if (!error) return false;
@@ -197,17 +171,6 @@ const logThrottledUpsertFallbackWarning = (cacheKey, message) => {
   console.warn(message);
 };
 
-const getUpsertConflictCacheKey = (tableName, conflictTarget) =>
-  `${tableName}:${conflictTarget || "legacy"}`;
-
-const isUnsupportedUpsertConflictError = (error) => {
-  const text =
-    `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
-  return text.includes(
-    "there is no unique or exclusion constraint matching the on conflict specification",
-  );
-};
-
 const executeWithSchemaFallback = async (builders) => {
   let lastError = null;
 
@@ -344,23 +307,17 @@ const discoverSingleSharedStoreIds = async () => {
 
   const discoveryStrategies = [
     async () => {
-      const { data, error } = await runAccessScopeQuery(
-        supabase.from("stores").select("id"),
-        "SHARED_STORES_QUERY_TIMEOUT",
-      );
+      const { data, error } = await supabase.from("stores").select("id");
       if (error) {
         throw error;
       }
       return getUniqueRowIds(data, "id");
     },
     async () => {
-      const { data, error } = await runAccessScopeQuery(
-        supabase
-          .from("shopify_tokens")
-          .select("store_id")
-          .not("store_id", "is", null),
-        "SHARED_TOKEN_STORES_QUERY_TIMEOUT",
-      );
+      const { data, error } = await supabase
+        .from("shopify_tokens")
+        .select("store_id")
+        .not("store_id", "is", null);
       if (error) {
         throw error;
       }
@@ -579,10 +536,7 @@ const syncRowsIndividually = async (tableName, rows, itemLabel) => {
   for (const row of rows) {
     try {
       const { data: existing, error: lookupError } =
-        await runShopifyMutationLookupQuery(
-          buildShopifyRowLookupQuery(tableName, row).maybeSingle(),
-          "SHOPIFY_ROW_LOOKUP_QUERY_TIMEOUT",
-        );
+        await buildShopifyRowLookupQuery(tableName, row).maybeSingle();
 
       if (lookupError) {
         failures.push(
@@ -649,119 +603,6 @@ const syncRowsIndividually = async (tableName, rows, itemLabel) => {
   };
 };
 
-const buildScopedShopifyRowKey = (row = {}) =>
-  `${String(row?.shopify_id || "").trim()}::${String(row?.store_id || "").trim()}`;
-
-const fetchExistingScopedShopifyRows = async (tableName, rows = []) => {
-  const shopifyIds = Array.from(
-    new Set(
-      rows.map((row) => String(row?.shopify_id || "").trim()).filter(Boolean),
-    ),
-  );
-  const storeIds = Array.from(
-    new Set(
-      rows.map((row) => String(row?.store_id || "").trim()).filter(Boolean),
-    ),
-  );
-
-  if (shopifyIds.length === 0 || storeIds.length === 0) {
-    return { data: [], error: null };
-  }
-
-  const existingRows = [];
-  for (
-    let index = 0;
-    index < shopifyIds.length;
-    index += BULK_SYNC_LOOKUP_CHUNK_SIZE
-  ) {
-    const chunk = shopifyIds.slice(index, index + BULK_SYNC_LOOKUP_CHUNK_SIZE);
-    const { data, error } = await runShopifyMutationLookupQuery(
-      supabase
-        .from(tableName)
-        .select("id, shopify_id, store_id")
-        .in("shopify_id", chunk)
-        .in("store_id", storeIds),
-      "SHOPIFY_BULK_ROW_LOOKUP_QUERY_TIMEOUT",
-    );
-
-    if (error) {
-      return { data: existingRows, error };
-    }
-
-    existingRows.push(...(data || []));
-  }
-
-  return { data: existingRows, error: null };
-};
-
-const syncScopedRowsWithBulkLookup = async (tableName, rows, itemLabel) => {
-  const lookupResult = await fetchExistingScopedShopifyRows(tableName, rows);
-  if (lookupResult.error) {
-    return await syncRowsIndividually(tableName, rows, itemLabel);
-  }
-
-  const existingByKey = new Map(
-    (lookupResult.data || []).map((row) => [buildScopedShopifyRowKey(row), row]),
-  );
-  const results = [];
-  const failures = [];
-
-  for (const row of rows) {
-    const existing = existingByKey.get(buildScopedShopifyRowKey(row));
-
-    try {
-      if (existing?.id) {
-        const { data: updated, error: updateError } =
-          await executeMutationWithMissingColumnFallback(row, (currentRow) =>
-            supabase
-              .from(tableName)
-              .update(currentRow)
-              .eq("id", existing.id)
-              .select()
-              .single(),
-          );
-
-        if (updateError) {
-          failures.push(
-            `${row.shopify_id}: update failed (${updateError.message})`,
-          );
-          continue;
-        }
-
-        results.push(updated);
-        continue;
-      }
-
-      const { data: inserted, error: insertError } =
-        await executeMutationWithMissingColumnFallback([row], (currentRows) =>
-          supabase.from(tableName).insert(currentRows).select().single(),
-        );
-
-      if (insertError) {
-        failures.push(
-          `${row.shopify_id}: insert failed (${insertError.message})`,
-        );
-        continue;
-      }
-
-      results.push(inserted);
-    } catch (itemError) {
-      failures.push(`${row.shopify_id}: ${itemError.message}`);
-    }
-  }
-
-  return {
-    data: results,
-    error:
-      failures.length > 0
-        ? {
-            message: `Failed to sync ${failures.length} ${itemLabel} rows`,
-            details: failures,
-          }
-        : null,
-  };
-};
-
 const upsertRowsChunkWithFallback = async (
   tableName,
   rows,
@@ -770,11 +611,6 @@ const upsertRowsChunkWithFallback = async (
 ) => {
   if (!conflictTarget) {
     return await syncRowsIndividually(tableName, rows, itemLabel);
-  }
-
-  const conflictCacheKey = getUpsertConflictCacheKey(tableName, conflictTarget);
-  if (unsupportedUpsertConflictTargets.has(conflictCacheKey)) {
-    return await syncScopedRowsWithBulkLookup(tableName, rows, itemLabel);
   }
 
   const upsertResult = await executeMutationWithMissingColumnFallback(
@@ -793,16 +629,12 @@ const upsertRowsChunkWithFallback = async (
     return { data: upsertResult.data || [], error: null };
   }
 
-  if (isUnsupportedUpsertConflictError(upsertResult.error)) {
-    unsupportedUpsertConflictTargets.add(conflictCacheKey);
-  }
-
   logThrottledUpsertFallbackWarning(
-    conflictCacheKey,
+    `${tableName}:${conflictTarget || "legacy"}`,
     `Upsert failed for ${tableName}, falling back to per-row sync: ${upsertResult.error.message}`,
   );
 
-  return await syncScopedRowsWithBulkLookup(
+  return await syncRowsIndividually(
     tableName,
     upsertResult.payload || rows,
     itemLabel,
@@ -990,15 +822,12 @@ const preserveLocalProductMetadataForUpserts = async (rows = []) => {
     return rows;
   }
 
-  const { data: existingRows, error } = await runShopifyMutationLookupQuery(
-    supabase
-      .from("products")
-      .select(
-        "shopify_id, store_id, user_id, data, inventory_quantity, cost_price, ads_cost, operation_cost, shipping_cost",
-      )
-      .in("shopify_id", shopifyIds),
-    "PRODUCT_METADATA_LOOKUP_QUERY_TIMEOUT",
-  );
+  const { data: existingRows, error } = await supabase
+    .from("products")
+    .select(
+      "shopify_id, store_id, user_id, data, inventory_quantity, cost_price, ads_cost, operation_cost, shipping_cost",
+    )
+    .in("shopify_id", shopifyIds);
 
   if (error) {
     console.warn("Product local metadata preservation skipped:", error.message);
@@ -1041,39 +870,14 @@ const preserveLocalOrderMetadataForUpserts = async (rows = []) => {
     return rows;
   }
 
-  const storeIds = Array.from(
-    new Set(
-      rows.map((row) => String(row?.store_id || "").trim()).filter(Boolean),
-    ),
-  );
-  const existingRows = [];
+  const { data: existingRows, error } = await supabase
+    .from("orders")
+    .select("shopify_id, store_id, user_id, data")
+    .in("shopify_id", shopifyIds);
 
-  for (
-    let index = 0;
-    index < shopifyIds.length;
-    index += BULK_SYNC_LOOKUP_CHUNK_SIZE
-  ) {
-    const chunk = shopifyIds.slice(index, index + BULK_SYNC_LOOKUP_CHUNK_SIZE);
-    let query = supabase
-      .from("orders")
-      .select("shopify_id, store_id, user_id, data")
-      .in("shopify_id", chunk);
-
-    if (storeIds.length > 0) {
-      query = query.in("store_id", storeIds);
-    }
-
-    const { data, error } = await runShopifyMutationLookupQuery(
-      query,
-      "ORDER_METADATA_LOOKUP_QUERY_TIMEOUT",
-    );
-
-    if (error) {
-      console.warn("Order local metadata preservation skipped:", error.message);
-      return rows;
-    }
-
-    existingRows.push(...(data || []));
+  if (error) {
+    console.warn("Order local metadata preservation skipped:", error.message);
+    return rows;
   }
 
   return rows.map((row) => {
@@ -1113,13 +917,7 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
         await measureAsync(
           "access-scope.user-stores",
           () =>
-            runAccessScopeQuery(
-              supabase
-                .from("user_stores")
-                .select("store_id")
-                .eq("user_id", userId),
-              "USER_STORES_SCOPE_QUERY_TIMEOUT",
-            ),
+            supabase.from("user_stores").select("store_id").eq("user_id", userId),
           {
             category: "scope",
             serverTimingKey: "scope",
@@ -1148,14 +946,11 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
         await measureAsync(
           "access-scope.shopify-tokens",
           () =>
-            runAccessScopeQuery(
-              supabase
-                .from("shopify_tokens")
-                .select("store_id")
-                .eq("user_id", userId)
-                .not("store_id", "is", null),
-              "SHOPIFY_TOKEN_SCOPE_QUERY_TIMEOUT",
-            ),
+            supabase
+              .from("shopify_tokens")
+              .select("store_id")
+              .eq("user_id", userId)
+              .not("store_id", "is", null),
           {
             category: "scope",
             serverTimingKey: "scope",
@@ -1182,15 +977,12 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
         measureAsync(
           "access-scope.infer-products",
           () =>
-            runAccessScopeQuery(
-              supabase
-                .from("products")
-                .select("store_id")
-                .eq("user_id", userId)
-                .not("store_id", "is", null)
-                .limit(20),
-              "PRODUCT_SCOPE_QUERY_TIMEOUT",
-            ),
+            supabase
+              .from("products")
+              .select("store_id")
+              .eq("user_id", userId)
+              .not("store_id", "is", null)
+              .limit(20),
           {
             category: "scope",
             serverTimingKey: "scope",
@@ -1200,15 +992,12 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
         measureAsync(
           "access-scope.infer-orders",
           () =>
-            runAccessScopeQuery(
-              supabase
-                .from("orders")
-                .select("store_id")
-                .eq("user_id", userId)
-                .not("store_id", "is", null)
-                .limit(20),
-              "ORDER_SCOPE_QUERY_TIMEOUT",
-            ),
+            supabase
+              .from("orders")
+              .select("store_id")
+              .eq("user_id", userId)
+              .not("store_id", "is", null)
+              .limit(20),
           {
             category: "scope",
             serverTimingKey: "scope",
@@ -1218,15 +1007,12 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
         measureAsync(
           "access-scope.infer-customers",
           () =>
-            runAccessScopeQuery(
-              supabase
-                .from("customers")
-                .select("store_id")
-                .eq("user_id", userId)
-                .not("store_id", "is", null)
-                .limit(20),
-              "CUSTOMER_SCOPE_QUERY_TIMEOUT",
-            ),
+            supabase
+              .from("customers")
+              .select("store_id")
+              .eq("user_id", userId)
+              .not("store_id", "is", null)
+              .limit(20),
           {
             category: "scope",
             serverTimingKey: "scope",
@@ -1252,15 +1038,12 @@ export const getAccessibleStoreIds = async (userId, context = {}) => {
       const { data: userRow, error: userError } = await measureAsync(
         "access-scope.creator-inheritance",
         () =>
-          runAccessScopeQuery(
-            supabase
-              .from("users")
-              .select("created_by")
-              .eq("id", userId)
-              .limit(1)
-              .maybeSingle(),
-            "CREATOR_SCOPE_QUERY_TIMEOUT",
-          ),
+          supabase
+            .from("users")
+            .select("created_by")
+            .eq("id", userId)
+            .limit(1)
+            .maybeSingle(),
         {
           category: "scope",
           serverTimingKey: "scope",

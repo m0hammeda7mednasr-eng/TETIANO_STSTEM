@@ -6,12 +6,6 @@ import { queueShopifyBackgroundSync } from "./shopifyBackgroundSyncService.js";
 import { extractCustomerPhone } from "../helpers/customerContact.js";
 
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
-const WEBHOOK_SECRET_CACHE_TTL_MS = 10 * 60 * 1000;
-const WEBHOOK_SECRET_LOOKUP_TIMEOUT_MS = Math.max(
-  500,
-  Number(process.env.WEBHOOK_SECRET_LOOKUP_TIMEOUT_MS) || 2500,
-);
-const SHOP_TOKEN_ROWS_CACHE_TTL_MS = 30 * 1000;
 const TETIANO_PAYMENT_TAG_PREFIXES = [
   "tetiano_payment_method:",
   "tetiano_pm:",
@@ -38,41 +32,6 @@ const VALID_ORDER_STATUSES = new Set([
   "voided",
   "partially_refunded",
 ]);
-const webhookSecretCache = new Map();
-const webhookSecretLookupPromises = new Map();
-const shopTokenRowsCache = new Map();
-const shopTokenRowsLookupPromises = new Map();
-
-const getTimedCacheValue = (cache, key, ttlMs) => {
-  const entry = cache.get(key);
-  if (!entry) return null;
-
-  if (Date.now() - entry.cachedAt <= ttlMs) {
-    return entry;
-  }
-
-  cache.delete(key);
-  return null;
-};
-
-const rememberTimedCacheValue = (cache, key, value) => {
-  cache.set(key, {
-    cachedAt: Date.now(),
-    ...value,
-  });
-};
-
-const withTimeout = (promise, timeoutMs, errorCode) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      setTimeout(() => {
-        const error = new Error(`${errorCode} after ${timeoutMs}ms`);
-        error.code = errorCode;
-        reject(error);
-      }, timeoutMs);
-    }),
-  ]);
 
 export const MANAGED_WEBHOOK_TOPICS = [
   "orders/create",
@@ -328,51 +287,27 @@ const selectTokenRowsByShop = async (shopDomain) => {
   const normalizedShop = normalizeShopDomain(shopDomain);
   if (!normalizedShop) return [];
 
-  const cached = getTimedCacheValue(
-    shopTokenRowsCache,
-    normalizedShop,
-    SHOP_TOKEN_ROWS_CACHE_TTL_MS,
-  );
-  if (cached) {
-    return cached.rows || [];
+  const { data, error } = await supabase
+    .from("shopify_tokens")
+    .select("user_id, store_id, shop, access_token, updated_at")
+    .eq("shop", normalizedShop)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw error;
   }
 
-  const existingLookup = shopTokenRowsLookupPromises.get(normalizedShop);
-  if (existingLookup) {
-    return await existingLookup;
+  const deduped = [];
+  const seen = new Set();
+  for (const row of data || []) {
+    const key = `${row.user_id || ""}:${row.store_id || ""}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(row);
+    }
   }
 
-  const lookupPromise = (async () => {
-    const { data, error } = await supabase
-      .from("shopify_tokens")
-      .select("user_id, store_id, shop, access_token, updated_at")
-      .eq("shop", normalizedShop)
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      throw error;
-    }
-
-    const deduped = [];
-    const seen = new Set();
-    for (const row of data || []) {
-      const key = `${row.user_id || ""}:${row.store_id || ""}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        deduped.push(row);
-      }
-    }
-
-    rememberTimedCacheValue(shopTokenRowsCache, normalizedShop, {
-      rows: deduped,
-    });
-    return deduped;
-  })().finally(() => {
-    shopTokenRowsLookupPromises.delete(normalizedShop);
-  });
-
-  shopTokenRowsLookupPromises.set(normalizedShop, lookupPromise);
-  return await lookupPromise;
+  return deduped;
 };
 
 const mapProductFromShopify = (product = {}) => {
@@ -719,7 +654,14 @@ export const removeManagedWebhooks = async ({
   return { deleted: toDelete.length, skipped: false };
 };
 
-const lookupWebhookSecretForShop = async (normalizedShop) => {
+export const getWebhookSecretForShop = async (shopDomain) => {
+  const fromEnv =
+    process.env.SHOPIFY_WEBHOOK_SECRET || process.env.SHOPIFY_API_SECRET;
+  if (fromEnv) return fromEnv;
+
+  const normalizedShop = normalizeShopDomain(shopDomain);
+  if (!normalizedShop) return null;
+
   const { data: tokenRow, error: tokenError } = await supabase
     .from("shopify_tokens")
     .select("user_id")
@@ -744,47 +686,6 @@ const lookupWebhookSecretForShop = async (normalizedShop) => {
   }
 
   return credentials?.api_secret || null;
-};
-
-export const getWebhookSecretForShop = async (shopDomain) => {
-  const fromEnv =
-    process.env.SHOPIFY_WEBHOOK_SECRET || process.env.SHOPIFY_API_SECRET;
-  if (fromEnv) return fromEnv;
-
-  const normalizedShop = normalizeShopDomain(shopDomain);
-  if (!normalizedShop) return null;
-
-  const cached = getTimedCacheValue(
-    webhookSecretCache,
-    normalizedShop,
-    WEBHOOK_SECRET_CACHE_TTL_MS,
-  );
-  if (cached) {
-    return cached.secret || null;
-  }
-
-  const existingLookup = webhookSecretLookupPromises.get(normalizedShop);
-  if (existingLookup) {
-    return await existingLookup;
-  }
-
-  const lookupPromise = withTimeout(
-    lookupWebhookSecretForShop(normalizedShop),
-    WEBHOOK_SECRET_LOOKUP_TIMEOUT_MS,
-    "WEBHOOK_SECRET_LOOKUP_TIMEOUT",
-  )
-    .then((secret) => {
-      rememberTimedCacheValue(webhookSecretCache, normalizedShop, {
-        secret: secret || null,
-      });
-      return secret || null;
-    })
-    .finally(() => {
-      webhookSecretLookupPromises.delete(normalizedShop);
-    });
-
-  webhookSecretLookupPromises.set(normalizedShop, lookupPromise);
-  return await lookupPromise;
 };
 
 export const verifyWebhookHmac = (rawBody, receivedHmac, secret) => {

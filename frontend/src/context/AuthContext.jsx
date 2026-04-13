@@ -182,7 +182,7 @@ export const AuthProvider = ({ children }) => {
 
         const { data: userData } = await api.get("/users/me", {
           params: {
-            include_stores: false,
+            include_stores: true,
           },
         });
 
@@ -209,16 +209,13 @@ export const AuthProvider = ({ children }) => {
             ),
         );
 
-        void api
-          .get("/users/me/stores")
-          .then(({ data: storesData }) => {
-            if (Array.isArray(storesData)) {
-              syncCurrentStoreId(storesData);
-            }
-          })
-          .catch((storesError) => {
-            console.error("Failed to sync current store", storesError);
-          });
+        try {
+          if (Array.isArray(userData?.stores)) {
+            syncCurrentStoreId(userData.stores);
+          }
+        } catch (storesError) {
+          console.error("Failed to sync current store", storesError);
+        }
       } catch (error) {
         console.error("Failed to refresh auth state", error);
 

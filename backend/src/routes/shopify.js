@@ -59,9 +59,14 @@ const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const SHIPPING_ISSUE_HISTORY_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 200;
-const ORDER_LIST_PAGE_LIMIT = 4500;
-const ORDER_LIST_MAX_VISIBLE = 4500;
+const ORDER_LIST_PAGE_LIMIT = 1200;
+const ORDER_LIST_MAX_VISIBLE = 1200;
+const ORDER_HISTORY_SOURCE_BATCH_SIZE = 1000;
 const ORDER_SEARCH_SHOPIFY_FALLBACK_LIMIT = 10;
+const HEAVY_ENDPOINT_CACHE_TTL_MS = 60 * 1000;
+const HEAVY_ENDPOINT_STALE_TTL_MS = 5 * 60 * 1000;
+const HEAVY_ENDPOINT_CACHE_MAX_ENTRIES = 100;
+const SHIPPING_ISSUE_OPERATION_LOOKBACK_LIMIT = 10000;
 const MISSING_ORDER_NOTIFICATION_WINDOW_MS = DAY_MS;
 const ORDER_ACTION_LOOKUP_CHUNK_SIZE = 250;
 const MISSING_ORDER_NOTIFICATION_TYPES = new Set([
@@ -75,6 +80,62 @@ const PAID_LIKE_STATUSES = new Set([
   "partially_refunded",
   "refunded",
 ]);
+const PRODUCT_LOCAL_METADATA_KEY = "_tetiano_local_product";
+const ORDER_LOCAL_METADATA_KEY = "_tetiano_local_order";
+const PRODUCT_WAREHOUSE_SNAPSHOT_FIELD_MAP = {
+  data_warehouse_quantity: "_tetiano_warehouse_quantity",
+  data_warehouse_last_scanned_at: "_tetiano_warehouse_last_scanned_at",
+  data_warehouse_last_movement_type: "_tetiano_warehouse_last_movement_type",
+  data_warehouse_last_movement_quantity: "_tetiano_warehouse_last_movement_quantity",
+  data_warehouse_created_at: "_tetiano_warehouse_created_at",
+  data_warehouse_updated_at: "_tetiano_warehouse_updated_at",
+};
+const PRODUCT_LIST_SNAPSHOT_FIELDS = [
+  "data_variants",
+  "data_images",
+  "data_image",
+  "data_local_metadata",
+  ...Object.keys(PRODUCT_WAREHOUSE_SNAPSHOT_FIELD_MAP),
+];
+const ORDER_LIST_SNAPSHOT_FIELDS = [
+  "data_customer",
+  "data_line_items",
+  "data_shipping_address",
+  "data_billing_address",
+  "data_name",
+  "data_note",
+  "data_tags",
+  "data_local_metadata",
+];
+const PRODUCT_LIST_SNAPSHOT_SELECT = [
+  "id",
+  "shopify_id",
+  "store_id",
+  "title",
+  "vendor",
+  "product_type",
+  "price",
+  "cost_price",
+  "ads_cost",
+  "operation_cost",
+  "shipping_cost",
+  "sku",
+  "image_url",
+  "inventory_quantity",
+  "last_synced_at",
+  "local_updated_at",
+  "pending_sync",
+  "sync_error",
+  "created_at",
+  "updated_at",
+  "data_variants:data->variants",
+  "data_images:data->images",
+  "data_image:data->image",
+  `data_local_metadata:data->${PRODUCT_LOCAL_METADATA_KEY}`,
+  ...Object.entries(PRODUCT_WAREHOUSE_SNAPSHOT_FIELD_MAP).map(
+    ([alias, key]) => `${alias}:data->${key}`,
+  ),
+].join(",");
 const PRODUCT_LIST_SELECT = [
   "id",
   "shopify_id",
@@ -99,6 +160,7 @@ const PRODUCT_LIST_SELECT = [
   "data",
 ].join(",");
 const PRODUCT_LIST_SELECTS = [
+  PRODUCT_LIST_SNAPSHOT_SELECT,
   PRODUCT_LIST_SELECT,
   [
     "id",
@@ -121,6 +183,34 @@ const PRODUCT_LIST_SELECTS = [
     "data",
   ].join(","),
 ];
+const ORDER_LIST_SNAPSHOT_SELECT = [
+  "id",
+  "shopify_id",
+  "store_id",
+  "order_number",
+  "customer_name",
+  "customer_email",
+  "customer_phone",
+  "total_price",
+  "total_refunded",
+  "financial_status",
+  "fulfillment_status",
+  "payment_method",
+  "manual_payment_method",
+  "status",
+  "items_count",
+  "cancelled_at",
+  "created_at",
+  "updated_at",
+  "data_customer:data->customer",
+  "data_line_items:data->line_items",
+  "data_shipping_address:data->shipping_address",
+  "data_billing_address:data->billing_address",
+  "data_name:data->name",
+  "data_note:data->note",
+  "data_tags:data->tags",
+  `data_local_metadata:data->${ORDER_LOCAL_METADATA_KEY}`,
+].join(",");
 const ORDER_LIST_SELECT = [
   "id",
   "shopify_id",
@@ -143,6 +233,7 @@ const ORDER_LIST_SELECT = [
   "data",
 ].join(",");
 const ORDER_LIST_SELECTS = [
+  ORDER_LIST_SNAPSHOT_SELECT,
   ORDER_LIST_SELECT,
   [
     "id",
@@ -367,6 +458,8 @@ const CUSTOMER_SORT_FIELDS = new Set([
 ]);
 const orderBackgroundSyncState = new Map();
 const shippingIssueHistoryRecoveryState = new Map();
+const missingOrdersResultCache = new Map();
+const shippingIssuesResultCache = new Map();
 const normalizeBaseUrl = (value) =>
   String(value || "")
     .trim()
@@ -602,6 +695,55 @@ const toBooleanQueryFlag = (value, fallback = false) => {
   return fallback;
 };
 
+const normalizeCachePart = (value, fallback = "none") => {
+  const normalized = String(value || "").trim();
+  return normalized || fallback;
+};
+
+const buildScopedRequestCacheKey = (req, namespace) =>
+  [
+    namespace,
+    normalizeCachePart(req?.user?.id, "anonymous"),
+    normalizeCachePart(req?.user?.role || (req?.user?.isAdmin ? "admin" : "user")),
+    normalizeCachePart(getRequestedStoreId(req), "all-stores"),
+  ].join("::");
+
+const getCachedHeavyResult = (cache, key, ttlMs = HEAVY_ENDPOINT_CACHE_TTL_MS) => {
+  const entry = cache.get(key);
+  if (!entry) {
+    return null;
+  }
+
+  if (Date.now() - entry.updatedAt > ttlMs) {
+    return null;
+  }
+
+  return entry.value;
+};
+
+const getStaleHeavyResult = (
+  cache,
+  key,
+  ttlMs = HEAVY_ENDPOINT_STALE_TTL_MS,
+) => getCachedHeavyResult(cache, key, ttlMs);
+
+const rememberHeavyResult = (cache, key, value) => {
+  cache.set(key, {
+    value,
+    updatedAt: Date.now(),
+  });
+
+  while (cache.size > HEAVY_ENDPOINT_CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    cache.delete(oldestKey);
+  }
+
+  return value;
+};
+
 const getListPagination = (
   query = {},
   defaultLimit = DEFAULT_LIST_LIMIT,
@@ -713,66 +855,98 @@ const fetchScopedOrdersByIds = async ({
   return rows;
 };
 
-const loadShippingIssueOrdersForRequest = async (req) => {
-  const requestedStoreId = getRequestedStoreId(req);
-  const isAdmin = await resolveIsAdmin(req);
-  const accessibleStoreIds = isAdmin
-    ? []
-    : await getAccessibleStoreIds(req.user.id);
-
-  if (
-    requestedStoreId &&
-    !isAdmin &&
-    !accessibleStoreIds.includes(requestedStoreId)
-  ) {
-    return {
-      rows: [],
-      repairedCount: 0,
-    };
+const loadShippingIssueOrdersForRequest = async (
+  req,
+  { forceRefresh = false } = {},
+) => {
+  const cacheKey = buildScopedRequestCacheKey(req, "shipping-issues");
+  if (!forceRefresh) {
+    const cached = getCachedHeavyResult(shippingIssuesResultCache, cacheKey);
+    if (cached) {
+      return cached;
+    }
   }
 
-  const { data: historyRows, error: historyError } = await db
-    .from("sync_operations")
-    .select("entity_id")
-    .eq("operation_type", "order_shipping_issue_update");
+  try {
+    const requestedStoreId = getRequestedStoreId(req);
+    const isAdmin = await resolveIsAdmin(req);
+    const accessibleStoreIds = isAdmin
+      ? []
+      : await getAccessibleStoreIds(req.user.id);
 
-  if (historyError) {
-    throw historyError;
+    if (
+      requestedStoreId &&
+      !isAdmin &&
+      !accessibleStoreIds.includes(requestedStoreId)
+    ) {
+      return {
+        rows: [],
+        repairedCount: 0,
+      };
+    }
+
+    const { data: historyRows, error: historyError } = await db
+      .from("sync_operations")
+      .select("entity_id")
+      .eq("operation_type", "order_shipping_issue_update")
+      .order("created_at", { ascending: false })
+      .limit(SHIPPING_ISSUE_OPERATION_LOOKBACK_LIMIT);
+
+    if (historyError) {
+      if (isSchemaCompatibilityError(historyError)) {
+        return rememberHeavyResult(shippingIssuesResultCache, cacheKey, {
+          rows: [],
+          repairedCount: 0,
+        });
+      }
+      throw historyError;
+    }
+
+    const candidateOrderIds = Array.from(
+      new Set(
+        (historyRows || [])
+          .map((row) => String(row?.entity_id || "").trim())
+          .filter(Boolean),
+      ),
+    );
+
+    const latestOperationByOrderId =
+      await fetchLatestShippingIssueOperationsByOrderId(db, candidateOrderIds);
+    const activeHistoryOrderIds = Array.from(latestOperationByOrderId.entries())
+      .filter(([, operation]) =>
+        isShippingIssueActive(operation?.request_data?.new_shipping_issue),
+      )
+      .map(([orderId]) => orderId);
+    const scopedOrders = await fetchScopedOrdersByIds({
+      req,
+      requestedStoreId,
+      isAdmin,
+      accessibleStoreIds,
+      orderIds: activeHistoryOrderIds,
+    });
+
+    const recoveryResult = await recoverShippingIssuesFromHistory({
+      supabaseClient: db,
+      orders: scopedOrders,
+      persist: true,
+    });
+
+    return rememberHeavyResult(shippingIssuesResultCache, cacheKey, {
+      rows: recoveryResult.orders || [],
+      repairedCount: recoveryResult.repairedCount || 0,
+    });
+  } catch (error) {
+    const stale = getStaleHeavyResult(shippingIssuesResultCache, cacheKey);
+    if (stale) {
+      console.warn(
+        "Serving stale shipping-issues cache after refresh failure:",
+        error?.message || error,
+      );
+      return stale;
+    }
+
+    throw error;
   }
-
-  const candidateOrderIds = Array.from(
-    new Set(
-      (historyRows || [])
-        .map((row) => String(row?.entity_id || "").trim())
-        .filter(Boolean),
-    ),
-  );
-
-  const latestOperationByOrderId =
-    await fetchLatestShippingIssueOperationsByOrderId(db, candidateOrderIds);
-  const activeHistoryOrderIds = Array.from(latestOperationByOrderId.entries())
-    .filter(([, operation]) =>
-      isShippingIssueActive(operation?.request_data?.new_shipping_issue),
-    )
-    .map(([orderId]) => orderId);
-  const scopedOrders = await fetchScopedOrdersByIds({
-    req,
-    requestedStoreId,
-    isAdmin,
-    accessibleStoreIds,
-    orderIds: activeHistoryOrderIds,
-  });
-
-  const recoveryResult = await recoverShippingIssuesFromHistory({
-    supabaseClient: db,
-    orders: scopedOrders,
-    persist: true,
-  });
-
-  return {
-    rows: recoveryResult.orders || [],
-    repairedCount: recoveryResult.repairedCount || 0,
-  };
 };
 
 const buildPaginatedCollection = (rows, { limit, offset }) => {
@@ -1018,6 +1192,201 @@ const getScopedEntityRows = async (req, entityModel) => {
   return {
     data: filterRowsByStoreId(sourceResult?.data || [], requestedStoreId),
     error: null,
+    isAdmin,
+    requestedStoreId,
+  };
+};
+
+const buildScopedOrderHistoryRowsQuery = ({
+  req,
+  selectedColumns,
+  rangeStart,
+  rangeEnd,
+  requestedStoreId,
+  isAdmin,
+  accessibleStoreIds = [],
+  useLegacyUserScope = false,
+  orderField = "created_at",
+  ascending = false,
+} = {}) => {
+  let query = db.from("orders").select(selectedColumns);
+
+  if (orderField) {
+    query = query.order(orderField, { ascending });
+  }
+
+  query = query.range(rangeStart, rangeEnd);
+
+  if (requestedStoreId) {
+    return query.eq("store_id", requestedStoreId);
+  }
+
+  if (isAdmin) {
+    return query;
+  }
+
+  if (!useLegacyUserScope && accessibleStoreIds.length > 0) {
+    return query.in("store_id", accessibleStoreIds);
+  }
+
+  return query.eq("user_id", req.user.id);
+};
+
+const executeScopedOrderHistoryRowsQuery = async ({
+  req,
+  selectedColumns,
+  requestedStoreId,
+  isAdmin,
+  accessibleStoreIds = [],
+  useLegacyUserScope = false,
+  sortOptions = {},
+} = {}) => {
+  const rows = [];
+  const orderFieldCandidates = getOrderFieldFallbacks(
+    sortOptions?.sortBy || "created_at",
+    { allowUnordered: true },
+  );
+  let lastError = null;
+
+  for (const orderField of orderFieldCandidates) {
+    rows.length = 0;
+
+    for (
+      let offset = 0;
+      ;
+      offset += ORDER_HISTORY_SOURCE_BATCH_SIZE
+    ) {
+      const { data, error } = await buildScopedOrderHistoryRowsQuery({
+        req,
+        selectedColumns,
+        rangeStart: offset,
+        rangeEnd: offset + ORDER_HISTORY_SOURCE_BATCH_SIZE - 1,
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+        useLegacyUserScope,
+        orderField,
+        ascending: Boolean(sortOptions?.ascending),
+      });
+
+      if (error) {
+        lastError = error;
+        break;
+      }
+
+      const batch = Array.isArray(data) ? data : [];
+      rows.push(...batch);
+
+      if (batch.length < ORDER_HISTORY_SOURCE_BATCH_SIZE) {
+        return {
+          data: rows,
+          error: null,
+        };
+      }
+    }
+
+    if (lastError && isSchemaCompatibilityError(lastError)) {
+      break;
+    }
+
+    if (lastError && isQueryRetryableError(lastError)) {
+      continue;
+    }
+
+    if (lastError) {
+      return {
+        data: [],
+        error: lastError,
+      };
+    }
+  }
+
+  return {
+    data: [],
+    error: lastError,
+  };
+};
+
+const loadScopedOrderHistoryRows = async (req, sortOptions = {}) => {
+  const requestedStoreId = getRequestedStoreId(req);
+  const isAdmin = await resolveIsAdmin(req);
+  const accessibleStoreIds = isAdmin
+    ? []
+    : await getAccessibleStoreIds(req.user.id);
+
+  if (
+    requestedStoreId &&
+    !isAdmin &&
+    !accessibleStoreIds.includes(requestedStoreId)
+  ) {
+    return {
+      data: [],
+      error: null,
+      isAdmin,
+      requestedStoreId,
+    };
+  }
+
+  let lastError = null;
+
+  for (const selectedColumns of ORDER_LIST_SELECTS) {
+    let queryResult = await executeScopedOrderHistoryRowsQuery({
+      req,
+      selectedColumns,
+      requestedStoreId,
+      isAdmin,
+      accessibleStoreIds,
+      useLegacyUserScope: false,
+      sortOptions,
+    });
+
+    if (
+      !queryResult.error &&
+      !isAdmin &&
+      !requestedStoreId &&
+      accessibleStoreIds.length > 0 &&
+      queryResult.data.length === 0
+    ) {
+      queryResult = await executeScopedOrderHistoryRowsQuery({
+        req,
+        selectedColumns,
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+        useLegacyUserScope: true,
+        sortOptions,
+      });
+    }
+
+    if (!queryResult.error) {
+      return {
+        data: dedupeRowsById(queryResult.data || []),
+        error: null,
+        isAdmin,
+        requestedStoreId,
+      };
+    }
+
+    lastError = queryResult.error;
+    if (isSchemaCompatibilityError(queryResult.error)) {
+      continue;
+    }
+
+    if (isQueryRetryableError(queryResult.error)) {
+      continue;
+    }
+
+    return {
+      data: [],
+      error: queryResult.error,
+      isAdmin,
+      requestedStoreId,
+    };
+  }
+
+  return {
+    data: [],
+    error: lastError,
     isAdmin,
     requestedStoreId,
   };
@@ -1601,13 +1970,89 @@ const parseJsonField = (value) => {
   return value;
 };
 
+const hasOwnProperty = (value, key) =>
+  Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
+
+const hasPrefetchedSnapshotFields = (record, fieldNames = []) =>
+  (fieldNames || []).some((fieldName) => hasOwnProperty(record, fieldName));
+
+const buildProductDataSnapshot = (product) => {
+  if (!hasPrefetchedSnapshotFields(product, PRODUCT_LIST_SNAPSHOT_FIELDS)) {
+    return parseJsonField(product?.data);
+  }
+
+  const snapshot = {};
+
+  if (hasOwnProperty(product, "data_image")) {
+    snapshot.image = product.data_image;
+  }
+  if (hasOwnProperty(product, "data_images")) {
+    snapshot.images = Array.isArray(product.data_images) ? product.data_images : [];
+  }
+  if (hasOwnProperty(product, "data_variants")) {
+    snapshot.variants = Array.isArray(product.data_variants)
+      ? product.data_variants
+      : [];
+  }
+  if (hasOwnProperty(product, "data_local_metadata")) {
+    snapshot[PRODUCT_LOCAL_METADATA_KEY] = product.data_local_metadata || {};
+  }
+
+  Object.entries(PRODUCT_WAREHOUSE_SNAPSHOT_FIELD_MAP).forEach(
+    ([alias, targetKey]) => {
+      if (hasOwnProperty(product, alias)) {
+        snapshot[targetKey] = product[alias];
+      }
+    },
+  );
+
+  return snapshot;
+};
+
+const buildOrderDataSnapshot = (order) => {
+  if (!hasPrefetchedSnapshotFields(order, ORDER_LIST_SNAPSHOT_FIELDS)) {
+    return parseJsonField(order?.data);
+  }
+
+  const snapshot = {};
+
+  if (hasOwnProperty(order, "data_customer")) {
+    snapshot.customer = order.data_customer || {};
+  }
+  if (hasOwnProperty(order, "data_line_items")) {
+    snapshot.line_items = Array.isArray(order.data_line_items)
+      ? order.data_line_items
+      : [];
+  }
+  if (hasOwnProperty(order, "data_shipping_address")) {
+    snapshot.shipping_address = order.data_shipping_address || {};
+  }
+  if (hasOwnProperty(order, "data_billing_address")) {
+    snapshot.billing_address = order.data_billing_address || {};
+  }
+  if (hasOwnProperty(order, "data_name")) {
+    snapshot.name = order.data_name || "";
+  }
+  if (hasOwnProperty(order, "data_note")) {
+    snapshot.note = order.data_note || "";
+  }
+  if (hasOwnProperty(order, "data_tags")) {
+    snapshot.tags = order.data_tags || [];
+  }
+  if (hasOwnProperty(order, "data_local_metadata")) {
+    snapshot[ORDER_LOCAL_METADATA_KEY] = order.data_local_metadata || {};
+  }
+
+  return snapshot;
+};
+
 const getProductVariantRows = (product) => {
-  const parsedData = parseJsonField(product?.data);
+  const parsedData = buildProductDataSnapshot(product);
   return Array.isArray(parsedData?.variants) ? parsedData.variants : [];
 };
 
 const getProductImageRows = (product) => {
-  const parsedData = parseJsonField(product?.data);
+  const parsedData = buildProductDataSnapshot(product);
   const images = Array.isArray(parsedData?.images) ? parsedData.images : [];
 
   return images.map((image) => ({
@@ -1634,7 +2079,9 @@ const getProductTotalInventory = (product) => {
 const getProductTotalWarehouseInventory = (product) => {
   const variants = getProductVariantRows(product);
   if (variants.length === 0) {
-    return extractWarehouseInventorySnapshot(parseJsonField(product?.data)).quantity;
+    return extractWarehouseInventorySnapshot(
+      buildProductDataSnapshot(product),
+    ).quantity;
   }
 
   return variants.reduce(
@@ -1670,7 +2117,7 @@ const getProductPrimaryImageUrl = (product) => {
     return firstImageUrl;
   }
 
-  const parsedData = parseJsonField(product?.data);
+  const parsedData = buildProductDataSnapshot(product);
   return String(parsedData?.image?.src || "").trim();
 };
 
@@ -1714,7 +2161,7 @@ const buildProductVariantSummaries = (product) => {
 
   if (variants.length === 0) {
     const warehouseSnapshot = extractWarehouseInventorySnapshot(
-      parseJsonField(product?.data),
+      buildProductDataSnapshot(product),
     );
 
     return [
@@ -1784,15 +2231,29 @@ const buildProductVariantSummaries = (product) => {
 };
 
 const buildProductSummary = (product) => {
+  const {
+    data,
+    data_variants,
+    data_images,
+    data_image,
+    data_local_metadata,
+    data_warehouse_quantity,
+    data_warehouse_last_scanned_at,
+    data_warehouse_last_movement_type,
+    data_warehouse_last_movement_quantity,
+    data_warehouse_created_at,
+    data_warehouse_updated_at,
+    ...productSummaryBase
+  } = product || {};
   const variants = buildProductVariantSummaries(product);
   const images = getProductImageRows(product);
   const totalInventory = getProductTotalInventory(product);
   const totalWarehouseInventory = getProductTotalWarehouseInventory(product);
   const primaryImageUrl = getProductPrimaryImageUrl(product);
-  const localMetadata = extractProductLocalMetadata(product?.data);
+  const localMetadata = extractProductLocalMetadata(buildProductDataSnapshot(product));
 
   return {
-    ...product,
+    ...productSummaryBase,
     inventory_quantity: totalInventory,
     shopify_inventory_quantity: totalInventory,
     warehouse_inventory_quantity: totalWarehouseInventory,
@@ -1992,7 +2453,7 @@ const findOrderByReferenceForUser = async (userId, orderReference) => {
 };
 
 const getOrderFinancialStatus = (order) => {
-  const data = parseJsonField(order?.data);
+  const data = buildOrderDataSnapshot(order);
   return String(
     resolveOrderStatusFromData(data) ||
       data?.financial_status ||
@@ -2010,17 +2471,17 @@ const isShopifyPaidOrder = (order) => {
 };
 
 const getOrderGrossAmount = (order) => {
-  const data = parseJsonField(order?.data);
+  const data = buildOrderDataSnapshot(order);
   return toNumber(order?.total_price ?? data?.total_price);
 };
 
 const getOrderCurrentAmount = (order) => {
-  const data = parseJsonField(order?.data);
+  const data = buildOrderDataSnapshot(order);
   return toNumber(order?.current_total_price ?? data?.current_total_price);
 };
 
 const getRefundedAmountFromTransactions = (order) => {
-  const data = parseJsonField(order?.data);
+  const data = buildOrderDataSnapshot(order);
   const refunds = Array.isArray(data?.refunds) ? data.refunds : [];
 
   return refunds.reduce((sum, refund) => {
@@ -2068,7 +2529,7 @@ const getOrderRefundedAmount = (order) => {
 };
 
 const isCancelledOrder = (order) => {
-  const data = parseJsonField(order?.data);
+  const data = buildOrderDataSnapshot(order);
   const financialStatus = getOrderFinancialStatus(order);
 
   return (
@@ -2110,7 +2571,7 @@ const resolveOrderPaymentMethod = (order) => {
     return "shopify";
   }
 
-  const data = parseJsonField(order?.data);
+  const data = buildOrderDataSnapshot(order);
   const manualMethod =
     normalizePaymentMethod(order?.manual_payment_method) ||
     resolveManualPaymentMethodFromData(data);
@@ -2123,17 +2584,17 @@ const resolveOrderPaymentMethod = (order) => {
 };
 
 const getOrderCustomerShopifyId = (order) => {
-  const data = parseJsonField(order?.data);
+  const data = buildOrderDataSnapshot(order);
   return String(order?.customer_id || data?.customer?.id || "").trim();
 };
 
 const getOrderLineItems = (order) => {
-  const parsedData = parseJsonField(order?.data);
+  const parsedData = buildOrderDataSnapshot(order);
   return Array.isArray(parsedData?.line_items) ? parsedData.line_items : [];
 };
 
 const buildOrderSearchIndex = (order) => {
-  const parsedData = parseJsonField(order?.data);
+  const parsedData = buildOrderDataSnapshot(order);
   const lineItems = getOrderLineItems(order);
   const previewTitles = buildOrderItemPreviews(order).map(
     (item) => item?.title,
@@ -2244,7 +2705,7 @@ const buildOrderItemPreviews = (order) =>
     }));
 
 const buildOrderListItem = (order) => {
-  const parsedData = parseJsonField(order?.data);
+  const parsedData = buildOrderDataSnapshot(order);
   const localOrderMetadata = extractOrderLocalMetadata(parsedData);
   const shippingIssue = localOrderMetadata?.shipping_issue || null;
   const financialStatus = getOrderFinancialStatus(order);
@@ -2606,7 +3067,7 @@ const applyOrdersQueryFilters = (
       .trim();
     filtered = filtered.filter((order) => {
       const shippingIssue =
-        extractOrderLocalMetadata(parseJsonField(order?.data))?.shipping_issue ||
+        extractOrderLocalMetadata(buildOrderDataSnapshot(order))?.shipping_issue ||
         null;
 
       if (shippingIssueFilter === "active") {
@@ -2627,7 +3088,7 @@ const applyOrdersQueryFilters = (
       .trim();
     filtered = filtered.filter((order) => {
       const shippingIssue =
-        extractOrderLocalMetadata(parseJsonField(order?.data))?.shipping_issue ||
+        extractOrderLocalMetadata(buildOrderDataSnapshot(order))?.shipping_issue ||
         null;
       return (
         isShippingIssueActive(shippingIssue) &&
@@ -2653,7 +3114,7 @@ const applyOrdersQueryFilters = (
     const refundFilter = String(query.refund_filter).toLowerCase().trim();
     filtered = filtered.filter((order) => {
       const status = getOrderFinancialStatus(order);
-      const data = parseJsonField(order.data);
+      const data = buildOrderDataSnapshot(order);
       const refunds = Array.isArray(data?.refunds) ? data.refunds : [];
       const refundedFromTransactions = refunds.reduce((sum, refund) => {
         const transactions = Array.isArray(refund?.transactions)
@@ -2694,7 +3155,7 @@ const applyOrdersQueryFilters = (
 
   if (String(query.cancelled_only || "").toLowerCase() === "true") {
     filtered = filtered.filter((order) => {
-      const data = parseJsonField(order.data);
+      const data = buildOrderDataSnapshot(order);
       const status = String(
         getOrderFinancialStatus(order) || order.status || "",
       )
@@ -2782,7 +3243,7 @@ const buildCustomerListItem = (
 };
 
 const getOrderCustomerPhone = (order) => {
-  const parsedData = parseJsonField(order?.data);
+  const parsedData = buildOrderDataSnapshot(order);
 
   return String(
     order?.customer_phone ||
@@ -3017,13 +3478,38 @@ const getMissingOrdersForRows = async (rows = []) => {
   });
 };
 
-const getMissingOrdersForRequest = async (req) => {
-  const scopedRowsResult = await loadMissingOrdersSourceRows(req);
-  if (scopedRowsResult?.error) {
-    throw scopedRowsResult.error;
+const getMissingOrdersForRequest = async (req, { forceRefresh = false } = {}) => {
+  const cacheKey = buildScopedRequestCacheKey(req, "missing-orders");
+
+  if (!forceRefresh) {
+    const cached = getCachedHeavyResult(missingOrdersResultCache, cacheKey);
+    if (cached) {
+      return cached;
+    }
   }
 
-  return await getMissingOrdersForRows(scopedRowsResult?.data || []);
+  try {
+    const scopedRowsResult = await loadMissingOrdersSourceRows(req);
+    if (scopedRowsResult?.error) {
+      throw scopedRowsResult.error;
+    }
+
+    const missingOrders = await getMissingOrdersForRows(
+      scopedRowsResult?.data || [],
+    );
+    return rememberHeavyResult(missingOrdersResultCache, cacheKey, missingOrders);
+  } catch (error) {
+    const stale = getStaleHeavyResult(missingOrdersResultCache, cacheKey);
+    if (stale) {
+      console.warn(
+        "Serving stale missing-orders cache after refresh failure:",
+        error?.message || error,
+      );
+      return stale;
+    }
+
+    throw error;
+  }
 };
 
 const getMissingOrderRecipients = async () => {
@@ -4181,11 +4667,20 @@ router.get(
         DEFAULT_LIST_LIMIT,
         ORDER_LIST_PAGE_LIMIT,
       );
+      const forceRefresh = toBooleanQueryFlag(req.query.force_refresh, false);
       const reasonFilter = String(req.query.reason || req.query.shipping_issue_reason || "")
         .trim()
         .toLowerCase();
+      const updatedFromTimestamp = req.query.updated_from
+        ? startOfLocalDay(req.query.updated_from)?.getTime()
+        : null;
+      const updatedToTimestamp = req.query.updated_to
+        ? endOfLocalDay(req.query.updated_to)?.getTime()
+        : null;
 
-      const { rows, repairedCount } = await loadShippingIssueOrdersForRequest(req);
+      const { rows, repairedCount } = await loadShippingIssueOrdersForRequest(req, {
+        forceRefresh,
+      });
       let normalizedOrders = dedupeRowsById(
         (rows || []).map((order) => buildOrderListItem(order)),
       ).filter((order) => isShippingIssueActive(order?.shipping_issue));
@@ -4197,6 +4692,24 @@ router.get(
               .trim()
               .toLowerCase() === reasonFilter,
         );
+      }
+
+      if (Number.isFinite(updatedFromTimestamp)) {
+        normalizedOrders = normalizedOrders.filter((order) => {
+          const timestamp = Date.parse(
+            order?.shipping_issue?.updated_at || order?.updated_at || order?.created_at || "",
+          );
+          return Number.isFinite(timestamp) && timestamp >= updatedFromTimestamp;
+        });
+      }
+
+      if (Number.isFinite(updatedToTimestamp)) {
+        normalizedOrders = normalizedOrders.filter((order) => {
+          const timestamp = Date.parse(
+            order?.shipping_issue?.updated_at || order?.updated_at || order?.created_at || "",
+          );
+          return Number.isFinite(timestamp) && timestamp <= updatedToTimestamp;
+        });
       }
 
       normalizedOrders.sort((left, right) => {
@@ -4311,7 +4824,7 @@ router.get(
       }
 
       if (searchAllHistory) {
-        const scopedRowsResult = await getScopedEntityRows(req, Order);
+        const scopedRowsResult = await loadScopedOrderHistoryRows(req, sortOptions);
         if (scopedRowsResult?.error) {
           console.error(
             "Error fetching full-history orders search:",
@@ -4481,15 +4994,43 @@ router.get(
   requirePermission("can_view_orders"),
   async (req, res) => {
     try {
+      const idsOnly = toBooleanQueryFlag(req.query.ids_only, false);
+      const forceRefresh = toBooleanQueryFlag(req.query.force_refresh, false);
+      const reasonFilter = String(req.query.reason || "")
+        .trim()
+        .toLowerCase();
       const pagination = getListPagination(
         req.query,
         DEFAULT_LIST_LIMIT,
         ORDER_LIST_PAGE_LIMIT,
       );
 
-      const missingOrders = await getMissingOrdersForRequest(req);
+      const missingOrders = await getMissingOrdersForRequest(req, {
+        forceRefresh,
+      });
+      const responseOrders =
+        reasonFilter && reasonFilter !== "all"
+          ? missingOrders.filter((order) => {
+              const reason = String(order?.missing_reason || "")
+                .trim()
+                .toLowerCase();
+              if (
+                reasonFilter === "stock_shortage" ||
+                reasonFilter === MISSING_ORDER_REASON_STOCK_SHORTAGE
+              ) {
+                return reason === MISSING_ORDER_REASON_STOCK_SHORTAGE;
+              }
+              if (
+                reasonFilter === "no_action" ||
+                reasonFilter === MISSING_ORDER_REASON_NO_ACTION
+              ) {
+                return reason === MISSING_ORDER_REASON_NO_ACTION;
+              }
+              return reason === reasonFilter;
+            })
+          : missingOrders;
 
-      if (pagination.offset === 0) {
+      if (!idsOnly && pagination.offset === 0) {
         try {
           await ensureMissingOrderNotifications(missingOrders);
         } catch (notificationError) {
@@ -4517,8 +5058,17 @@ router.get(
         ).length,
       };
 
+      if (idsOnly) {
+        return res.json({
+          ids: responseOrders
+            .map((order) => String(order?.id || "").trim())
+            .filter(Boolean),
+          summary,
+        });
+      }
+
       res.json(
-        buildSlicedPaginatedCollection(missingOrders, pagination, { summary }),
+        buildSlicedPaginatedCollection(responseOrders, pagination, { summary }),
       );
     } catch (error) {
       console.error("Error fetching missing orders:", error);
@@ -4704,15 +5254,20 @@ router.post(
         });
       }
 
-      const scopedRowsResult = await getScopedEntityRows(req, Order);
-      if (scopedRowsResult?.error) {
-        return res.status(500).json({
-          error: scopedRowsResult.error.message || "Failed to load orders",
-        });
-      }
-
+      const requestedStoreId = getRequestedStoreId(req);
+      const isAdmin = await resolveIsAdmin(req);
+      const accessibleStoreIds = isAdmin
+        ? []
+        : await getAccessibleStoreIds(req.user.id);
+      const scopedOrders = await fetchScopedOrdersByIds({
+        req,
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+        orderIds,
+      });
       const orderMap = new Map(
-        (scopedRowsResult?.data || []).map((order) => [
+        (scopedOrders || []).map((order) => [
           String(order?.id || "").trim(),
           order,
         ]),

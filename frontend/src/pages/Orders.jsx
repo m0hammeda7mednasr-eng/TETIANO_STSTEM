@@ -48,13 +48,29 @@ import {
 } from "../utils/shippingIssues";
 
 const LIVE_REFRESH_DEBOUNCE_MS = 450;
-const ORDER_HISTORY_SEARCH_PAGE_SIZE = 1000;
-const MISSING_ORDERS_FETCH_PAGE_SIZE = 4500;
-const ORDERS_VISIBLE_LIMIT = 4500;
+const ORDER_SEARCH_DEBOUNCE_MS = 350;
+const ORDERS_VISIBLE_LIMIT = 1200;
+const ORDER_HISTORY_SEARCH_PAGE_SIZE = ORDERS_VISIBLE_LIMIT;
 const ORDERS_PER_PAGE = 50;
 const ORDERS_PAGINATION_WINDOW = 5;
 const ORDERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const MISSING_ORDER_REASON_NO_ACTION = "in_stock_without_action";
+
+const useDebouncedValue = (value, delayMs) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedValue(value);
+    }, delayMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [delayMs, value]);
+
+  return debouncedValue;
+};
 
 const INITIAL_FILTERS = {
   searchTerm: "",
@@ -82,6 +98,24 @@ const ORDER_DATE_PRESET_IDS = [
   "half_monthly",
   "monthly",
 ];
+
+const buildOrdersSortApiParams = (sortBy) => {
+  switch (sortBy) {
+    case "oldest":
+      return { sort_by: "created_at", sort_dir: "asc" };
+    case "amount_desc":
+      return { sort_by: "total_price", sort_dir: "desc" };
+    case "amount_asc":
+      return { sort_by: "total_price", sort_dir: "asc" };
+    case "order_desc":
+      return { sort_by: "order_number", sort_dir: "desc" };
+    case "order_asc":
+      return { sort_by: "order_number", sort_dir: "asc" };
+    case "newest":
+    default:
+      return { sort_by: "created_at", sort_dir: "desc" };
+  }
+};
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -322,6 +356,7 @@ const getOrderMeta = (order) => {
     order.financial_status || order.status,
   );
   const fulfillmentStatus = normalizeOrderState(order.fulfillment_status);
+  const createdAtDate = parseOrderDate(order.created_at);
   const totalPrice = toNumber(order.total_price);
   const refundedAmount = Math.max(
     toNumber(order.refunded_amount),
@@ -364,7 +399,8 @@ const getOrderMeta = (order) => {
     paymentMethod,
     netSalesAmount,
     orderNumberNumeric: toNumber(order.order_number),
-    createdAtDate: parseOrderDate(order.created_at),
+    createdAtDate,
+    createdAtTimestamp: createdAtDate ? createdAtDate.getTime() : 0,
   };
 };
 
@@ -518,6 +554,7 @@ export default function Orders() {
   );
   const [lastLiveEventAt, setLastLiveEventAt] = useState(null);
   const [fullHistorySearchOrders, setFullHistorySearchOrders] = useState(null);
+  const [fullHistorySearchTotal, setFullHistorySearchTotal] = useState(0);
   const [fullHistorySearchError, setFullHistorySearchError] = useState("");
   const [fullHistorySearchLoading, setFullHistorySearchLoading] = useState(false);
   const [loadStatus, setLoadStatus] = useState({
@@ -530,33 +567,57 @@ export default function Orders() {
   const missingFetchPromiseRef = useRef(null);
   const fullHistorySearchRequestIdRef = useRef(0);
   const ordersRef = useRef([]);
+  const debouncedSearchTerm = useDebouncedValue(
+    deferredSearchTerm,
+    ORDER_SEARCH_DEBOUNCE_MS,
+  );
 
   useEffect(() => {
     ordersRef.current = orders;
   }, [orders]);
 
+  const queryFilters = useMemo(
+    () => ({
+      ...filters,
+      searchTerm: debouncedSearchTerm,
+    }),
+    [
+      debouncedSearchTerm,
+      filters.amountMax,
+      filters.amountMin,
+      filters.cancelledOnly,
+      filters.dateFrom,
+      filters.dateTo,
+      filters.fulfilledOnly,
+      filters.fulfillmentFilter,
+      filters.orderNumberFrom,
+      filters.orderNumberTo,
+      filters.paidOnly,
+      filters.paymentFilter,
+      filters.paymentMethodFilter,
+      filters.refundFilter,
+      filters.sortBy,
+    ],
+  );
+
   const fullHistoryQueryParams = useMemo(
-    () =>
-      buildOrdersListApiParams({
-        ...filters,
-        searchTerm: deferredSearchTerm,
-      }),
-    [deferredSearchTerm, filters],
+    () => ({
+      ...buildOrdersListApiParams(queryFilters),
+      ...buildOrdersSortApiParams(queryFilters.sortBy),
+    }),
+    [queryFilters],
   );
 
   const shouldUseFullHistory = useMemo(
-    () =>
-      hasActiveOrdersListFilters({
-        ...filters,
-        searchTerm: deferredSearchTerm,
-      }),
-    [deferredSearchTerm, filters],
+    () => hasActiveOrdersListFilters(queryFilters),
+    [queryFilters],
   );
 
   useEffect(() => {
     if (!shouldUseFullHistory) {
       fullHistorySearchRequestIdRef.current += 1;
       setFullHistorySearchOrders(null);
+      setFullHistorySearchTotal(0);
       setFullHistorySearchError("");
       setFullHistorySearchLoading(false);
       return undefined;
@@ -569,6 +630,7 @@ export default function Orders() {
     setFullHistorySearchLoading(true);
     setFullHistorySearchError("");
     setFullHistorySearchOrders(null);
+    setFullHistorySearchTotal(0);
     setLoadStatus({
       active: true,
       message: select(
@@ -589,12 +651,15 @@ export default function Orders() {
         }),
       {
         limit: ORDER_HISTORY_SEARCH_PAGE_SIZE,
-        onPage: ({ rows, hasMore }) => {
+        maxPages: 1,
+        onPage: ({ rows, hasMore, pagination }) => {
           if (!active || requestId !== fullHistorySearchRequestIdRef.current) {
             return false;
           }
 
           setFullHistorySearchOrders(rows);
+          const total = Number(pagination?.total);
+          setFullHistorySearchTotal(Number.isFinite(total) ? total : rows.length);
           setLoadStatus({
             active: hasMore,
             message: hasMore
@@ -618,6 +683,9 @@ export default function Orders() {
         }
 
         setFullHistorySearchOrders(rows);
+        setFullHistorySearchTotal((currentTotal) =>
+          rows.length > 0 ? currentTotal || rows.length : 0,
+        );
         setFullHistorySearchLoading(false);
         setLoadStatus({
           active: false,
@@ -640,6 +708,7 @@ export default function Orders() {
 
         console.error("Error searching orders across full history:", searchError);
         setFullHistorySearchOrders(null);
+        setFullHistorySearchTotal(0);
         setFullHistorySearchLoading(false);
         setFullHistorySearchError(
           select(
@@ -659,7 +728,6 @@ export default function Orders() {
     };
   }, [
     currentStoreId,
-    deferredSearchTerm,
     formatNumber,
     fullHistoryQueryParams,
     select,
@@ -699,36 +767,23 @@ export default function Orders() {
 
     const request = (async () => {
       try {
-        const rows = await fetchAllPagesProgressively(
-          ({ limit, offset }) =>
-            api.get("/shopify/orders/missing", {
-              params: {
-                limit,
-                offset,
-              },
-            }),
-          {
-            limit: MISSING_ORDERS_FETCH_PAGE_SIZE,
+        const response = await api.get("/shopify/orders/missing", {
+          params: {
+            ids_only: "true",
           },
-        );
+        });
+        const ids = Array.isArray(response?.data?.ids)
+          ? response.data.ids
+              .map((value) => String(value || "").trim())
+              .filter(Boolean)
+          : [];
+        const summary = response?.data?.summary || {};
 
-        setMissingOrderIds(
-          rows
-            .map((order) => String(order?.id || "").trim())
-            .filter(Boolean),
-        );
+        setMissingOrderIds(ids);
         setMissingOrdersSummary({
-          total: rows.length,
-          stockShortage: rows.filter(
-            (order) =>
-              String(order?.missing_reason || "").trim().toLowerCase() !==
-              MISSING_ORDER_REASON_NO_ACTION,
-          ).length,
-          noAction: rows.filter(
-            (order) =>
-              String(order?.missing_reason || "").trim().toLowerCase() ===
-              MISSING_ORDER_REASON_NO_ACTION,
-          ).length,
+          total: Number(summary?.total_missing || ids.length || 0),
+          stockShortage: Number(summary?.stock_shortage_count || 0),
+          noAction: Number(summary?.no_action_count || 0),
         });
       } catch (missingError) {
         console.error("Error fetching missing orders:", missingError);
@@ -930,14 +985,16 @@ export default function Orders() {
     [selectedOrderIds],
   );
 
+  const shouldBuildSearchIndex = debouncedSearchTerm.trim().length > 0;
+
   const ordersWithMeta = useMemo(
     () =>
       activeOrders.map((order) => ({
         ...order,
         _meta: getOrderMeta(order),
-        _searchIndex: buildOrderSearchIndex(order),
+        _searchIndex: shouldBuildSearchIndex ? buildOrderSearchIndex(order) : null,
       })),
-    [activeOrders],
+    [activeOrders, shouldBuildSearchIndex],
   );
 
   const shippingIssueOrders = useMemo(
@@ -977,9 +1034,12 @@ export default function Orders() {
         !shippingIssueIdSet.has(String(order?.id || "").trim()),
     );
 
-    if (deferredSearchTerm.trim()) {
+    if (debouncedSearchTerm.trim()) {
       result = result.filter((order) => {
-        return matchesOrderSearch(order._searchIndex, deferredSearchTerm);
+        return matchesOrderSearch(
+          order._searchIndex || buildOrderSearchIndex(order),
+          debouncedSearchTerm,
+        );
       });
     }
 
@@ -1076,7 +1136,7 @@ export default function Orders() {
       switch (filters.sortBy) {
         case "oldest":
           return (
-            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            a._meta.createdAtTimestamp - b._meta.createdAtTimestamp
           );
         case "amount_desc":
           return b._meta.totalPrice - a._meta.totalPrice;
@@ -1089,14 +1149,14 @@ export default function Orders() {
         case "newest":
         default:
           return (
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            b._meta.createdAtTimestamp - a._meta.createdAtTimestamp
           );
       }
     });
 
     return result;
   }, [
-    deferredSearchTerm,
+    debouncedSearchTerm,
     filters,
     missingOrderIdSet,
     normalizedDateRange,
@@ -1230,7 +1290,7 @@ export default function Orders() {
     if (fullHistorySearchOrders) {
       return select(
         `يتم الآن عرض ${formatNumber(fullHistorySearchOrders.length, { maximumFractionDigits: 0 })} نتيجة من كل تاريخ المتجر.`,
-        `Showing ${formatNumber(fullHistorySearchOrders.length, { maximumFractionDigits: 0 })} result(s) from the full store history.`,
+        `Showing ${formatNumber(fullHistorySearchOrders.length, { maximumFractionDigits: 0 })} of ${formatNumber(fullHistorySearchTotal || fullHistorySearchOrders.length, { maximumFractionDigits: 0 })} result(s) from the full store history.`,
       );
     }
 
@@ -1242,6 +1302,7 @@ export default function Orders() {
     formatNumber,
     fullHistorySearchLoading,
     fullHistorySearchOrders,
+    fullHistorySearchTotal,
     select,
     shouldUseFullHistory,
   ]);
@@ -1499,6 +1560,16 @@ export default function Orders() {
                   <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                     <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                     Live Sync Active
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-sky-50 text-sky-700 border border-sky-200">
+                    {select(
+                      `القائمة الرئيسية تحمل آخر ${formatNumber(ORDERS_VISIBLE_LIMIT, {
+                        maximumFractionDigits: 0,
+                      })} طلب فقط لتقليل الضغط، وأي بحث أو فلترة يوسع الفحص لكل التاريخ تلقائياً.`,
+                      `The main list loads only the latest ${formatNumber(ORDERS_VISIBLE_LIMIT, {
+                        maximumFractionDigits: 0,
+                      })} orders for speed, and any search or filter automatically scans full history.`,
+                    )}
                   </span>
                   {lastUpdatedAt && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">

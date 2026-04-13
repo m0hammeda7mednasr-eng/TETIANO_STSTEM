@@ -53,7 +53,7 @@ const EMPTY_DASHBOARD_STATS = {
   total_products: 0,
   total_customers: 0,
   low_stock_products: 0,
-  orders_window_limit: 4500,
+  orders_window_limit: 1200,
   paid_orders_count: 0,
   avg_order_value: 0,
 };

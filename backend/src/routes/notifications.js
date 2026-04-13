@@ -18,6 +18,25 @@ const isNotificationsTableMissing = (error) => {
   return text.includes("notifications") && text.includes("does not exist");
 };
 
+const isNotificationsSchemaUnavailable = (error) => {
+  if (isNotificationsTableMissing(error)) {
+    return true;
+  }
+
+  const code = String(error?.code || "");
+  if (code === "42703" || code === "PGRST204") {
+    return true;
+  }
+
+  const text =
+    `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+  return (
+    text.includes("column") ||
+    text.includes("schema cache") ||
+    text.includes("could not find")
+  );
+};
+
 router.use(authenticateToken);
 
 router.get("/", async (req, res) => {
@@ -41,7 +60,7 @@ router.get("/", async (req, res) => {
     const { data, error } = await query;
 
     if (error) {
-      if (isNotificationsTableMissing(error)) {
+      if (isNotificationsSchemaUnavailable(error)) {
         return res.json([]);
       }
       throw error;
@@ -63,7 +82,7 @@ router.get("/unread-count", async (req, res) => {
       .eq("is_read", false);
 
     if (error) {
-      if (isNotificationsTableMissing(error)) {
+      if (isNotificationsSchemaUnavailable(error)) {
         return res.json({ unread_count: 0 });
       }
       throw error;
@@ -86,6 +105,9 @@ router.put("/:id/read", async (req, res) => {
     res.json({ success: true, notification });
   } catch (error) {
     console.error("Error marking notification as read:", error);
+    if (isNotificationsSchemaUnavailable(error)) {
+      return res.json({ success: true, notification: null });
+    }
     res.status(500).json({ error: "Failed to update notification" });
   }
 });
@@ -96,6 +118,9 @@ router.put("/read-all", async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error("Error marking all notifications as read:", error);
+    if (isNotificationsSchemaUnavailable(error)) {
+      return res.json({ success: true });
+    }
     res.status(500).json({ error: "Failed to update notifications" });
   }
 });

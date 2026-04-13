@@ -15,6 +15,10 @@ import {
   isTransientSupabaseError,
   withSupabaseRetry,
 } from "../helpers/supabaseRetry.js";
+import {
+  isSupabaseQueryTimeoutError,
+  runSupabaseQueryWithTimeout,
+} from "../helpers/supabaseQueryTimeout.js";
 import { getAccessibleStoreIds } from "../models/index.js";
 
 const router = express.Router();
@@ -24,6 +28,10 @@ const FAST_AUTH_QUERY_RETRY_OPTIONS = {
 };
 const USER_PROFILE_CACHE_TTL_MS = 30 * 1000;
 const USER_PROFILE_STALE_TTL_MS = 2 * 60 * 1000;
+const USER_PROFILE_QUERY_TIMEOUT_MS = Math.max(
+  500,
+  Number(process.env.USER_PROFILE_QUERY_TIMEOUT_MS) || 2500,
+);
 const unsupportedPermissionColumns = new Set();
 const userProfileCache = new Map();
 
@@ -61,6 +69,12 @@ const invalidateUserProfileCache = (userId) => {
     }
   }
 };
+
+const runUserProfileQuery = (query, code = "USER_PROFILE_QUERY_TIMEOUT") =>
+  runSupabaseQueryWithTimeout(query, {
+    timeoutMs: USER_PROFILE_QUERY_TIMEOUT_MS,
+    code,
+  });
 
 const buildPermissionsPayload = (input = {}, { includeUpdatedAt = false } = {}) => {
   const normalized = normalizePermissions(input);
@@ -212,11 +226,14 @@ const listAccessibleStoresForUser = async (userId, normalizedRole = "user") => {
     return [];
   }
 
-  const { data, error } = await supabase
-    .from("stores")
-    .select("*")
-    .in("id", accessibleStoreIds)
-    .order("name", { ascending: true });
+  const { data, error } = await runUserProfileQuery(
+    supabase
+      .from("stores")
+      .select("*")
+      .in("id", accessibleStoreIds)
+      .order("name", { ascending: true }),
+    "USER_STORES_QUERY_TIMEOUT",
+  );
 
   if (!error && Array.isArray(data) && data.length > 0) {
     return data;
@@ -236,10 +253,13 @@ export const getAdminVisibleStores = async () => {
   const discoveredStores = new Map();
 
   try {
-    const { data, error } = await supabase
-      .from("stores")
-      .select("id, name")
-      .order("name", { ascending: true });
+    const { data, error } = await runUserProfileQuery(
+      supabase
+        .from("stores")
+        .select("id, name")
+        .order("name", { ascending: true }),
+      "ADMIN_STORES_QUERY_TIMEOUT",
+    );
 
     if (error) {
       console.error("Error fetching admin stores:", error);
@@ -253,12 +273,15 @@ export const getAdminVisibleStores = async () => {
   }
 
   try {
-    const { data, error } = await supabase
-      .from("shopify_tokens")
-      .select("store_id, shop")
-      .not("store_id", "is", null)
-      .order("updated_at", { ascending: false })
-      .limit(200);
+    const { data, error } = await runUserProfileQuery(
+      supabase
+        .from("shopify_tokens")
+        .select("store_id, shop")
+        .not("store_id", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(200),
+      "ADMIN_TOKEN_STORES_QUERY_TIMEOUT",
+    );
 
     if (error) {
       console.error("Error inferring admin stores from Shopify tokens:", error);
@@ -277,21 +300,30 @@ export const getAdminVisibleStores = async () => {
 
   try {
     const inferredResults = await Promise.all([
-      supabase
-        .from("products")
-        .select("store_id")
-        .not("store_id", "is", null)
-        .limit(200),
-      supabase
-        .from("orders")
-        .select("store_id")
-        .not("store_id", "is", null)
-        .limit(200),
-      supabase
-        .from("customers")
-        .select("store_id")
-        .not("store_id", "is", null)
-        .limit(200),
+      runUserProfileQuery(
+        supabase
+          .from("products")
+          .select("store_id")
+          .not("store_id", "is", null)
+          .limit(200),
+        "ADMIN_PRODUCT_STORES_QUERY_TIMEOUT",
+      ),
+      runUserProfileQuery(
+        supabase
+          .from("orders")
+          .select("store_id")
+          .not("store_id", "is", null)
+          .limit(200),
+        "ADMIN_ORDER_STORES_QUERY_TIMEOUT",
+      ),
+      runUserProfileQuery(
+        supabase
+          .from("customers")
+          .select("store_id")
+          .not("store_id", "is", null)
+          .limit(200),
+        "ADMIN_CUSTOMER_STORES_QUERY_TIMEOUT",
+      ),
     ]);
 
     inferredResults.forEach((result) => {
@@ -582,16 +614,22 @@ router.get("/me", authenticateToken, async (req, res) => {
     }
 
     const { data: user, error } = await withSupabaseRetry(() =>
-      supabase
-        .from("users")
-        .select("id, email, name, role, is_active, created_at")
-        .eq("id", req.user.id)
-        .limit(1)
-        .maybeSingle(),
+      runUserProfileQuery(
+        supabase
+          .from("users")
+          .select("id, email, name, role, is_active, created_at")
+          .eq("id", req.user.id)
+          .limit(1)
+          .maybeSingle(),
+        "USER_ME_QUERY_TIMEOUT",
+      ),
       FAST_AUTH_QUERY_RETRY_OPTIONS,
     );
 
-    if (error && isTransientSupabaseError(error)) {
+    if (
+      error &&
+      (isTransientSupabaseError(error) || isSupabaseQueryTimeoutError(error))
+    ) {
       const degradedResponse = {
         id: req.user.id,
         email: req.user.email,
@@ -604,18 +642,7 @@ router.get("/me", authenticateToken, async (req, res) => {
       };
 
       if (includeStores) {
-        try {
-          degradedResponse.stores = await listAccessibleStoresForUser(
-            req.user.id,
-            degradedResponse.role,
-          );
-        } catch (storesError) {
-          console.error(
-            "Error fetching user stores for degraded profile:",
-            storesError,
-          );
-          degradedResponse.stores = [];
-        }
+        degradedResponse.stores = [];
       }
 
       primeUserAccessContext(req.user.id, {
@@ -641,16 +668,23 @@ router.get("/me", authenticateToken, async (req, res) => {
     } else {
       const { data: permissionsData, error: permissionsError } =
         await withSupabaseRetry(() =>
-          supabase
-            .from("permissions")
-            .select("*")
-            .eq("user_id", req.user.id)
-            .limit(1)
-            .maybeSingle(),
+          runUserProfileQuery(
+            supabase
+              .from("permissions")
+              .select("*")
+              .eq("user_id", req.user.id)
+              .limit(1)
+              .maybeSingle(),
+            "USER_PERMISSIONS_QUERY_TIMEOUT",
+          ),
           FAST_AUTH_QUERY_RETRY_OPTIONS,
         );
 
-      if (permissionsError && isTransientSupabaseError(permissionsError)) {
+      if (
+        permissionsError &&
+        (isTransientSupabaseError(permissionsError) ||
+          isSupabaseQueryTimeoutError(permissionsError))
+      ) {
         normalizedPermissions = buildPermissionsForRole(normalizedUserRole);
       } else {
         if (permissionsError && permissionsError.code !== "PGRST116") {

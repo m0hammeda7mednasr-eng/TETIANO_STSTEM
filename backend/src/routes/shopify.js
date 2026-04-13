@@ -48,6 +48,10 @@ import {
   fetchLatestShippingIssueOperationsByOrderId,
   recoverShippingIssuesFromHistory,
 } from "../helpers/shippingIssueRecovery.js";
+import {
+  isSupabaseQueryTimeoutError,
+  runSupabaseQueryWithTimeout,
+} from "../helpers/supabaseQueryTimeout.js";
 import { loadWarehouseAvailabilityByStoreIds } from "../services/warehouseAvailabilityService.js";
 
 const router = express.Router();
@@ -69,6 +73,10 @@ const HEAVY_ENDPOINT_CACHE_MAX_ENTRIES = 100;
 const SHIPPING_ISSUE_OPERATION_LOOKBACK_LIMIT = 10000;
 const MISSING_ORDER_NOTIFICATION_WINDOW_MS = DAY_MS;
 const ORDER_ACTION_LOOKUP_CHUNK_SIZE = 250;
+const ORDER_HOT_PATH_QUERY_TIMEOUT_MS = Math.max(
+  1000,
+  Number(process.env.ORDER_HOT_PATH_QUERY_TIMEOUT_MS) || 4500,
+);
 const MISSING_ORDER_NOTIFICATION_TYPES = new Set([
   "order_missing",
   "order_missing_escalated",
@@ -460,6 +468,8 @@ const orderBackgroundSyncState = new Map();
 const shippingIssueHistoryRecoveryState = new Map();
 const missingOrdersResultCache = new Map();
 const shippingIssuesResultCache = new Map();
+const missingOrdersRefreshPromises = new Map();
+const shippingIssuesRefreshPromises = new Map();
 const normalizeBaseUrl = (value) =>
   String(value || "")
     .trim()
@@ -744,6 +754,26 @@ const rememberHeavyResult = (cache, key, value) => {
   return value;
 };
 
+const queueHeavyResultRefresh = (refreshPromises, cacheKey, refreshFn) => {
+  if (refreshPromises.has(cacheKey)) {
+    return;
+  }
+
+  const refreshPromise = Promise.resolve()
+    .then(refreshFn)
+    .catch((error) => {
+      console.warn(
+        "Heavy endpoint background refresh failed:",
+        error?.message || error,
+      );
+    })
+    .finally(() => {
+      refreshPromises.delete(cacheKey);
+    });
+
+  refreshPromises.set(cacheKey, refreshPromise);
+};
+
 const getListPagination = (
   query = {},
   defaultLimit = DEFAULT_LIST_LIMIT,
@@ -843,7 +873,10 @@ const fetchScopedOrdersByIds = async ({
       return [];
     }
 
-    const { data, error } = await query;
+    const { data, error } = await runOrderHotPathQuery(
+      query,
+      "ORDER_IDS_QUERY_TIMEOUT",
+    );
 
     if (error) {
       throw error;
@@ -865,6 +898,23 @@ const loadShippingIssueOrdersForRequest = async (
     if (cached) {
       return cached;
     }
+
+    const stale = getStaleHeavyResult(shippingIssuesResultCache, cacheKey);
+    if (stale) {
+      queueHeavyResultRefresh(shippingIssuesRefreshPromises, cacheKey, () =>
+        loadShippingIssueOrdersForRequest(req, { forceRefresh: true }),
+      );
+      return stale;
+    }
+
+    queueHeavyResultRefresh(shippingIssuesRefreshPromises, cacheKey, () =>
+      loadShippingIssueOrdersForRequest(req, { forceRefresh: true }),
+    );
+    return {
+      rows: [],
+      repairedCount: 0,
+      degraded: true,
+    };
   }
 
   try {
@@ -885,12 +935,16 @@ const loadShippingIssueOrdersForRequest = async (
       };
     }
 
-    const { data: historyRows, error: historyError } = await db
-      .from("sync_operations")
-      .select("entity_id")
-      .eq("operation_type", "order_shipping_issue_update")
-      .order("created_at", { ascending: false })
-      .limit(SHIPPING_ISSUE_OPERATION_LOOKBACK_LIMIT);
+    const { data: historyRows, error: historyError } =
+      await runOrderHotPathQuery(
+        db
+          .from("sync_operations")
+          .select("entity_id")
+          .eq("operation_type", "order_shipping_issue_update")
+          .order("created_at", { ascending: false })
+          .limit(SHIPPING_ISSUE_OPERATION_LOOKBACK_LIMIT),
+        "SHIPPING_ISSUE_HISTORY_QUERY_TIMEOUT",
+      );
 
     if (historyError) {
       if (isSchemaCompatibilityError(historyError)) {
@@ -1021,6 +1075,10 @@ const isQueryRetryableError = (error) => {
     return false;
   }
 
+  if (isSupabaseQueryTimeoutError(error)) {
+    return true;
+  }
+
   if (isSchemaCompatibilityError(error)) {
     return true;
   }
@@ -1037,6 +1095,7 @@ const isQueryRetryableError = (error) => {
 
 const isStatementTimeoutError = (error) => {
   if (!error) return false;
+  if (isSupabaseQueryTimeoutError(error)) return true;
   const code = String(error.code || "");
   const text =
     `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
@@ -1059,6 +1118,12 @@ const buildDegradedPaginatedCollection = (
     degraded: true,
   };
 };
+
+const runOrderHotPathQuery = (query, code = "ORDER_QUERY_TIMEOUT") =>
+  runSupabaseQueryWithTimeout(query, {
+    timeoutMs: ORDER_HOT_PATH_QUERY_TIMEOUT_MS,
+    code,
+  });
 
 const getOrderFieldFallbacks = (
   primaryField,
@@ -1148,7 +1213,10 @@ const getScopedEntityPage = async ({
 
   for (const selectedColumns of selectCandidates) {
     for (const orderField of orderFieldCandidates) {
-      let result = await buildQuery(selectedColumns, orderField, false);
+      let result = await runOrderHotPathQuery(
+        buildQuery(selectedColumns, orderField, false),
+        `${String(tableName || "entity").toUpperCase()}_PAGE_QUERY_TIMEOUT`,
+      );
 
       if (
         !isAdmin &&
@@ -1158,7 +1226,10 @@ const getScopedEntityPage = async ({
         !result.error &&
         (!Array.isArray(result.data) || result.data.length === 0)
       ) {
-        result = await buildQuery(selectedColumns, orderField, true);
+        result = await runOrderHotPathQuery(
+          buildQuery(selectedColumns, orderField, true),
+          `${String(tableName || "entity").toUpperCase()}_LEGACY_PAGE_QUERY_TIMEOUT`,
+        );
       }
 
       if (!result?.error) {
@@ -1290,18 +1361,21 @@ const executeScopedOrderHistoryRowsQuery = async ({
       ;
       offset += ORDER_HISTORY_SOURCE_BATCH_SIZE
     ) {
-      const { data, error } = await buildScopedOrderHistoryRowsQuery({
-        req,
-        selectedColumns,
-        rangeStart: offset,
-        rangeEnd: offset + ORDER_HISTORY_SOURCE_BATCH_SIZE - 1,
-        requestedStoreId,
-        isAdmin,
-        accessibleStoreIds,
-        useLegacyUserScope,
-        orderField,
-        ascending: Boolean(sortOptions?.ascending),
-      });
+      const { data, error } = await runOrderHotPathQuery(
+        buildScopedOrderHistoryRowsQuery({
+          req,
+          selectedColumns,
+          rangeStart: offset,
+          rangeEnd: offset + ORDER_HISTORY_SOURCE_BATCH_SIZE - 1,
+          requestedStoreId,
+          isAdmin,
+          accessibleStoreIds,
+          useLegacyUserScope,
+          orderField,
+          ascending: Boolean(sortOptions?.ascending),
+        }),
+        "ORDER_HISTORY_QUERY_TIMEOUT",
+      );
 
       if (error) {
         lastError = error;
@@ -1493,17 +1567,20 @@ const executeScopedMissingOrdersSourceQuery = async ({
     ;
     offset += MISSING_ORDER_SOURCE_BATCH_SIZE
   ) {
-    const { data, error } = await buildScopedMissingOrdersSourceQuery({
-      req,
-      selectedColumns,
-      rangeStart: offset,
-      rangeEnd: offset + MISSING_ORDER_SOURCE_BATCH_SIZE - 1,
-      requestedStoreId,
-      isAdmin,
-      accessibleStoreIds,
-      useLegacyUserScope,
-      cutoffIso,
-    });
+    const { data, error } = await runOrderHotPathQuery(
+      buildScopedMissingOrdersSourceQuery({
+        req,
+        selectedColumns,
+        rangeStart: offset,
+        rangeEnd: offset + MISSING_ORDER_SOURCE_BATCH_SIZE - 1,
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+        useLegacyUserScope,
+        cutoffIso,
+      }),
+      "MISSING_ORDERS_SOURCE_QUERY_TIMEOUT",
+    );
 
     if (error) {
       return {
@@ -3476,10 +3553,13 @@ const loadLatestOrderActionTimestampsByKey = async (orders = []) => {
     }
 
     try {
-      const { data, error } = await db
-        .from("order_comments")
-        .select("order_id, created_at, updated_at, edited_at")
-        .in("order_id", chunk);
+      const { data, error } = await runOrderHotPathQuery(
+        db
+          .from("order_comments")
+          .select("order_id, created_at, updated_at, edited_at")
+          .in("order_id", chunk),
+        "ORDER_ACTION_LOOKUP_QUERY_TIMEOUT",
+      );
 
       if (error) {
         console.warn(
@@ -3544,6 +3624,19 @@ const getMissingOrdersForRequest = async (req, { forceRefresh = false } = {}) =>
     if (cached) {
       return cached;
     }
+
+    const stale = getStaleHeavyResult(missingOrdersResultCache, cacheKey);
+    if (stale) {
+      queueHeavyResultRefresh(missingOrdersRefreshPromises, cacheKey, () =>
+        getMissingOrdersForRequest(req, { forceRefresh: true }),
+      );
+      return stale;
+    }
+
+    queueHeavyResultRefresh(missingOrdersRefreshPromises, cacheKey, () =>
+      getMissingOrdersForRequest(req, { forceRefresh: true }),
+    );
+    return [];
   }
 
   try {
@@ -5145,14 +5238,16 @@ router.get(
           : missingOrders;
 
       if (!idsOnly && pagination.offset === 0) {
-        try {
-          await ensureMissingOrderNotifications(missingOrders);
-        } catch (notificationError) {
-          console.error(
-            "Missing orders notification error (non-blocking):",
-            notificationError,
-          );
-        }
+        setImmediate(async () => {
+          try {
+            await ensureMissingOrderNotifications(missingOrders);
+          } catch (notificationError) {
+            console.error(
+              "Missing orders notification error (non-blocking):",
+              notificationError,
+            );
+          }
+        });
       }
 
       const summary = {

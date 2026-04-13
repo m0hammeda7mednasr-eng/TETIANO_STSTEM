@@ -2,6 +2,10 @@ import express from "express";
 import { authenticateToken } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { supabase } from "../supabaseClient.js";
+import {
+  isSupabaseQueryTimeoutError,
+  runSupabaseQueryWithTimeout,
+} from "../helpers/supabaseQueryTimeout.js";
 
 const router = express.Router();
 
@@ -13,6 +17,10 @@ const SCHEMA_COMPATIBILITY_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST
 const ORDER_LOOKUP_CACHE_TTL_MS = 60 * 1000;
 const ORDER_COMMENTS_CACHE_TTL_MS = 20 * 1000;
 const ORDER_COMMENTS_STALE_TTL_MS = 2 * 60 * 1000;
+const ORDER_COMMENTS_QUERY_TIMEOUT_MS = Math.max(
+  500,
+  Number(process.env.ORDER_COMMENTS_QUERY_TIMEOUT_MS) || 2500,
+);
 const orderLookupCache = new Map();
 const orderCommentsCache = new Map();
 
@@ -60,10 +68,20 @@ const clearOrderCommentsCacheForOrder = (orderReference) => {
 
 const isTransientQueryError = (error) => {
   if (!error) return false;
+  if (isSupabaseQueryTimeoutError(error)) return true;
   if (String(error.code || "") === "57014") return true;
   const message = `${error.message || ""} ${error.details || ""}`.toLowerCase();
   return message.includes("statement timeout") || message.includes("timeout");
 };
+
+const runOrderCommentsQuery = (
+  query,
+  code = "ORDER_COMMENTS_QUERY_TIMEOUT",
+) =>
+  runSupabaseQueryWithTimeout(query, {
+    timeoutMs: ORDER_COMMENTS_QUERY_TIMEOUT_MS,
+    code,
+  });
 
 const isSchemaCompatibilityError = (error) => {
   if (!error) return false;
@@ -179,7 +197,10 @@ const getOrderByReference = async (userId, orderReference) => {
 
   let lastSchemaError = null;
   for (const build of queryBuilders) {
-    const { data, error } = await build();
+    const { data, error } = await runOrderCommentsQuery(
+      build(),
+      "ORDER_COMMENTS_ORDER_LOOKUP_TIMEOUT",
+    );
     if (!error) {
       const order = data || null;
       rememberTimedCacheEntry(orderLookupCache, lookupCacheKey, order);
@@ -298,7 +319,10 @@ router.get(
       .eq("order_id", normalizedShopifyOrderId)
       .order("created_at", { ascending: true });
 
-    const { data: comments, error } = await query;
+    const { data: comments, error } = await runOrderCommentsQuery(
+      query,
+      "ORDER_COMMENTS_LIST_QUERY_TIMEOUT",
+    );
 
     if (error) {
       if (isMissingCommentsTableError(error)) {
@@ -342,6 +366,17 @@ router.get(
       res.setHeader("X-Order-Comments-Cache", "stale");
       return res.json({
         ...staleResponse,
+        degraded: true,
+      });
+    }
+
+    if (isTransientQueryError(error)) {
+      res.setHeader("X-Order-Comments-Degraded", "query_timeout");
+      return res.json({
+        success: true,
+        data: [],
+        total: 0,
+        mode: "table",
         degraded: true,
       });
     }

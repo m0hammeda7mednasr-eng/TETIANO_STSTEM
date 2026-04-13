@@ -54,7 +54,6 @@ const ORDER_HISTORY_SEARCH_PAGE_SIZE = ORDERS_VISIBLE_LIMIT;
 const ORDERS_PER_PAGE = 50;
 const ORDERS_PAGINATION_WINDOW = 5;
 const ORDERS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
-const MISSING_ORDER_REASON_NO_ACTION = "in_stock_without_action";
 
 const useDebouncedValue = (value, delayMs) => {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -581,23 +580,7 @@ export default function Orders() {
       ...filters,
       searchTerm: debouncedSearchTerm,
     }),
-    [
-      debouncedSearchTerm,
-      filters.amountMax,
-      filters.amountMin,
-      filters.cancelledOnly,
-      filters.dateFrom,
-      filters.dateTo,
-      filters.fulfilledOnly,
-      filters.fulfillmentFilter,
-      filters.orderNumberFrom,
-      filters.orderNumberTo,
-      filters.paidOnly,
-      filters.paymentFilter,
-      filters.paymentMethodFilter,
-      filters.refundFilter,
-      filters.sortBy,
-    ],
+    [debouncedSearchTerm, filters],
   );
 
   const fullHistoryQueryParams = useMemo(

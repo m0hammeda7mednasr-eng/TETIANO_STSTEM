@@ -12,6 +12,7 @@ const SHOPIFY_UPSERT_BATCH_SIZE = 200;
 const LIST_QUERY_BATCH_SIZE = 1000;
 const ACCESSIBLE_STORE_IDS_CACHE_TTL_MS = 60 * 1000;
 const UPSERT_FALLBACK_WARNING_TTL_MS = 5 * 60 * 1000;
+const BULK_SYNC_LOOKUP_CHUNK_SIZE = 200;
 const LOCAL_PRODUCT_COST_FIELDS = [
   "cost_price",
   "ads_cost",
@@ -20,6 +21,7 @@ const LOCAL_PRODUCT_COST_FIELDS = [
 ];
 const accessibleStoreIdsCache = new Map();
 const upsertFallbackWarningCache = new Map();
+const unsupportedUpsertConflictTargets = new Set();
 
 const isSchemaCompatibilityError = (error) => {
   if (!error) return false;
@@ -169,6 +171,17 @@ const logThrottledUpsertFallbackWarning = (cacheKey, message) => {
 
   upsertFallbackWarningCache.set(cacheKey, now);
   console.warn(message);
+};
+
+const getUpsertConflictCacheKey = (tableName, conflictTarget) =>
+  `${tableName}:${conflictTarget || "legacy"}`;
+
+const isUnsupportedUpsertConflictError = (error) => {
+  const text =
+    `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+  return text.includes(
+    "there is no unique or exclusion constraint matching the on conflict specification",
+  );
 };
 
 const executeWithSchemaFallback = async (builders) => {
@@ -603,6 +616,116 @@ const syncRowsIndividually = async (tableName, rows, itemLabel) => {
   };
 };
 
+const buildScopedShopifyRowKey = (row = {}) =>
+  `${String(row?.shopify_id || "").trim()}::${String(row?.store_id || "").trim()}`;
+
+const fetchExistingScopedShopifyRows = async (tableName, rows = []) => {
+  const shopifyIds = Array.from(
+    new Set(
+      rows.map((row) => String(row?.shopify_id || "").trim()).filter(Boolean),
+    ),
+  );
+  const storeIds = Array.from(
+    new Set(
+      rows.map((row) => String(row?.store_id || "").trim()).filter(Boolean),
+    ),
+  );
+
+  if (shopifyIds.length === 0 || storeIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const existingRows = [];
+  for (
+    let index = 0;
+    index < shopifyIds.length;
+    index += BULK_SYNC_LOOKUP_CHUNK_SIZE
+  ) {
+    const chunk = shopifyIds.slice(index, index + BULK_SYNC_LOOKUP_CHUNK_SIZE);
+    const { data, error } = await supabase
+      .from(tableName)
+      .select("id, shopify_id, store_id")
+      .in("shopify_id", chunk)
+      .in("store_id", storeIds);
+
+    if (error) {
+      return { data: existingRows, error };
+    }
+
+    existingRows.push(...(data || []));
+  }
+
+  return { data: existingRows, error: null };
+};
+
+const syncScopedRowsWithBulkLookup = async (tableName, rows, itemLabel) => {
+  const lookupResult = await fetchExistingScopedShopifyRows(tableName, rows);
+  if (lookupResult.error) {
+    return await syncRowsIndividually(tableName, rows, itemLabel);
+  }
+
+  const existingByKey = new Map(
+    (lookupResult.data || []).map((row) => [buildScopedShopifyRowKey(row), row]),
+  );
+  const results = [];
+  const failures = [];
+
+  for (const row of rows) {
+    const existing = existingByKey.get(buildScopedShopifyRowKey(row));
+
+    try {
+      if (existing?.id) {
+        const { data: updated, error: updateError } =
+          await executeMutationWithMissingColumnFallback(row, (currentRow) =>
+            supabase
+              .from(tableName)
+              .update(currentRow)
+              .eq("id", existing.id)
+              .select()
+              .single(),
+          );
+
+        if (updateError) {
+          failures.push(
+            `${row.shopify_id}: update failed (${updateError.message})`,
+          );
+          continue;
+        }
+
+        results.push(updated);
+        continue;
+      }
+
+      const { data: inserted, error: insertError } =
+        await executeMutationWithMissingColumnFallback([row], (currentRows) =>
+          supabase.from(tableName).insert(currentRows).select().single(),
+        );
+
+      if (insertError) {
+        failures.push(
+          `${row.shopify_id}: insert failed (${insertError.message})`,
+        );
+        continue;
+      }
+
+      results.push(inserted);
+    } catch (itemError) {
+      failures.push(`${row.shopify_id}: ${itemError.message}`);
+    }
+  }
+
+  return {
+    data: results,
+    error:
+      failures.length > 0
+        ? {
+            message: `Failed to sync ${failures.length} ${itemLabel} rows`,
+            details: failures,
+          }
+        : null,
+  };
+};
+
 const upsertRowsChunkWithFallback = async (
   tableName,
   rows,
@@ -611,6 +734,11 @@ const upsertRowsChunkWithFallback = async (
 ) => {
   if (!conflictTarget) {
     return await syncRowsIndividually(tableName, rows, itemLabel);
+  }
+
+  const conflictCacheKey = getUpsertConflictCacheKey(tableName, conflictTarget);
+  if (unsupportedUpsertConflictTargets.has(conflictCacheKey)) {
+    return await syncScopedRowsWithBulkLookup(tableName, rows, itemLabel);
   }
 
   const upsertResult = await executeMutationWithMissingColumnFallback(
@@ -629,12 +757,16 @@ const upsertRowsChunkWithFallback = async (
     return { data: upsertResult.data || [], error: null };
   }
 
+  if (isUnsupportedUpsertConflictError(upsertResult.error)) {
+    unsupportedUpsertConflictTargets.add(conflictCacheKey);
+  }
+
   logThrottledUpsertFallbackWarning(
-    `${tableName}:${conflictTarget || "legacy"}`,
+    conflictCacheKey,
     `Upsert failed for ${tableName}, falling back to per-row sync: ${upsertResult.error.message}`,
   );
 
-  return await syncRowsIndividually(
+  return await syncScopedRowsWithBulkLookup(
     tableName,
     upsertResult.payload || rows,
     itemLabel,
@@ -870,14 +1002,36 @@ const preserveLocalOrderMetadataForUpserts = async (rows = []) => {
     return rows;
   }
 
-  const { data: existingRows, error } = await supabase
-    .from("orders")
-    .select("shopify_id, store_id, user_id, data")
-    .in("shopify_id", shopifyIds);
+  const storeIds = Array.from(
+    new Set(
+      rows.map((row) => String(row?.store_id || "").trim()).filter(Boolean),
+    ),
+  );
+  const existingRows = [];
 
-  if (error) {
-    console.warn("Order local metadata preservation skipped:", error.message);
-    return rows;
+  for (
+    let index = 0;
+    index < shopifyIds.length;
+    index += BULK_SYNC_LOOKUP_CHUNK_SIZE
+  ) {
+    const chunk = shopifyIds.slice(index, index + BULK_SYNC_LOOKUP_CHUNK_SIZE);
+    let query = supabase
+      .from("orders")
+      .select("shopify_id, store_id, user_id, data")
+      .in("shopify_id", chunk);
+
+    if (storeIds.length > 0) {
+      query = query.in("store_id", storeIds);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.warn("Order local metadata preservation skipped:", error.message);
+      return rows;
+    }
+
+    existingRows.push(...(data || []));
   }
 
   return rows.map((row) => {

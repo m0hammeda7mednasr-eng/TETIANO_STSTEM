@@ -1035,6 +1035,31 @@ const isQueryRetryableError = (error) => {
   return text.includes("statement timeout") || text.includes("timeout");
 };
 
+const isStatementTimeoutError = (error) => {
+  if (!error) return false;
+  const code = String(error.code || "");
+  const text =
+    `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+  return code === "57014" || text.includes("statement timeout");
+};
+
+const buildDegradedPaginatedCollection = (
+  pagination,
+  extra = {},
+  maxVisible = null,
+) => {
+  const response =
+    maxVisible === null
+      ? buildSlicedPaginatedCollection([], pagination, extra)
+      : buildLimitedPaginatedCollection([], pagination, maxVisible);
+
+  return {
+    ...response,
+    ...extra,
+    degraded: true,
+  };
+};
+
 const getOrderFieldFallbacks = (
   primaryField,
   { allowUnordered = false } = {},
@@ -1151,6 +1176,15 @@ const getScopedEntityPage = async ({
       }
 
       console.error("Error executing query:", result.error);
+
+      if (isStatementTimeoutError(result.error)) {
+        return {
+          data: [],
+          error: result.error,
+          isAdmin,
+          requestedStoreId,
+        };
+      }
 
       if (isQueryRetryableError(result.error)) {
         continue;
@@ -1290,6 +1324,12 @@ const executeScopedOrderHistoryRowsQuery = async ({
     }
 
     if (lastError && isQueryRetryableError(lastError)) {
+      if (isStatementTimeoutError(lastError)) {
+        return {
+          data: [],
+          error: lastError,
+        };
+      }
       continue;
     }
 
@@ -1370,6 +1410,15 @@ const loadScopedOrderHistoryRows = async (req, sortOptions = {}) => {
     lastError = queryResult.error;
     if (isSchemaCompatibilityError(queryResult.error)) {
       continue;
+    }
+
+    if (isStatementTimeoutError(queryResult.error)) {
+      return {
+        data: [],
+        error: queryResult.error,
+        isAdmin,
+        requestedStoreId,
+      };
     }
 
     if (isQueryRetryableError(queryResult.error)) {
@@ -1541,6 +1590,15 @@ const loadMissingOrdersSourceRows = async (req) => {
     lastError = queryResult.error;
     if (isSchemaCompatibilityError(queryResult.error)) {
       continue;
+    }
+
+    if (isStatementTimeoutError(queryResult.error)) {
+      return {
+        data: [],
+        error: queryResult.error,
+        isAdmin,
+        requestedStoreId,
+      };
     }
 
     if (isQueryRetryableError(queryResult.error)) {
@@ -4752,6 +4810,22 @@ router.get(
       );
     } catch (error) {
       console.error("Error fetching shipping issues orders:", error);
+      if (isStatementTimeoutError(error)) {
+        const degradedPagination = getListPagination(
+          req.query,
+          DEFAULT_LIST_LIMIT,
+          ORDER_LIST_PAGE_LIMIT,
+        );
+        res.setHeader("X-Orders-Degraded", "shipping_issues_timeout");
+        return res.json(
+          buildDegradedPaginatedCollection(degradedPagination, {
+            summary: {
+              total_shipping_issues: 0,
+            },
+          }),
+        );
+      }
+
       return res.status(500).json({
         error: error.message || "Failed to fetch shipping issues",
       });
@@ -4830,6 +4904,17 @@ router.get(
             "Error fetching full-history orders search:",
             scopedRowsResult.error,
           );
+          if (isStatementTimeoutError(scopedRowsResult.error)) {
+            res.setHeader("X-Orders-Degraded", "search_timeout");
+            return res.json(
+              buildDegradedPaginatedCollection(pagination, {
+                meta: {
+                  search_scope: "degraded_timeout",
+                },
+              }),
+            );
+          }
+
           return res.status(500).json({
             error: scopedRowsResult.error.message || "Failed to search orders",
           });
@@ -4928,6 +5013,23 @@ router.get(
 
       if (error) {
         console.error("Error fetching orders:", error);
+        if (isStatementTimeoutError(error)) {
+          if (liveSyncResult) {
+            res.setHeader(
+              "X-Orders-Live-Sync",
+              liveSyncResult.reason || "attempted",
+            );
+          }
+          res.setHeader("X-Orders-Degraded", "query_timeout");
+          return res.json(
+            buildDegradedPaginatedCollection(
+              pagination,
+              {},
+              ORDER_LIST_MAX_VISIBLE,
+            ),
+          );
+        }
+
         try {
           const fallbackOrders = await getFallbackOrdersPage(req);
           if (liveSyncResult) {
@@ -4984,6 +5086,18 @@ router.get(
       );
     } catch (e) {
       console.error("Exception fetching orders:", e);
+      if (isStatementTimeoutError(e)) {
+        const pagination = getOrdersListPagination(req.query);
+        res.setHeader("X-Orders-Degraded", "query_timeout");
+        return res.json(
+          buildDegradedPaginatedCollection(
+            pagination,
+            {},
+            ORDER_LIST_MAX_VISIBLE,
+          ),
+        );
+      }
+
       res.status(500).json({ error: e.message });
     }
   },
@@ -5072,6 +5186,35 @@ router.get(
       );
     } catch (error) {
       console.error("Error fetching missing orders:", error);
+      if (isStatementTimeoutError(error)) {
+        const idsOnly = toBooleanQueryFlag(req.query.ids_only, false);
+        const pagination = getListPagination(
+          req.query,
+          DEFAULT_LIST_LIMIT,
+          ORDER_LIST_PAGE_LIMIT,
+        );
+        const summary = {
+          total_missing: 0,
+          escalated_count: 0,
+          warning_count: 0,
+          stock_shortage_count: 0,
+          no_action_count: 0,
+        };
+
+        res.setHeader("X-Orders-Degraded", "missing_orders_timeout");
+        if (idsOnly) {
+          return res.json({
+            ids: [],
+            summary,
+            degraded: true,
+          });
+        }
+
+        return res.json(
+          buildDegradedPaginatedCollection(pagination, { summary }),
+        );
+      }
+
       res
         .status(500)
         .json({ error: error.message || "Failed to fetch missing orders" });

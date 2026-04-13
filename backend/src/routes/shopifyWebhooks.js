@@ -36,45 +36,53 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Invalid JSON payload" });
     }
 
-    const result = await handleShopifyWebhook({
-      topic,
-      shopDomain,
-      payload,
-    });
+    setImmediate(async () => {
+      try {
+        const result = await handleShopifyWebhook({
+          topic,
+          shopDomain,
+          payload,
+        });
 
-    if (!result.handled) {
-      return res.status(200).json({
-        success: true,
-        ignored: true,
-        reason: result.reason || "ignored",
-      });
-    }
+        if (!result.handled) {
+          return;
+        }
 
-    const topicText = String(result.topic || "").toLowerCase();
-    const eventType = topicText.startsWith("orders/")
-      ? "orders.updated"
-      : topicText.startsWith("products/")
-        ? "products.updated"
-        : topicText.startsWith("inventory_levels/")
-          ? "products.updated"
-          : topicText.startsWith("customers/")
-            ? "customers.updated"
-          : "data.updated";
-    emitRealtimeEvent({
-      type: eventType,
-      source: "shopify.webhook",
-      userIds: result.affectedUserIds || [],
-      storeIds: result.affectedStoreIds || [],
-      payload: {
-        topic: result.topic,
-        webhookId: webhookId || null,
-      },
+        const topicText = String(result.topic || "").toLowerCase();
+        const eventType = topicText.startsWith("orders/")
+          ? "orders.updated"
+          : topicText.startsWith("products/")
+            ? "products.updated"
+            : topicText.startsWith("inventory_levels/")
+              ? "products.updated"
+              : topicText.startsWith("customers/")
+                ? "customers.updated"
+                : "data.updated";
+        emitRealtimeEvent({
+          type: eventType,
+          source: "shopify.webhook",
+          userIds: result.affectedUserIds || [],
+          storeIds: result.affectedStoreIds || [],
+          payload: {
+            topic: result.topic,
+            webhookId: webhookId || null,
+          },
+        });
+      } catch (backgroundError) {
+        console.error("Shopify webhook background processing error:", {
+          topic,
+          shopDomain,
+          webhookId: webhookId || null,
+          error: backgroundError?.message || backgroundError,
+        });
+      }
     });
 
     return res.status(200).json({
       success: true,
-      topic: result.topic,
+      topic,
       webhookId: webhookId || null,
+      queued: true,
     });
   } catch (error) {
     console.error("Shopify webhook processing error:", error);

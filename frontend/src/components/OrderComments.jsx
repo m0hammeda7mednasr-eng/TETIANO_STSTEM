@@ -112,8 +112,9 @@ const OrderComments = ({ orderId, orderNumber, legacyOrderId = null }) => {
     fetchComments();
 
     const intervalId = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       fetchComments({ silent: true });
-    }, 15000);
+    }, 60000);
 
     const onFocus = () => {
       fetchComments({ silent: true });

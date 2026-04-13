@@ -10,6 +10,60 @@ const UUID_REGEX =
 
 const isUuid = (value) => UUID_REGEX.test(String(value || "").trim());
 const SCHEMA_COMPATIBILITY_CODES = new Set(["42P01", "42703", "PGRST204", "PGRST205"]);
+const ORDER_LOOKUP_CACHE_TTL_MS = 60 * 1000;
+const ORDER_COMMENTS_CACHE_TTL_MS = 20 * 1000;
+const ORDER_COMMENTS_STALE_TTL_MS = 2 * 60 * 1000;
+const orderLookupCache = new Map();
+const orderCommentsCache = new Map();
+
+const getCacheKey = (...parts) =>
+  parts.map((part) => String(part || "").trim()).join("::");
+
+const getTimedCacheEntry = (
+  cache,
+  cacheKey,
+  ttlMs,
+  { allowStale = false, staleTtlMs = ttlMs } = {},
+) => {
+  const entry = cache.get(cacheKey);
+  if (!entry) return null;
+
+  const age = Date.now() - entry.cachedAt;
+  if (age <= ttlMs) {
+    return entry.payload;
+  }
+  if (allowStale && age <= staleTtlMs) {
+    return entry.payload;
+  }
+
+  cache.delete(cacheKey);
+  return null;
+};
+
+const rememberTimedCacheEntry = (cache, cacheKey, payload) => {
+  cache.set(cacheKey, {
+    cachedAt: Date.now(),
+    payload,
+  });
+};
+
+const clearOrderCommentsCacheForOrder = (orderReference) => {
+  const needle = String(orderReference || "").trim();
+  if (!needle) return;
+
+  for (const cacheKey of orderCommentsCache.keys()) {
+    if (cacheKey.endsWith(`::${needle}`)) {
+      orderCommentsCache.delete(cacheKey);
+    }
+  }
+};
+
+const isTransientQueryError = (error) => {
+  if (!error) return false;
+  if (String(error.code || "") === "57014") return true;
+  const message = `${error.message || ""} ${error.details || ""}`.toLowerCase();
+  return message.includes("statement timeout") || message.includes("timeout");
+};
 
 const isSchemaCompatibilityError = (error) => {
   if (!error) return false;
@@ -85,6 +139,16 @@ const getOrderByReference = async (userId, orderReference) => {
   const normalizedReference = String(orderReference || "").trim();
   if (!normalizedReference) return null;
 
+  const lookupCacheKey = getCacheKey("order", userId, normalizedReference);
+  const cachedOrder = getTimedCacheEntry(
+    orderLookupCache,
+    lookupCacheKey,
+    ORDER_LOOKUP_CACHE_TTL_MS,
+  );
+  if (cachedOrder !== null) {
+    return cachedOrder;
+  }
+
   const selectedColumns = [
     "id, shopify_id, notes, user_id, store_id",
     "id, shopify_id, notes, user_id",
@@ -116,7 +180,11 @@ const getOrderByReference = async (userId, orderReference) => {
   let lastSchemaError = null;
   for (const build of queryBuilders) {
     const { data, error } = await build();
-    if (!error) return data || null;
+    if (!error) {
+      const order = data || null;
+      rememberTimedCacheEntry(orderLookupCache, lookupCacheKey, order);
+      return order;
+    }
     if (isNoRowsError(error)) {
       continue;
     }
@@ -130,6 +198,7 @@ const getOrderByReference = async (userId, orderReference) => {
     console.warn("Order lookup fallback exhausted in order comments:", lastSchemaError.message);
   }
 
+  rememberTimedCacheEntry(orderLookupCache, lookupCacheKey, null);
   return null;
 };
 
@@ -187,8 +256,19 @@ router.get(
   authenticateToken,
   requirePermission("can_view_orders"),
   async (req, res) => {
+  const { orderId } = req.params;
+  const commentsCacheKey = getCacheKey("comments", req.user.id, orderId);
   try {
-    const { orderId } = req.params;
+    const cachedResponse = getTimedCacheEntry(
+      orderCommentsCache,
+      commentsCacheKey,
+      ORDER_COMMENTS_CACHE_TTL_MS,
+    );
+    if (cachedResponse) {
+      res.setHeader("X-Order-Comments-Cache", "hit");
+      return res.json(cachedResponse);
+    }
+
     const order = await getOrderByReference(req.user.id, orderId);
 
     if (!order) {
@@ -198,12 +278,18 @@ router.get(
     const normalizedShopifyOrderId = String(order.shopify_id || "").trim();
     if (!normalizedShopifyOrderId) {
       const legacyComments = mapLegacyNotesToComments(parseLegacyNotes(order.notes));
-      return res.json({
+      const responsePayload = {
         success: true,
         data: legacyComments,
         total: legacyComments.length,
         mode: "legacy",
-      });
+      };
+      rememberTimedCacheEntry(
+        orderCommentsCache,
+        commentsCacheKey,
+        responsePayload,
+      );
+      return res.json(responsePayload);
     }
 
     let query = supabase
@@ -217,24 +303,49 @@ router.get(
     if (error) {
       if (isMissingCommentsTableError(error)) {
         const legacyComments = mapLegacyNotesToComments(parseLegacyNotes(order.notes));
-        return res.json({
+        const responsePayload = {
           success: true,
           data: legacyComments,
           total: legacyComments.length,
           mode: "legacy",
-        });
+        };
+        rememberTimedCacheEntry(
+          orderCommentsCache,
+          commentsCacheKey,
+          responsePayload,
+        );
+        return res.json(responsePayload);
       }
       throw error;
     }
 
-    res.json({
+    const responsePayload = {
       success: true,
       data: comments || [],
       total: comments ? comments.length : 0,
       mode: "table",
-    });
+    };
+    rememberTimedCacheEntry(orderCommentsCache, commentsCacheKey, responsePayload);
+    res.json(responsePayload);
   } catch (error) {
     console.error("Error fetching order comments:", error);
+    const staleResponse = getTimedCacheEntry(
+      orderCommentsCache,
+      commentsCacheKey,
+      ORDER_COMMENTS_CACHE_TTL_MS,
+      {
+        allowStale: true,
+        staleTtlMs: ORDER_COMMENTS_STALE_TTL_MS,
+      },
+    );
+    if (staleResponse && isTransientQueryError(error)) {
+      res.setHeader("X-Order-Comments-Cache", "stale");
+      return res.json({
+        ...staleResponse,
+        degraded: true,
+      });
+    }
+
     res.status(500).json({ error: error.message });
   }
   },
@@ -275,6 +386,8 @@ router.post("/", authenticateToken, requirePermission("can_view_orders"), async 
         userRole: req.user.role,
       });
 
+      clearOrderCommentsCacheForOrder(order_id);
+      clearOrderCommentsCacheForOrder(order.id);
       return res.status(201).json({
         success: true,
         message: "Comment added successfully",
@@ -308,6 +421,8 @@ router.post("/", authenticateToken, requirePermission("can_view_orders"), async 
           userRole: req.user.role,
         });
 
+        clearOrderCommentsCacheForOrder(order_id);
+        clearOrderCommentsCacheForOrder(order.id);
         return res.status(201).json({
           success: true,
           message: "Comment added successfully",
@@ -327,6 +442,9 @@ router.post("/", authenticateToken, requirePermission("can_view_orders"), async 
 
     if (fetchError) throw fetchError;
 
+    clearOrderCommentsCacheForOrder(order_id);
+    clearOrderCommentsCacheForOrder(normalizedShopifyOrderId);
+    clearOrderCommentsCacheForOrder(order.id);
     res.status(201).json({
       success: true,
       message: "Comment added successfully",
@@ -357,7 +475,7 @@ router.put(
 
     const { data: existingComment, error: fetchError } = await supabase
       .from("order_comments")
-      .select("user_id")
+      .select("user_id, order_id")
       .eq("id", commentId)
       .single();
 
@@ -403,6 +521,7 @@ router.put(
 
     if (fetchUpdatedError) throw fetchUpdatedError;
 
+    clearOrderCommentsCacheForOrder(existingComment.order_id);
     res.json({
       success: true,
       message: "Comment updated successfully",
@@ -426,7 +545,7 @@ router.delete(
 
     const { data: existingComment, error: fetchError } = await supabase
       .from("order_comments")
-      .select("user_id")
+      .select("user_id, order_id")
       .eq("id", commentId)
       .single();
 
@@ -452,6 +571,7 @@ router.delete(
 
     if (error) throw error;
 
+    clearOrderCommentsCacheForOrder(existingComment.order_id);
     res.json({
       success: true,
       message: "Comment deleted successfully",
@@ -492,6 +612,7 @@ router.patch(
       return res.status(404).json({ error: "Comment not found" });
     }
 
+    clearOrderCommentsCacheForOrder(updatedComment.order_id);
     res.json({
       success: true,
       message: `Comment ${is_pinned ? "pinned" : "unpinned"} successfully`,

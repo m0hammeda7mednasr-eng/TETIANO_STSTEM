@@ -22,7 +22,45 @@ const MAX_USERS_LIST_LIMIT = 200;
 const FAST_AUTH_QUERY_RETRY_OPTIONS = {
   attempts: 1,
 };
+const USER_PROFILE_CACHE_TTL_MS = 30 * 1000;
+const USER_PROFILE_STALE_TTL_MS = 2 * 60 * 1000;
 const unsupportedPermissionColumns = new Set();
+const userProfileCache = new Map();
+
+const getUserProfileCacheKey = (userId, includeStores) =>
+  `${String(userId || "").trim()}::stores:${includeStores ? "1" : "0"}`;
+
+const getUserProfileCacheEntry = (cacheKey, { allowStale = false } = {}) => {
+  const entry = userProfileCache.get(cacheKey);
+  if (!entry) return null;
+
+  const age = Date.now() - entry.cachedAt;
+  if (age <= USER_PROFILE_CACHE_TTL_MS) {
+    return entry.payload;
+  }
+  if (allowStale && age <= USER_PROFILE_STALE_TTL_MS) {
+    return entry.payload;
+  }
+
+  userProfileCache.delete(cacheKey);
+  return null;
+};
+
+const rememberUserProfileCacheEntry = (cacheKey, payload) => {
+  userProfileCache.set(cacheKey, {
+    cachedAt: Date.now(),
+    payload,
+  });
+};
+
+const invalidateUserProfileCache = (userId) => {
+  const prefix = `${String(userId || "").trim()}::`;
+  for (const cacheKey of userProfileCache.keys()) {
+    if (cacheKey.startsWith(prefix)) {
+      userProfileCache.delete(cacheKey);
+    }
+  }
+};
 
 const buildPermissionsPayload = (input = {}, { includeUpdatedAt = false } = {}) => {
   const normalized = normalizePermissions(input);
@@ -464,6 +502,7 @@ router.put(
         }
       }
 
+      invalidateUserProfileCache(userId);
       res.json({ success: true, message: "User updated successfully" });
     } catch (error) {
       console.error("Error updating user:", error);
@@ -504,6 +543,7 @@ router.delete(
 
       if (error) throw error;
 
+      invalidateUserProfileCache(userId);
       res.json({ success: true, message: "User deleted successfully" });
     } catch (error) {
       console.error("Error deleting user:", error);
@@ -527,8 +567,20 @@ router.get("/me/stores", authenticateToken, async (req, res) => {
 
 // Get current user info (no admin required) - MUST be before /:userId
 router.get("/me", authenticateToken, async (req, res) => {
+  const includeStores = shouldIncludeRelatedStores(req.query.include_stores);
+  const cacheKey = getUserProfileCacheKey(req.user.id, includeStores);
+
   try {
-    const includeStores = shouldIncludeRelatedStores(req.query.include_stores);
+    const cachedProfile = getUserProfileCacheEntry(cacheKey);
+    if (cachedProfile) {
+      primeUserAccessContext(req.user.id, {
+        role: cachedProfile.role,
+        permissions: cachedProfile.permissions,
+      });
+      res.setHeader("X-User-Profile-Cache", "hit");
+      return res.json(cachedProfile);
+    }
+
     const { data: user, error } = await withSupabaseRetry(() =>
       supabase
         .from("users")
@@ -571,6 +623,7 @@ router.get("/me", authenticateToken, async (req, res) => {
         permissions: degradedResponse.permissions,
       });
 
+      rememberUserProfileCacheEntry(cacheKey, degradedResponse);
       return res.json(degradedResponse);
     }
 
@@ -634,9 +687,25 @@ router.get("/me", authenticateToken, async (req, res) => {
       permissions: normalizedPermissions,
     });
 
+    rememberUserProfileCacheEntry(cacheKey, responsePayload);
     res.json(responsePayload);
   } catch (error) {
     console.error("Error fetching user:", error);
+    const staleProfile = getUserProfileCacheEntry(cacheKey, {
+      allowStale: true,
+    });
+    if (staleProfile) {
+      primeUserAccessContext(req.user.id, {
+        role: staleProfile.role,
+        permissions: staleProfile.permissions,
+      });
+      res.setHeader("X-User-Profile-Cache", "stale");
+      return res.json({
+        ...staleProfile,
+        degraded: true,
+      });
+    }
+
     res.status(isTransientSupabaseError(error) ? 503 : 500).json({
       error: isTransientSupabaseError(error)
         ? "User profile is temporarily unavailable"

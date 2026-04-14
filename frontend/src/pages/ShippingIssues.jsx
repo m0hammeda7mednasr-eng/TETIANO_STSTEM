@@ -29,9 +29,11 @@ import {
 } from "../utils/shippingIssueDrafts";
 import {
   buildStoreScopedCacheKey,
+  isCacheFresh,
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
+import { HEAVY_VIEW_CACHE_FRESH_MS } from "../utils/refreshPolicy";
 import {
   getShippingIssueBadgeClassName,
   getShippingIssueReasonLabel,
@@ -43,6 +45,7 @@ import {
 } from "../utils/shippingIssues";
 
 const FETCH_PAGE_LIMIT = 4500;
+const SHIPPING_ISSUES_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const PAGE_SIZE = 50;
 const PAGINATION_WINDOW = 5;
 const DATE_PRESET_OPTIONS = [
@@ -352,12 +355,32 @@ export default function ShippingIssues() {
   );
 
   const fetchShippingIssues = useCallback(
-    async ({ silent = false } = {}) => {
+    async ({ silent = false, force = false } = {}) => {
       if (fetchPromiseRef.current?.cacheKey === cacheKey) {
         return fetchPromiseRef.current.promise;
       }
 
       const request = (async () => {
+        if (!force) {
+          const cached = await readCachedView(cacheKey);
+          const cachedRows = Array.isArray(cached?.value?.rows)
+            ? cached.value.rows
+            : [];
+
+          if (
+            cachedRows.length > 0 &&
+            isCacheFresh(cached, SHIPPING_ISSUES_CACHE_FRESH_MS)
+          ) {
+            setOrders(cachedRows.filter((order) => isShippingIssueActive(order)));
+            setLastUpdatedAt(
+              cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
+            );
+            setLoading(false);
+            setError("");
+            return cachedRows;
+          }
+        }
+
         if (!silent) {
           setLoading(true);
           setError("");
@@ -376,6 +399,7 @@ export default function ShippingIssues() {
           setOrders(activeRows);
           setLastUpdatedAt(new Date());
           await writeCachedView(cacheKey, { rows: activeRows });
+          return activeRows;
         } catch (requestError) {
           console.error("Error fetching shipping issues:", requestError);
           setError(
@@ -441,7 +465,7 @@ export default function ShippingIssues() {
 
   useEffect(() => {
     const unsubscribe = subscribeToSharedDataUpdates(() => {
-      fetchShippingIssues({ silent: true });
+      fetchShippingIssues({ silent: true, force: true });
     });
 
     return () => unsubscribe();
@@ -846,8 +870,8 @@ export default function ShippingIssues() {
         active: true,
         reason,
       });
-      setOrders((current) =>
-        current.map((order) =>
+      setOrders((current) => {
+        const nextOrders = current.map((order) =>
           order.id === orderId
             ? {
                 ...order,
@@ -859,8 +883,10 @@ export default function ShippingIssues() {
                 shipping_issue_reason: reason,
               }
             : order,
-        ),
-      );
+        );
+        void writeCachedView(cacheKey, { rows: nextOrders });
+        return nextOrders;
+      });
       markSharedDataUpdated();
     } catch (updateError) {
       console.error("Error updating shipping issue:", updateError);
@@ -918,8 +944,8 @@ export default function ShippingIssues() {
         return;
       }
 
-      setOrders((current) =>
-        current.map((entry) =>
+      setOrders((current) => {
+        const nextOrders = current.map((entry) =>
           entry.id === orderId
             ? {
                 ...entry,
@@ -933,8 +959,10 @@ export default function ShippingIssues() {
                 shipping_issue_reason: reason,
               }
             : entry,
-        ),
-      );
+        );
+        void writeCachedView(cacheKey, { rows: nextOrders });
+        return nextOrders;
+      });
       clearNoteDraft(orderId);
       setLastUpdatedAt(new Date());
       setNoteSaveStatus(orderId, "saved");
@@ -971,7 +999,11 @@ export default function ShippingIssues() {
       await api.post(`/shopify/orders/${orderId}/shipping-issue`, {
         active: false,
       });
-      setOrders((current) => current.filter((order) => order.id !== orderId));
+      setOrders((current) => {
+        const nextOrders = current.filter((order) => order.id !== orderId);
+        void writeCachedView(cacheKey, { rows: nextOrders });
+        return nextOrders;
+      });
       clearNoteDraft(orderId);
       markSharedDataUpdated();
     } catch (updateError) {
@@ -1026,7 +1058,7 @@ export default function ShippingIssues() {
 
               <button
                 type="button"
-                onClick={() => fetchShippingIssues()}
+                onClick={() => fetchShippingIssues({ force: true })}
                 className="flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-white transition hover:bg-sky-800"
               >
                 <RefreshCw size={18} />

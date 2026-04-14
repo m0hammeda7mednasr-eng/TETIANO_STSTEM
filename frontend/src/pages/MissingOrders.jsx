@@ -17,11 +17,14 @@ import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import {
   buildStoreScopedCacheKey,
+  isCacheFresh,
   readCachedView,
   writeCachedView,
 } from "../utils/viewCache";
+import { HEAVY_VIEW_CACHE_FRESH_MS } from "../utils/refreshPolicy";
 
 const FETCH_PAGE_LIMIT = 4500;
+const FOLLOW_UP_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
 const MISSING_ORDERS_PER_PAGE = 50;
 const MISSING_ORDERS_PAGINATION_WINDOW = 5;
 const MISSING_ORDER_REASON_NO_ACTION = "in_stock_without_action";
@@ -339,28 +342,46 @@ export default function MissingOrders() {
     [formatDateTime],
   );
 
-  const fetchMissingOrders = useCallback(async ({ silent = false } = {}) => {
+  const fetchMissingOrders = useCallback(async ({ silent = false, force = false } = {}) => {
     if (fetchPromiseRef.current?.cacheKey === cacheKey) {
       return fetchPromiseRef.current.promise;
     }
 
     const request = (async () => {
-    if (!silent) {
-      setLoading(true);
-      setError("");
-    }
+      if (!force) {
+        const cached = await readCachedView(cacheKey);
+        const cachedRows = Array.isArray(cached?.value?.rows)
+          ? cached.value.rows
+          : [];
 
-    try {
-      const response = await shopifyAPI.getMissingOrders({
-        limit: FETCH_PAGE_LIMIT,
-        offset: 0,
-      });
-      const rows = extractArray(response?.data);
+        if (cachedRows.length > 0 && isCacheFresh(cached, FOLLOW_UP_CACHE_FRESH_MS)) {
+          setOrders(cachedRows);
+          setLastUpdatedAt(
+            cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
+          );
+          setLoading(false);
+          setError("");
+          return cachedRows;
+        }
+      }
 
-      setOrders(rows);
-      setLastUpdatedAt(new Date());
-      await writeCachedView(cacheKey, { rows });
-    } catch (requestError) {
+      if (!silent) {
+        setLoading(true);
+        setError("");
+      }
+
+      try {
+        const response = await shopifyAPI.getMissingOrders({
+          limit: FETCH_PAGE_LIMIT,
+          offset: 0,
+        });
+        const rows = extractArray(response?.data);
+
+        setOrders(rows);
+        setLastUpdatedAt(new Date());
+        await writeCachedView(cacheKey, { rows });
+        return rows;
+      } catch (requestError) {
       console.error("Error fetching missing orders:", requestError);
       setError(
         requestError?.response?.data?.error ||
@@ -420,7 +441,7 @@ export default function MissingOrders() {
       if (String(event?.resource || "").toLowerCase() === "notifications") {
         return;
       }
-      fetchMissingOrders({ silent: true });
+      fetchMissingOrders({ silent: true, force: true });
     });
 
     return () => unsubscribe();
@@ -581,7 +602,7 @@ export default function MissingOrders() {
 
               <button
                 type="button"
-                onClick={() => fetchMissingOrders()}
+                onClick={() => fetchMissingOrders({ force: true })}
                 className="flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-white transition hover:bg-sky-800"
               >
                 <RefreshCw size={18} />

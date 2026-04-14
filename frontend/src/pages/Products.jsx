@@ -23,22 +23,18 @@ import {
 import BarcodeLabelModal from "../components/BarcodeLabelModal";
 import Sidebar from "../components/Sidebar";
 import { SkeletonBlock } from "../components/Common";
-import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
-import { fetchAllPagesProgressively } from "../utils/pagination";
+import { shouldAutoRefreshView } from "../utils/refreshPolicy";
 import {
-  buildStoreScopedCacheKey,
-  isCacheFresh,
-  peekCachedView,
-  readCachedView,
-  writeCachedView,
-} from "../utils/viewCache";
-import {
-  HEAVY_VIEW_CACHE_FRESH_MS,
-  shouldAutoRefreshView,
-} from "../utils/refreshPolicy";
+  PRODUCT_CACHE_FRESH_MS,
+  buildProductsCacheKey,
+  fetchProductPages,
+  peekCachedProducts,
+  readCachedProducts,
+  writeProductsCache,
+} from "../utils/productCache";
 import {
   formatCurrency as formatAmount,
   formatDateTime,
@@ -51,10 +47,6 @@ import {
   getNormalizedDateRange,
   toNumber,
 } from "../utils/productsView";
-
-const PRODUCTS_PAGE_SIZE = 200;
-const PRODUCTS_CACHE_FRESH_MS = HEAVY_VIEW_CACHE_FRESH_MS;
-const PRODUCTS_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
 
 const INITIAL_FILTERS = {
   searchTerm: "",
@@ -150,12 +142,12 @@ export default function Products() {
   const { isAdmin, hasPermission } = useAuth();
   const { select } = useLocale();
   const canEditProducts = hasPermission("can_edit_products");
-  const cacheKey = useMemo(() => buildStoreScopedCacheKey("products:list"), []);
+  const cacheKey = useMemo(() => buildProductsCacheKey(), []);
   const initialCachedSnapshot = useMemo(() => {
-    const cached = peekCachedView(cacheKey);
+    const rows = peekCachedProducts(cacheKey);
     return {
-      rows: Array.isArray(cached?.value?.rows) ? cached.value.rows : [],
-      updatedAt: cached?.updatedAt ? new Date(cached.updatedAt) : null,
+      rows,
+      updatedAt: null,
     };
   }, [cacheKey]);
 
@@ -200,22 +192,15 @@ export default function Products() {
   useEffect(() => {
     let active = true;
 
-    readCachedView(cacheKey).then((cached) => {
-      const cachedRows = Array.isArray(cached?.value?.rows)
-        ? cached.value.rows
-        : [];
-      if (
-        !active ||
-        cachedRows.length === 0 ||
-        cachedRows.length <= productsRef.current.length
-      ) {
+    readCachedProducts(cacheKey).then(({ rows: cachedRows, updatedAt }) => {
+      if (!active || cachedRows.length === 0) {
         return;
       }
 
-      setProducts(cachedRows);
-      setLastUpdatedAt(
-        cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
-      );
+      if (cachedRows.length > productsRef.current.length) {
+        setProducts(cachedRows);
+      }
+      setLastUpdatedAt(updatedAt || new Date());
       setLoadStatus({
         active: false,
         message: `Showing ${formatNumber(cachedRows.length, { maximumFractionDigits: 0 })} cached products`,
@@ -253,31 +238,20 @@ export default function Products() {
         });
 
         try {
-          const rows = await fetchAllPagesProgressively(
-            ({ limit, offset }) =>
-              api.get("/shopify/products", {
-                params: {
-                  limit,
-                  offset,
-                  sort_by: "updated_at",
-                  sort_dir: "desc",
-                },
-                timeout: PRODUCTS_REQUEST_TIMEOUT_MS,
-              }),
-            {
-              limit: PRODUCTS_PAGE_SIZE,
-              onPage: ({ rows: accumulatedRows, hasMore }) => {
-                setProducts(accumulatedRows);
-                setLastUpdatedAt(new Date());
-                setLoadStatus({
-                  active: hasMore,
-                  message: hasMore
-                    ? `Loaded ${formatNumber(accumulatedRows.length, { maximumFractionDigits: 0 })} products so far...`
-                    : `Loaded ${formatNumber(accumulatedRows.length, { maximumFractionDigits: 0 })} products`,
-                });
-              },
+          const rows = await fetchProductPages({
+            sortBy: "updated_at",
+            sortDir: "desc",
+            onPage: ({ rows: accumulatedRows, hasMore }) => {
+              setProducts(accumulatedRows);
+              setLastUpdatedAt(new Date());
+              setLoadStatus({
+                active: hasMore,
+                message: hasMore
+                  ? `Loaded ${formatNumber(accumulatedRows.length, { maximumFractionDigits: 0 })} products so far...`
+                  : `Loaded ${formatNumber(accumulatedRows.length, { maximumFractionDigits: 0 })} products`,
+              });
             },
-          );
+          });
 
           setProducts(rows);
           setLastUpdatedAt(new Date());
@@ -288,7 +262,7 @@ export default function Products() {
                 ? `Loaded ${formatNumber(rows.length, { maximumFractionDigits: 0 })} products`
                 : "No products found",
           });
-          await writeCachedView(cacheKey, { rows });
+          await writeProductsCache(cacheKey, rows);
         } catch (requestError) {
           console.error("Error fetching products:", requestError);
           if (!silent) {
@@ -325,19 +299,26 @@ export default function Products() {
     let active = true;
 
     (async () => {
-      const cached = await readCachedView(cacheKey);
+      const {
+        rows: cachedRows,
+        isFresh,
+        updatedAt,
+      } = await readCachedProducts(cacheKey);
       if (!active) {
         return;
       }
 
-      const hasCachedRows =
-        Array.isArray(cached?.value?.rows) && cached.value.rows.length > 0;
-      if (productsRef.current.length === 0) {
-        await fetchProducts({ silent: true });
+      const hasCachedRows = cachedRows.length > 0;
+      if (hasCachedRows && productsRef.current.length === 0) {
+        setProducts(cachedRows);
+        setLastUpdatedAt(updatedAt || new Date());
+      }
+
+      if (hasCachedRows && isFresh) {
         return;
       }
 
-      if (!hasCachedRows && !isCacheFresh(cached, PRODUCTS_CACHE_FRESH_MS)) {
+      if (!hasCachedRows || !isFresh) {
         await fetchProducts({ silent: true });
       }
     })();
@@ -361,11 +342,11 @@ export default function Products() {
         }
 
         fetchProducts({ silent: true });
-      }, PRODUCTS_CACHE_FRESH_MS);
+      }, PRODUCT_CACHE_FRESH_MS);
 
       onFocus = async () => {
-        const cached = await readCachedView(cacheKey);
-        if (isCacheFresh(cached, PRODUCTS_CACHE_FRESH_MS)) {
+        const { isFresh } = await readCachedProducts(cacheKey);
+        if (isFresh) {
           return;
         }
 

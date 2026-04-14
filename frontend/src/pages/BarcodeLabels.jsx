@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -18,16 +19,19 @@ import CustomLabelCreatorModal from "../components/CustomLabelCreatorModal";
 import { EmptyState, ErrorAlert, LoadingSpinner } from "../components/Common";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
-import api from "../utils/api";
 import { formatDateTime, formatNumber } from "../utils/helpers";
-import { fetchAllPagesProgressively } from "../utils/pagination";
 import {
   hasPrintableBarcodeValue,
   normalizeBarcodeVariantTitle,
 } from "../utils/barcodeLabels";
 import { buildVariantRows } from "../utils/productsView";
-
-const PRODUCTS_PAGE_SIZE = 200;
+import {
+  buildProductsCacheKey,
+  fetchProductPages,
+  peekCachedProducts,
+  readCachedProducts,
+  writeProductsCache,
+} from "../utils/productCache";
 
 const getActiveSupplierLinks = (variant = {}) =>
   (Array.isArray(variant?.supplier_links) ? variant.supplier_links : [])
@@ -217,8 +221,13 @@ function VariantCard({
 export default function BarcodeLabels() {
   const { isAdmin } = useAuth();
   const { select } = useLocale();
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = useMemo(() => buildProductsCacheKey(), []);
+  const initialCachedProducts = useMemo(
+    () => peekCachedProducts(cacheKey),
+    [cacheKey],
+  );
+  const [products, setProducts] = useState(() => initialCachedProducts);
+  const [loading, setLoading] = useState(initialCachedProducts.length === 0);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [loadStatus, setLoadStatus] = useState({
@@ -231,9 +240,37 @@ export default function BarcodeLabels() {
   const [barcodeModalTargetKey, setBarcodeModalTargetKey] = useState("");
   const [selectedSuppliersByVariantKey, setSelectedSuppliersByVariantKey] =
     useState({});
+  const productsRef = useRef([]);
 
-  const fetchProducts = useCallback(async () => {
-    setLoading(true);
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
+
+  const fetchProducts = useCallback(async ({ force = false, silent = false } = {}) => {
+    if (!force) {
+      const { rows: cachedRows, isFresh } = await readCachedProducts(cacheKey);
+      if (cachedRows.length > 0) {
+        setProducts(cachedRows);
+        setLoading(false);
+        setLoadStatus({
+          active: false,
+          message: select(
+            `تم عرض ${formatNumber(cachedRows.length, {
+              maximumFractionDigits: 0,
+            })} منتج من الكاش`,
+            `Showing ${formatNumber(cachedRows.length, {
+              maximumFractionDigits: 0,
+            })} cached products`,
+          ),
+        });
+
+        if (isFresh) {
+          return;
+        }
+      }
+    }
+
+    setLoading(!silent && productsRef.current.length === 0);
     setError("");
     setLoadStatus({
       active: true,
@@ -244,23 +281,14 @@ export default function BarcodeLabels() {
     });
 
     try {
-      const rows = await fetchAllPagesProgressively(
-        ({ limit, offset }) =>
-          api.get("/shopify/products", {
-            params: {
-              limit,
-              offset,
-              sort_by: "updated_at",
-              sort_dir: "desc",
-            },
-          }),
-        {
-          limit: PRODUCTS_PAGE_SIZE,
-          onPage: ({ rows: accumulatedRows, hasMore }) => {
-            setProducts(accumulatedRows);
-            setLoadStatus({
-              active: hasMore,
-              message: hasMore
+      const rows = await fetchProductPages({
+        sortBy: "updated_at",
+        sortDir: "desc",
+        onPage: ({ rows: accumulatedRows, hasMore }) => {
+          setProducts(accumulatedRows);
+          setLoadStatus({
+            active: hasMore,
+            message: hasMore
                 ? select(
                     `تم تحميل ${formatNumber(accumulatedRows.length, {
                       maximumFractionDigits: 0,
@@ -277,12 +305,12 @@ export default function BarcodeLabels() {
                       maximumFractionDigits: 0,
                     })} products`,
                   ),
-            });
-          },
+          });
         },
-      );
+      });
 
       setProducts(rows);
+      await writeProductsCache(cacheKey, rows);
       setLoadStatus({
         active: false,
         message: "",
@@ -302,7 +330,7 @@ export default function BarcodeLabels() {
     } finally {
       setLoading(false);
     }
-  }, [select]);
+  }, [cacheKey, formatNumber, select]);
 
   useEffect(() => {
     fetchProducts();
@@ -438,7 +466,7 @@ export default function BarcodeLabels() {
 
             <button
               type="button"
-              onClick={fetchProducts}
+              onClick={() => fetchProducts({ force: true })}
               className="app-button-primary inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-white"
             >
               <RefreshCw size={16} />

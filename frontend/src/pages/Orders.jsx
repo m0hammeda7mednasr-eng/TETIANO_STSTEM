@@ -492,6 +492,10 @@ export default function Orders() {
     () => buildStoreScopedCacheKey("orders:list", currentStoreId),
     [currentStoreId],
   );
+  const missingOrdersCacheKey = useMemo(
+    () => buildStoreScopedCacheKey("missing-orders:list", currentStoreId),
+    [currentStoreId],
+  );
   const initialCachedSnapshot = useMemo(() => {
     const cached = peekCachedView(cacheKey);
     return {
@@ -691,13 +695,45 @@ export default function Orders() {
     };
   }, [cacheKey, formatNumber]);
 
-  const fetchMissingOrderIds = useCallback(async () => {
+  const fetchMissingOrderIds = useCallback(async ({ force = false } = {}) => {
     if (missingFetchPromiseRef.current) {
       return missingFetchPromiseRef.current;
     }
 
     const request = (async () => {
       try {
+        if (!force) {
+          const cached = await readCachedView(missingOrdersCacheKey);
+          const cachedRows = Array.isArray(cached?.value?.rows)
+            ? cached.value.rows
+            : [];
+
+          if (
+            cachedRows.length > 0 &&
+            isCacheFresh(cached, ORDERS_CACHE_FRESH_MS)
+          ) {
+            setMissingOrderIds(
+              cachedRows
+                .map((order) => String(order?.id || "").trim())
+                .filter(Boolean),
+            );
+            setMissingOrdersSummary({
+              total: cachedRows.length,
+              stockShortage: cachedRows.filter(
+                (order) =>
+                  String(order?.missing_reason || "").trim().toLowerCase() !==
+                  MISSING_ORDER_REASON_NO_ACTION,
+              ).length,
+              noAction: cachedRows.filter(
+                (order) =>
+                  String(order?.missing_reason || "").trim().toLowerCase() ===
+                  MISSING_ORDER_REASON_NO_ACTION,
+              ).length,
+            });
+            return cachedRows;
+          }
+        }
+
         const rows = await fetchAllPagesProgressively(
           ({ limit, offset }) =>
             shopifyAPI.getMissingOrders({
@@ -727,6 +763,8 @@ export default function Orders() {
               MISSING_ORDER_REASON_NO_ACTION,
           ).length,
         });
+        await writeCachedView(missingOrdersCacheKey, { rows });
+        return rows;
       } catch (missingError) {
         console.error("Error fetching missing orders:", missingError);
       }
@@ -739,7 +777,7 @@ export default function Orders() {
     } finally {
       missingFetchPromiseRef.current = null;
     }
-  }, []);
+  }, [missingOrdersCacheKey]);
 
   const fetchOrders = useCallback(async ({ silent = false, forceSync = false } = {}) => {
     if (fetchPromiseRef.current) {
@@ -770,7 +808,7 @@ export default function Orders() {
       });
 
       try {
-        void fetchMissingOrderIds();
+        void fetchMissingOrderIds({ force: forceSync });
 
         const rows = await fetchAllPagesProgressively(
           ({ limit, offset }) =>

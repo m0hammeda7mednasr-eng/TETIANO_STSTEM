@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   AlertCircle,
@@ -16,13 +16,19 @@ import {
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
-import api, { getErrorMessage, suppliersAPI } from "../utils/api";
+import { getErrorMessage, suppliersAPI } from "../utils/api";
 import {
   formatCurrency,
   formatDateTime,
   formatNumber,
 } from "../utils/helpers";
-import { fetchAllPages } from "../utils/pagination";
+import {
+  buildProductsCacheKey,
+  fetchProductPages,
+  peekCachedProducts,
+  readCachedProducts,
+  writeProductsCache,
+} from "../utils/productCache";
 import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { decodeMaybeMojibake } from "../utils/text";
@@ -257,7 +263,6 @@ const SUPPLIER_UI_TRANSLATIONS = {
     "تصنيع": "Manufacturing",
   },
 };
-const PRODUCTS_PAGE_SIZE = 200;
 const DEFAULT_VARIANT_TITLES = new Set(["default", "default title"]);
 const normalizeText = (value) => String(value || "").trim();
 const formatCount = (value) =>
@@ -723,6 +728,11 @@ export default function Suppliers() {
   const canManageSuppliers = hasPermission("can_edit_suppliers");
   const supplierViewType = getSupplierViewType(location.pathname);
   const isFactorySuppliersView = supplierViewType === "factory";
+  const productCatalogCacheKey = useMemo(() => buildProductsCacheKey(), []);
+  const initialProductCatalogRows = useMemo(
+    () => peekCachedProducts(productCatalogCacheKey),
+    [productCatalogCacheKey],
+  );
 
   const [suppliers, setSuppliers] = useState([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
@@ -742,13 +752,20 @@ export default function Suppliers() {
   const [fabricForm, setFabricForm] = useState(createEmptyFabricForm);
   const [deliveryForm, setDeliveryForm] = useState(createEmptyDeliveryForm);
   const [paymentForm, setPaymentForm] = useState(createEmptyPaymentForm);
-  const [productCatalogRows, setProductCatalogRows] = useState([]);
+  const [productCatalogRows, setProductCatalogRows] = useState(
+    () => initialProductCatalogRows,
+  );
   const [relatedSuppliers, setRelatedSuppliers] = useState([]);
   const [savingSupplier, setSavingSupplier] = useState(false);
   const [savingFabric, setSavingFabric] = useState(false);
   const [savingDelivery, setSavingDelivery] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
   const [savingProductLinks, setSavingProductLinks] = useState(false);
+  const productCatalogRowsRef = useRef([]);
+
+  useEffect(() => {
+    productCatalogRowsRef.current = productCatalogRows;
+  }, [productCatalogRows]);
 
   const productCatalogOptions = useMemo(
     () => buildProductCatalogOptions(productCatalogRows),
@@ -830,7 +847,7 @@ export default function Suppliers() {
     }
   }, [canManageSuppliers, isFactorySuppliersView]);
 
-  const loadProductCatalog = useCallback(async ({ silent = false } = {}) => {
+  const loadProductCatalog = useCallback(async ({ silent = false, force = false } = {}) => {
     if (!canManageSuppliers || !isFactorySuppliersView) {
       setProductCatalogRows([]);
       setCatalogError("");
@@ -838,35 +855,46 @@ export default function Suppliers() {
     }
 
     try {
+      if (!force) {
+        const { rows: cachedRows, isFresh } =
+          await readCachedProducts(productCatalogCacheKey);
+        if (cachedRows.length > 0) {
+          setProductCatalogRows(cachedRows);
+          if (isFresh) {
+            setCatalogError("");
+            return;
+          }
+        }
+      }
+
       if (!silent) {
-        setCatalogLoading(true);
+        setCatalogLoading(productCatalogRowsRef.current.length === 0);
       }
       setCatalogError("");
 
-      const rows = await fetchAllPages(
-        ({ limit, offset }) =>
-          api.get("/shopify/products", {
-            params: {
-              limit,
-              offset,
-              sort_by: "title",
-              sort_dir: "asc",
-            },
-          }),
-        { limit: PRODUCTS_PAGE_SIZE },
-      );
+      const rows = await fetchProductPages({
+        sortBy: "title",
+        sortDir: "asc",
+      });
 
       setProductCatalogRows(rows);
+      await writeProductsCache(productCatalogCacheKey, rows);
     } catch (requestError) {
       console.error("Error loading supplier product catalog:", requestError);
-      setProductCatalogRows([]);
+      if (productCatalogRowsRef.current.length === 0) {
+        setProductCatalogRows([]);
+      }
       setCatalogError(getErrorMessage(requestError));
     } finally {
       if (!silent) {
         setCatalogLoading(false);
       }
     }
-  }, [canManageSuppliers, isFactorySuppliersView]);
+  }, [
+    canManageSuppliers,
+    isFactorySuppliersView,
+    productCatalogCacheKey,
+  ]);
 
   useEffect(() => {
     loadSuppliers();
@@ -912,7 +940,7 @@ export default function Suppliers() {
       }
 
       if (isProductsRelatedUpdate(event)) {
-        loadProductCatalog({ silent: true });
+        loadProductCatalog({ silent: true, force: true });
       }
     });
 
@@ -1306,7 +1334,11 @@ export default function Suppliers() {
       setSavingProductLinks(true);
       setMessage({ type: "", text: "" });
       await suppliersAPI.updateProductLinks(selectedSupplierId, { links });
-      await Promise.all([loadSuppliers(), loadSupplierDetail(selectedSupplierId)]);
+      await Promise.all([
+        loadSuppliers(),
+        loadSupplierDetail(selectedSupplierId),
+        loadProductCatalog({ silent: true, force: true }),
+      ]);
       setMessage({
         type: "success",
         text: "تم حفظ ربط المنتجات بالمورد",

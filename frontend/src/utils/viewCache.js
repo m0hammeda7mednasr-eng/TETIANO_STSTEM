@@ -1,6 +1,8 @@
 const DB_NAME = "tetiano_local_cache";
 const STORE_NAME = "views";
 const LOCAL_STORAGE_PREFIX = "tetiano_view_cache::";
+const LOCAL_STORAGE_MAX_CHARS = 1_500_000;
+const LOCAL_STORAGE_PREVIEW_ARRAY_LIMIT = 500;
 
 let openDbPromise = null;
 
@@ -51,11 +53,81 @@ const writeToLocalStorage = (key, value) => {
   try {
     window.localStorage.setItem(
       `${LOCAL_STORAGE_PREFIX}${key}`,
-      JSON.stringify(value),
+      JSON.stringify(buildLocalStoragePayload(value)),
     );
   } catch {
     // Ignore cache write failures.
   }
+};
+
+const getJsonLength = (value) => {
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+};
+
+const buildPreviewValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.slice(0, LOCAL_STORAGE_PREVIEW_ARRAY_LIMIT);
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  let didTrim = false;
+  const preview = { ...value };
+
+  for (const [field, fieldValue] of Object.entries(preview)) {
+    if (
+      Array.isArray(fieldValue) &&
+      fieldValue.length > LOCAL_STORAGE_PREVIEW_ARRAY_LIMIT
+    ) {
+      preview[field] = fieldValue.slice(0, LOCAL_STORAGE_PREVIEW_ARRAY_LIMIT);
+      didTrim = true;
+    }
+  }
+
+  return didTrim
+    ? {
+        ...preview,
+        __cache_preview: true,
+        __cache_preview_limit: LOCAL_STORAGE_PREVIEW_ARRAY_LIMIT,
+      }
+    : preview;
+};
+
+const buildLocalStoragePayload = (payload) => {
+  if (getJsonLength(payload) <= LOCAL_STORAGE_MAX_CHARS) {
+    return payload;
+  }
+
+  const previewPayload = {
+    ...payload,
+    value: buildPreviewValue(payload?.value),
+    storage: {
+      ...(payload?.storage || {}),
+      full: "indexeddb",
+      localStorage: "preview",
+    },
+  };
+
+  if (getJsonLength(previewPayload) <= LOCAL_STORAGE_MAX_CHARS) {
+    return previewPayload;
+  }
+
+  return {
+    key: payload?.key,
+    value: null,
+    updatedAt: payload?.updatedAt,
+    storage: {
+      ...(payload?.storage || {}),
+      full: "indexeddb",
+      localStorage: "metadata",
+    },
+  };
 };
 
 export const buildStoreScopedCacheKey = (scope, storeIdOverride = null) => {

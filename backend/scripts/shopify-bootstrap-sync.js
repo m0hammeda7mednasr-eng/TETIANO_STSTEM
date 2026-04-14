@@ -13,8 +13,13 @@ Shopify full bootstrap sync
 Required:
   SUPABASE_URL
   SUPABASE_SERVICE_ROLE_KEY
-  SHOPIFY_BOOTSTRAP_SHOP or SHOPIFY_EMERGENCY_SHOP
-  SHOPIFY_BOOTSTRAP_ACCESS_TOKEN or SHOPIFY_EMERGENCY_ACCESS_TOKEN
+
+Shopify connection:
+  - Preferred env:
+      SHOPIFY_BOOTSTRAP_SHOP or SHOPIFY_EMERGENCY_SHOP
+      SHOPIFY_BOOTSTRAP_ACCESS_TOKEN or SHOPIFY_EMERGENCY_ACCESS_TOKEN
+  - Or reuse an existing row from public.shopify_tokens
+    when the database already has the saved Shopify token
 
 User resolution:
   - If SHOPIFY_BOOTSTRAP_USER_ID is set, use that user

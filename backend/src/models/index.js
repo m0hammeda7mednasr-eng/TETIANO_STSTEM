@@ -1252,41 +1252,21 @@ export const Customer = {
 
 export const ShopifyToken = {
   async save(userId, shop, accessToken, storeId) {
-    // First, try to find existing token
-    const { data: existingTokens } = await supabase
-      .from("shopify_tokens")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("shop", shop);
-
-    const baseRow = {
+    const row = {
       user_id: userId,
       shop,
       access_token: accessToken,
       store_id: storeId || null,
+      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
-    if (existingTokens && existingTokens.length > 0) {
-      // Update existing token
-      return await supabase
-        .from("shopify_tokens")
-        .update(baseRow)
-        .eq("user_id", userId)
-        .eq("shop", shop)
-        .select();
-    } else {
-      // Insert new token
-      return await supabase
-        .from("shopify_tokens")
-        .insert([
-          {
-            ...baseRow,
-            created_at: new Date().toISOString(),
-          },
-        ])
-        .select();
-    }
+    return await supabase
+      .from("shopify_tokens")
+      .upsert(row, {
+        onConflict: "user_id,shop",
+      })
+      .select();
   },
 
   async findByShop(shop) {

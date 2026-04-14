@@ -1868,7 +1868,16 @@ const grantUserStoreAccess = async ({ supabase, userId, storeId }) => {
 
   const result = await supabase
     .from("user_stores")
-    .upsert({ user_id: userId, store_id: storeId });
+    .upsert(
+      {
+        user_id: userId,
+        store_id: storeId,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "user_id,store_id",
+      },
+    );
 
   if (result.error && !isSchemaCompatibilityError(result.error)) {
     throw result.error;

@@ -170,12 +170,13 @@ export const getUserRole = async (
   }
 
   const { data: user, error } = await withSupabaseRetry(
-    () =>
+    ({ signal } = {}) =>
       supabase
         .from("users")
         .select("role")
         .eq("id", userId)
         .limit(1)
+        .abortSignal(signal)
         .maybeSingle(),
     retryOptions,
   );
@@ -207,12 +208,13 @@ export const getUserPermissions = async (
   }
 
   const { data: permissions, error } = await withSupabaseRetry(
-    () =>
+    ({ signal } = {}) =>
       supabase
         .from("permissions")
         .select("*")
         .eq("user_id", userId)
         .limit(1)
+        .abortSignal(signal)
         .maybeSingle(),
     retryOptions,
   );
@@ -258,8 +260,8 @@ export const requirePermission = (permissionName) => {
         String(req.method || "").toUpperCase(),
       );
       const retryOptions = isSafeMethod
-        ? { attempts: 1 }
-        : { attempts: 2, baseDelayMs: 150 };
+        ? { attempts: 1, timeoutMs: 2500 }
+        : { attempts: 2, baseDelayMs: 150, timeoutMs: 5000 };
       const role = normalizeRole(
         req.user?.role ||
           (await getUserRole(req.user?.id, {
@@ -299,6 +301,21 @@ export const requirePermission = (permissionName) => {
       next();
     } catch (error) {
       console.error("Permission check error:", error);
+      if (
+        isSafeMethod &&
+        isTransientSupabaseError(error) &&
+        req.user?.role
+      ) {
+        const fallbackPermissions = buildPermissionsForRole(req.user.role);
+        if (fallbackPermissions[permissionName]) {
+          req.user.permissions = fallbackPermissions;
+          req.permissionFallback = {
+            source: "token-role",
+          };
+          return next();
+        }
+      }
+
       res.status(isTransientSupabaseError(error) ? 503 : 500).json({
         error: isTransientSupabaseError(error)
           ? "Permission validation is temporarily unavailable"

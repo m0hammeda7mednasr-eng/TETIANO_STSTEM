@@ -211,6 +211,10 @@ export const AuthProvider = ({ children }) => {
         );
 
         try {
+          if (userData?.degraded) {
+            return;
+          }
+
           if (Array.isArray(userData?.stores)) {
             syncCurrentStoreId(userData.stores);
           } else {

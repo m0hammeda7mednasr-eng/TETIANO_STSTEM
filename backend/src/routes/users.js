@@ -21,6 +21,7 @@ const router = express.Router();
 const MAX_USERS_LIST_LIMIT = 200;
 const FAST_AUTH_QUERY_RETRY_OPTIONS = {
   attempts: 1,
+  timeoutMs: 3000,
 };
 const unsupportedPermissionColumns = new Set();
 
@@ -529,12 +530,13 @@ router.get("/me/stores", authenticateToken, async (req, res) => {
 router.get("/me", authenticateToken, async (req, res) => {
   try {
     const includeStores = shouldIncludeRelatedStores(req.query.include_stores);
-    const { data: user, error } = await withSupabaseRetry(() =>
+    const { data: user, error } = await withSupabaseRetry(({ signal } = {}) =>
       supabase
         .from("users")
         .select("id, email, name, role, is_active, created_at")
         .eq("id", req.user.id)
         .limit(1)
+        .abortSignal(signal)
         .maybeSingle(),
       FAST_AUTH_QUERY_RETRY_OPTIONS,
     );
@@ -550,21 +552,6 @@ router.get("/me", authenticateToken, async (req, res) => {
         permissions: buildPermissionsForRole(req.user.role),
         degraded: true,
       };
-
-      if (includeStores) {
-        try {
-          degradedResponse.stores = await listAccessibleStoresForUser(
-            req.user.id,
-            degradedResponse.role,
-          );
-        } catch (storesError) {
-          console.error(
-            "Error fetching user stores for degraded profile:",
-            storesError,
-          );
-          degradedResponse.stores = [];
-        }
-      }
 
       primeUserAccessContext(req.user.id, {
         role: degradedResponse.role,
@@ -587,12 +574,13 @@ router.get("/me", authenticateToken, async (req, res) => {
       normalizedPermissions = buildPermissionsForRole(normalizedUserRole);
     } else {
       const { data: permissionsData, error: permissionsError } =
-        await withSupabaseRetry(() =>
+        await withSupabaseRetry(({ signal } = {}) =>
           supabase
             .from("permissions")
             .select("*")
             .eq("user_id", req.user.id)
             .limit(1)
+            .abortSignal(signal)
             .maybeSingle(),
           FAST_AUTH_QUERY_RETRY_OPTIONS,
         );
@@ -648,12 +636,13 @@ router.get("/me", authenticateToken, async (req, res) => {
 // Get current user permissions - MUST be before /:userId
 router.get("/me/permissions", authenticateToken, async (req, res) => {
   try {
-    const { data: userData, error: userError } = await withSupabaseRetry(() =>
+    const { data: userData, error: userError } = await withSupabaseRetry(({ signal } = {}) =>
       supabase
         .from("users")
         .select("role")
         .eq("id", req.user.id)
         .limit(1)
+        .abortSignal(signal)
         .maybeSingle(),
       FAST_AUTH_QUERY_RETRY_OPTIONS,
     );
@@ -680,12 +669,13 @@ router.get("/me/permissions", authenticateToken, async (req, res) => {
       return res.json(adminPermissions);
     }
 
-    const { data, error } = await withSupabaseRetry(() =>
+    const { data, error } = await withSupabaseRetry(({ signal } = {}) =>
       supabase
         .from("permissions")
         .select("*")
         .eq("user_id", req.user.id)
         .limit(1)
+        .abortSignal(signal)
         .maybeSingle(),
       FAST_AUTH_QUERY_RETRY_OPTIONS,
     );

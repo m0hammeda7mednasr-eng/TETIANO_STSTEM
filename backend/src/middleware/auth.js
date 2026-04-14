@@ -71,8 +71,8 @@ export const authenticateToken = async (req, res, next) => {
         String(req.method || "").toUpperCase(),
       );
       const roleRetryOptions = isSafeMethod
-        ? { attempts: 1 }
-        : { attempts: 2, baseDelayMs: 150 };
+        ? { attempts: 1, timeoutMs: 2500 }
+        : { attempts: 2, baseDelayMs: 150, timeoutMs: 5000 };
 
       try {
         // Always resolve current role from DB to avoid stale JWT role privileges.

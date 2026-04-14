@@ -1799,6 +1799,36 @@ const validateShopifyConnection = async ({ shop, accessToken }) => {
   }
 };
 
+const validateShopifyOrdersReadAccess = async ({ shop, accessToken }) => {
+  if (!shop || !accessToken) {
+    return {
+      readable: false,
+      message: "Missing Shopify connection details",
+    };
+  }
+
+  try {
+    await axios.get(`https://${shop}/admin/api/2024-01/orders.json`, {
+      params: {
+        limit: 1,
+        status: "any",
+      },
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json",
+      },
+      timeout: 10000,
+    });
+
+    return { readable: true, message: null };
+  } catch (error) {
+    return {
+      readable: false,
+      message: getReadableShopifyError(error),
+    };
+  }
+};
+
 const findOrCreateStoreConnection = async ({ supabase, shop, userId }) => {
   const lookup = await supabase
     .from("stores")
@@ -4526,11 +4556,26 @@ router.get(
             requiresReconnect: false,
             message: null,
           };
+      const ordersReadAccess = tokenData?.access_token
+        ? await validateShopifyOrdersReadAccess({
+            shop: tokenData.shop,
+            accessToken: tokenData.access_token,
+          })
+        : {
+            readable: false,
+            message: null,
+          };
 
       res.json({
         connected: Boolean(tokenData?.access_token && validation.valid),
         shop: tokenData?.shop || null,
         store_id: resolvedStoreId || null,
+        source: tokenData?.source || "database",
+        emergency_fallback: tokenData?.source === "env_emergency",
+        orders_readable: Boolean(ordersReadAccess.readable),
+        orders_read_error: ordersReadAccess.readable
+          ? null
+          : ordersReadAccess.message,
         redirectUri: redirectUri,
         webhookAddress: getWebhookAddress(req),
         requires_reconnect: validation.requiresReconnect,

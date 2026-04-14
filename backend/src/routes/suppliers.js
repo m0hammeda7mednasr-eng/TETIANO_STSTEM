@@ -65,6 +65,32 @@ const SUPPLIER_FABRICS_SELECT = [
   "created_at",
   "updated_at",
 ].join(",");
+const SUPPLIER_PRODUCTS_SELECT = [
+  "id",
+  "supplier_id",
+  "store_id",
+  "product_id",
+  "variant_id",
+  "product_shopify_id",
+  "product_name",
+  "variant_title",
+  "sku",
+  "notes",
+  "is_active",
+  "created_by",
+  "created_at",
+  "updated_at",
+].join(",");
+const PRODUCT_LINK_PRODUCT_SELECT = [
+  "id",
+  "shopify_id",
+  "store_id",
+  "title",
+  "vendor",
+  "product_type",
+  "sku",
+  "data",
+].join(",");
 
 const createHttpError = (status, message) => {
   const error = new Error(message);
@@ -119,6 +145,11 @@ const getRequestedSupplierType = (req) => {
   }
 
   return normalizeSupplierType(normalized);
+};
+
+const normalizeNullableText = (value) => {
+  const normalized = String(value || "").trim();
+  return normalized || null;
 };
 
 const resolveIsAdmin = (req) =>
@@ -274,6 +305,226 @@ const loadStoreSupplierFabrics = async (storeId) => {
   return data || [];
 };
 
+const loadStoreSupplierProductLinks = async (storeId, supplierId = null) => {
+  let query = db
+    .from("supplier_products")
+    .select(SUPPLIER_PRODUCTS_SELECT)
+    .eq("store_id", storeId);
+
+  if (supplierId) {
+    query = query.eq("supplier_id", supplierId);
+  }
+
+  const { data, error } = await query
+    .order("product_name", { ascending: true })
+    .order("variant_title", { ascending: true });
+
+  if (error) {
+    if (isSchemaCompatibilityError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  return data || [];
+};
+
+const getProductVariantRows = (product = {}) => {
+  const rawData = product?.data;
+  const parsedData =
+    rawData && typeof rawData === "object"
+      ? rawData
+      : (() => {
+          try {
+            return rawData ? JSON.parse(rawData) : {};
+          } catch {
+            return {};
+          }
+        })();
+
+  return Array.isArray(parsedData?.variants) ? parsedData.variants : [];
+};
+
+const buildProductLinkSnapshot = (product = {}, variantId = "") => {
+  const normalizedVariantId = String(variantId || "").trim();
+  const variants = getProductVariantRows(product);
+  const variant = normalizedVariantId
+    ? variants.find((item) => String(item?.id || "").trim() === normalizedVariantId)
+    : null;
+  const variantTitle = normalizeNullableText(variant?.title) || "";
+  const sku = normalizeNullableText(variant?.sku || product?.sku) || "";
+
+  return {
+    product_shopify_id: String(product?.shopify_id || "").trim(),
+    product_name: String(product?.title || "").trim(),
+    variant_title: variantTitle,
+    sku,
+  };
+};
+
+const decorateSupplierProductLinks = async (links = [], storeId) => {
+  const productIds = Array.from(
+    new Set(
+      (links || [])
+        .map((link) => String(link?.product_id || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (productIds.length === 0) {
+    return links || [];
+  }
+
+  const { data: products, error } = await db
+    .from("products")
+    .select(PRODUCT_LINK_PRODUCT_SELECT)
+    .eq("store_id", storeId)
+    .in("id", productIds);
+
+  if (error) {
+    if (isSchemaCompatibilityError(error)) {
+      return links || [];
+    }
+    throw error;
+  }
+
+  const productsById = new Map(
+    (products || []).map((product) => [String(product?.id || ""), product]),
+  );
+
+  return (links || []).map((link) => {
+    const product = productsById.get(String(link?.product_id || "")) || null;
+    const snapshot = product
+      ? buildProductLinkSnapshot(product, link?.variant_id)
+      : {};
+
+    return {
+      ...link,
+      product_shopify_id:
+        String(link?.product_shopify_id || "").trim() ||
+        snapshot.product_shopify_id ||
+        "",
+      product_name:
+        String(link?.product_name || "").trim() || snapshot.product_name || "",
+      variant_title:
+        String(link?.variant_title || "").trim() || snapshot.variant_title || "",
+      sku: String(link?.sku || "").trim() || snapshot.sku || "",
+      product: product
+        ? {
+            id: product.id,
+            shopify_id: product.shopify_id,
+            title: product.title,
+            vendor: product.vendor,
+            product_type: product.product_type,
+            sku: product.sku,
+          }
+        : null,
+    };
+  });
+};
+
+const attachProductLinkCounts = (suppliers = [], links = []) => {
+  const countsBySupplier = new Map();
+
+  for (const link of links || []) {
+    if (link?.is_active === false) {
+      continue;
+    }
+
+    const supplierId = String(link?.supplier_id || "").trim();
+    if (!supplierId) {
+      continue;
+    }
+
+    const current = countsBySupplier.get(supplierId) || new Set();
+    current.add(
+      `${String(link?.product_id || "").trim()}::${String(
+        link?.variant_id || "",
+      ).trim()}`,
+    );
+    countsBySupplier.set(supplierId, current);
+  }
+
+  return (suppliers || []).map((supplier) => {
+    const directProductsCount = countsBySupplier.get(String(supplier?.id || ""))?.size || 0;
+    return {
+      ...supplier,
+      direct_products_count: directProductsCount,
+      products_count: Math.max(Number(supplier?.products_count || 0), directProductsCount),
+    };
+  });
+};
+
+const buildSupplierProductPayloads = async ({
+  storeId,
+  supplierId,
+  links = [],
+  userId,
+}) => {
+  const requestedLinks = Array.isArray(links) ? links : [];
+  const normalizedLinks = requestedLinks
+    .map((link) => ({
+      product_id: String(link?.product_id || "").trim(),
+      variant_id: normalizeNullableText(link?.variant_id),
+      notes: String(link?.notes || "").trim(),
+      is_active: link?.is_active !== false,
+    }))
+    .filter((link) => UUID_REGEX.test(link.product_id));
+
+  if (normalizedLinks.length === 0) {
+    return [];
+  }
+
+  const uniqueKeys = new Set();
+  const dedupedLinks = normalizedLinks.filter((link) => {
+    const key = `${link.product_id}::${link.variant_id || ""}`;
+    if (uniqueKeys.has(key)) {
+      return false;
+    }
+    uniqueKeys.add(key);
+    return true;
+  });
+
+  const productIds = Array.from(new Set(dedupedLinks.map((link) => link.product_id)));
+  const { data: products, error } = await db
+    .from("products")
+    .select(PRODUCT_LINK_PRODUCT_SELECT)
+    .eq("store_id", storeId)
+    .in("id", productIds);
+
+  if (error) {
+    throw error;
+  }
+
+  const productsById = new Map(
+    (products || []).map((product) => [String(product?.id || ""), product]),
+  );
+
+  if (productsById.size !== productIds.length) {
+    throw createHttpError(400, "One or more selected products were not found");
+  }
+
+  return dedupedLinks.map((link) => {
+    const product = productsById.get(link.product_id);
+    const snapshot = buildProductLinkSnapshot(product, link.variant_id);
+
+    return {
+      supplier_id: supplierId,
+      store_id: storeId,
+      product_id: link.product_id,
+      variant_id: link.variant_id,
+      product_shopify_id: snapshot.product_shopify_id,
+      product_name: snapshot.product_name,
+      variant_title: snapshot.variant_title,
+      sku: snapshot.sku,
+      notes: link.notes,
+      is_active: link.is_active,
+      created_by: userId || null,
+      updated_at: new Date().toISOString(),
+    };
+  });
+};
+
 const findSupplierForStore = async (storeId, supplierId) => {
   const { data, error } = await db
     .from("suppliers")
@@ -340,13 +591,17 @@ router.get("/", async (req, res) => {
   try {
     const { storeId } = await resolveStoreContext(req);
     const supplierType = getRequestedSupplierType(req);
-    const [suppliers, entries, fabrics, allSuppliers] = await Promise.all([
+    const [suppliers, entries, fabrics, allSuppliers, productLinks] = await Promise.all([
       loadStoreSuppliers(storeId, supplierType),
       loadStoreSupplierEntries(storeId),
       loadStoreSupplierFabrics(storeId),
       loadStoreSuppliers(storeId),
+      loadStoreSupplierProductLinks(storeId),
     ]);
-    const data = buildSupplierList(suppliers, entries, fabrics, allSuppliers);
+    const data = attachProductLinkCounts(
+      buildSupplierList(suppliers, entries, fabrics, allSuppliers),
+      productLinks,
+    );
 
     res.json({
       data,
@@ -378,10 +633,11 @@ router.get("/:id", async (req, res) => {
       requestedSupplierType,
       "Supplier type does not match the current page",
     );
-    const [entries, fabrics, allSuppliers] = await Promise.all([
+    const [entries, fabrics, allSuppliers, productLinks] = await Promise.all([
       loadStoreSupplierEntries(storeId),
       loadStoreSupplierFabrics(storeId),
       loadStoreSuppliers(storeId),
+      loadStoreSupplierProductLinks(storeId, supplier.id),
     ]);
     const detail = buildSupplierDetail(
       supplier,
@@ -389,9 +645,23 @@ router.get("/:id", async (req, res) => {
       fabrics,
       allSuppliers,
     );
+    const decoratedProductLinks = await decorateSupplierProductLinks(
+      productLinks,
+      storeId,
+    );
 
     res.json({
-      supplier: detail,
+      supplier: {
+        ...detail,
+        product_links: decoratedProductLinks,
+        direct_products_count: decoratedProductLinks.filter(
+          (link) => link?.is_active !== false,
+        ).length,
+        products_count: Math.max(
+          Number(detail?.products_count || 0),
+          decoratedProductLinks.filter((link) => link?.is_active !== false).length,
+        ),
+      },
       meta: {
         store_id: storeId,
         supplier_type: supplier.supplier_type,
@@ -410,6 +680,102 @@ router.get("/:id", async (req, res) => {
     });
   }
 });
+
+router.get(
+  "/:id/product-links",
+  requirePermission("can_edit_suppliers"),
+  async (req, res) => {
+    try {
+      const { storeId } = await resolveStoreContext(req);
+      await requireSupplierForStore(storeId, req.params.id);
+      const links = await decorateSupplierProductLinks(
+        await loadStoreSupplierProductLinks(storeId, req.params.id),
+        storeId,
+      );
+
+      res.json({
+        data: links,
+        meta: {
+          store_id: storeId,
+          supplier_id: req.params.id,
+          generated_at: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching supplier product links:", error);
+
+      if (isSchemaCompatibilityError(error)) {
+        return handleSchemaError(res);
+      }
+
+      res.status(error.status || 500).json({
+        error: error.status ? error.message : "Failed to fetch supplier product links",
+      });
+    }
+  },
+);
+
+router.put(
+  "/:id/product-links",
+  requirePermission("can_edit_suppliers"),
+  async (req, res) => {
+    try {
+      const { storeId } = await resolveStoreContext(req);
+      const supplier = await requireSupplierForStore(storeId, req.params.id);
+      const payloads = await buildSupplierProductPayloads({
+        storeId,
+        supplierId: supplier.id,
+        links: req.body?.links,
+        userId: req.user?.id,
+      });
+
+      const deleteResult = await db
+        .from("supplier_products")
+        .delete()
+        .eq("store_id", storeId)
+        .eq("supplier_id", supplier.id);
+
+      if (deleteResult.error) {
+        throw deleteResult.error;
+      }
+
+      if (payloads.length > 0) {
+        const { error: insertError } = await db
+          .from("supplier_products")
+          .insert(payloads);
+
+        if (insertError) {
+          throw insertError;
+        }
+      }
+
+      const links = await decorateSupplierProductLinks(
+        await loadStoreSupplierProductLinks(storeId, supplier.id),
+        storeId,
+      );
+
+      res.json({
+        data: links,
+        meta: {
+          store_id: storeId,
+          supplier_id: supplier.id,
+          count: links.length,
+          updated_at: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error("Error saving supplier product links:", error);
+
+      if (isSchemaCompatibilityError(error)) {
+        return handleSchemaError(res);
+      }
+
+      res.status(error.status || 500).json({
+        error: error.status ? error.message : "Failed to save supplier product links",
+      });
+    }
+  },
+);
 
 router.post("/", requirePermission("can_edit_suppliers"), async (req, res) => {
   try {

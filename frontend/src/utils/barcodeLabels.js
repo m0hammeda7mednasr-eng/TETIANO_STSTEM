@@ -253,7 +253,6 @@ export const buildBarcodeLabelPrintHtml = ({
         </div>
       `
       : "";
-
   const footerMarkup =
     footerLines.length > 0
       ? `

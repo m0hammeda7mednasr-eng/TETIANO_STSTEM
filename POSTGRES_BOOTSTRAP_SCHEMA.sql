@@ -384,6 +384,23 @@ create table if not exists public.supplier_fabrics (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.supplier_products (
+  id uuid primary key default gen_random_uuid(),
+  supplier_id uuid not null references public.suppliers(id) on delete cascade,
+  store_id uuid not null references public.stores(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete cascade,
+  variant_id text,
+  product_shopify_id text default '',
+  product_name text not null default '',
+  variant_title text default '',
+  sku text default '',
+  notes text default '',
+  is_active boolean not null default true,
+  created_by uuid references public.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.tasks (
   id uuid primary key default gen_random_uuid(),
   title text not null,
@@ -572,6 +589,10 @@ create index if not exists idx_supplier_entries_supplier_id on public.supplier_e
 create index if not exists idx_supplier_entries_entry_date on public.supplier_entries (entry_date desc);
 create index if not exists idx_supplier_fabrics_supplier_id on public.supplier_fabrics (supplier_id);
 create unique index if not exists idx_supplier_fabrics_supplier_code_unique on public.supplier_fabrics (supplier_id, code) where nullif(btrim(code), '') is not null;
+create index if not exists idx_supplier_products_supplier_id on public.supplier_products (supplier_id);
+create index if not exists idx_supplier_products_product_id on public.supplier_products (product_id);
+create index if not exists idx_supplier_products_store_product on public.supplier_products (store_id, product_id);
+create unique index if not exists idx_supplier_products_unique_link on public.supplier_products (supplier_id, product_id, coalesce(variant_id, ''));
 create index if not exists idx_tasks_assigned_to_created_at on public.tasks (assigned_to, created_at desc);
 create index if not exists idx_tasks_store_updated_at on public.tasks (store_id, updated_at desc);
 create index if not exists idx_task_comments_task_created_at on public.task_comments (task_id, created_at asc);
@@ -620,6 +641,8 @@ drop trigger if exists supplier_entries_set_updated_at on public.supplier_entrie
 create trigger supplier_entries_set_updated_at before update on public.supplier_entries for each row execute function public.set_updated_at();
 drop trigger if exists supplier_fabrics_set_updated_at on public.supplier_fabrics;
 create trigger supplier_fabrics_set_updated_at before update on public.supplier_fabrics for each row execute function public.set_updated_at();
+drop trigger if exists supplier_products_set_updated_at on public.supplier_products;
+create trigger supplier_products_set_updated_at before update on public.supplier_products for each row execute function public.set_updated_at();
 drop trigger if exists tasks_set_updated_at on public.tasks;
 create trigger tasks_set_updated_at before update on public.tasks for each row execute function public.set_updated_at();
 drop trigger if exists task_comments_set_updated_at on public.task_comments;

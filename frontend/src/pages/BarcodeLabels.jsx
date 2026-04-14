@@ -29,17 +29,55 @@ import { buildVariantRows } from "../utils/productsView";
 
 const PRODUCTS_PAGE_SIZE = 200;
 
-const buildPrintableTarget = (variant) => ({
-  key: String(variant?.key || variant?.variant_id || variant?.id || ""),
-  title: String(variant?.product_title || "").trim(),
-  subtitle: normalizeBarcodeVariantTitle(
-    variant?.variant_title,
-    variant?.product_title,
-  ),
-  sku: String(variant?.sku || "").trim(),
-  barcode: String(variant?.barcode || "").trim(),
-  vendor: String(variant?.vendor || "").trim(),
-});
+const getActiveSupplierLinks = (variant = {}) =>
+  (Array.isArray(variant?.supplier_links) ? variant.supplier_links : [])
+    .filter((link) => link?.is_active !== false && link?.supplier?.is_active !== false);
+
+const getSupplierDisplayCode = (link = {}) =>
+  String(link?.supplier?.code || link?.supplier_code || "").trim();
+
+const getSupplierDisplayName = (link = {}) =>
+  String(link?.supplier?.name || link?.supplier_name || "").trim();
+
+const resolveSelectedSupplierLink = (variant = {}, selectedSupplierId = "") => {
+  const links = getActiveSupplierLinks(variant);
+  if (links.length === 0) {
+    return null;
+  }
+
+  const normalizedSupplierId = String(selectedSupplierId || "").trim();
+  if (normalizedSupplierId) {
+    const selected = links.find(
+      (link) => String(link?.supplier_id || link?.supplier?.id || "").trim() === normalizedSupplierId,
+    );
+    if (selected) {
+      return selected;
+    }
+  }
+
+  return links.length === 1 ? links[0] : links[0];
+};
+
+const buildPrintableTarget = (variant, selectedSupplierId = "") => {
+  const supplierLink = resolveSelectedSupplierLink(variant, selectedSupplierId);
+  const supplierCode = getSupplierDisplayCode(supplierLink);
+  const supplierName = getSupplierDisplayName(supplierLink);
+
+  return {
+    key: String(variant?.key || variant?.variant_id || variant?.id || ""),
+    title: String(variant?.product_title || "").trim(),
+    subtitle: normalizeBarcodeVariantTitle(
+      variant?.variant_title,
+      variant?.product_title,
+    ),
+    sku: String(variant?.sku || "").trim(),
+    barcode: String(variant?.barcode || "").trim(),
+    vendor: String(variant?.vendor || "").trim(),
+    supplier_id: String(supplierLink?.supplier_id || supplierLink?.supplier?.id || "").trim(),
+    supplier_code: supplierCode,
+    supplier_name: supplierName,
+  };
+};
 
 function MetricCard({ icon: Icon, label, value, helper }) {
   return (
@@ -60,7 +98,16 @@ function MetricCard({ icon: Icon, label, value, helper }) {
   );
 }
 
-function VariantCard({ target, variant, onPrint, select }) {
+function VariantCard({
+  target,
+  variant,
+  selectedSupplierId,
+  onSupplierChange,
+  onPrint,
+  select,
+}) {
+  const supplierLinks = getActiveSupplierLinks(variant);
+
   return (
     <div className="app-surface rounded-[26px] p-5">
       <div className="flex items-start justify-between gap-4">
@@ -102,6 +149,16 @@ function VariantCard({ target, variant, onPrint, select }) {
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
+        {target.supplier_code ? (
+          <span className="app-chip px-3 py-1.5 text-xs font-semibold text-slate-800">
+            {select("كود المورد", "Supplier code")}: {target.supplier_code}
+          </span>
+        ) : null}
+        {target.supplier_name ? (
+          <span className="app-chip px-3 py-1.5 text-xs font-medium text-slate-700">
+            {target.supplier_name}
+          </span>
+        ) : null}
         {target.vendor ? (
           <span className="app-chip px-3 py-1.5 text-xs font-medium text-slate-700">
             {target.vendor}
@@ -117,6 +174,30 @@ function VariantCard({ target, variant, onPrint, select }) {
             </span>
           ))}
       </div>
+
+      {supplierLinks.length > 1 ? (
+        <label className="mt-4 block">
+          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            {select("المورد على الليبل", "Label supplier")}
+          </span>
+          <select
+            value={selectedSupplierId}
+            onChange={(event) => onSupplierChange(variant, event.target.value)}
+            className="app-input rounded-2xl px-4 py-3 text-sm"
+          >
+            {supplierLinks.map((link) => {
+              const supplierId = String(link?.supplier_id || link?.supplier?.id || "").trim();
+              const code = getSupplierDisplayCode(link);
+              const name = getSupplierDisplayName(link);
+              return (
+                <option key={`${target.key}-${supplierId}`} value={supplierId}>
+                  {code ? `${code} | ${name || "-"}` : name || supplierId}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
         <span>
@@ -148,6 +229,8 @@ export default function BarcodeLabels() {
   const [isCustomLabelModalOpen, setIsCustomLabelModalOpen] = useState(false);
   const [barcodeModalTargets, setBarcodeModalTargets] = useState([]);
   const [barcodeModalTargetKey, setBarcodeModalTargetKey] = useState("");
+  const [selectedSuppliersByVariantKey, setSelectedSuppliersByVariantKey] =
+    useState({});
 
   const fetchProducts = useCallback(async () => {
     setLoading(true);
@@ -240,13 +323,20 @@ export default function BarcodeLabels() {
     }
 
     return printableVariants.filter((variant) => {
-      const target = buildPrintableTarget(variant);
+      const target = buildPrintableTarget(
+        variant,
+        selectedSuppliersByVariantKey[
+          String(variant?.key || variant?.variant_id || variant?.id || "")
+        ],
+      );
       const fields = [
         target.title,
         target.subtitle,
         target.sku,
         target.barcode,
         target.vendor,
+        target.supplier_code,
+        target.supplier_name,
         ...(Array.isArray(variant?.option_values) ? variant.option_values : []),
       ]
         .map((value) => String(value || "").toLowerCase())
@@ -254,11 +344,64 @@ export default function BarcodeLabels() {
 
       return fields.some((value) => value.includes(keyword));
     });
-  }, [printableVariants, searchTerm]);
+  }, [printableVariants, searchTerm, selectedSuppliersByVariantKey]);
+
+  useEffect(() => {
+    setSelectedSuppliersByVariantKey((current) => {
+      const next = { ...current };
+      let changed = false;
+
+      for (const variant of printableVariants) {
+        const key = String(variant?.key || variant?.variant_id || variant?.id || "");
+        if (!key) {
+          continue;
+        }
+
+        const links = getActiveSupplierLinks(variant);
+        if (links.length === 1) {
+          const supplierId = String(
+            links[0]?.supplier_id || links[0]?.supplier?.id || "",
+          ).trim();
+          if (supplierId && next[key] !== supplierId) {
+            next[key] = supplierId;
+            changed = true;
+          }
+        } else if (links.length > 1 && !next[key]) {
+          const supplierId = String(
+            links[0]?.supplier_id || links[0]?.supplier?.id || "",
+          ).trim();
+          if (supplierId) {
+            next[key] = supplierId;
+            changed = true;
+          }
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [printableVariants]);
+
+  const updateVariantSupplierSelection = useCallback((variant, supplierId) => {
+    const key = String(variant?.key || variant?.variant_id || variant?.id || "");
+    if (!key) {
+      return;
+    }
+
+    setSelectedSuppliersByVariantKey((current) => ({
+      ...current,
+      [key]: supplierId,
+    }));
+  }, []);
 
   const openBarcodeLabelModal = useCallback(
     (variant) => {
-      const target = buildPrintableTarget(variant);
+      const variantKey = String(
+        variant?.key || variant?.variant_id || variant?.id || "",
+      );
+      const target = buildPrintableTarget(
+        variant,
+        selectedSuppliersByVariantKey[variantKey],
+      );
       if (!hasPrintableBarcodeValue(target)) {
         return;
       }
@@ -267,7 +410,7 @@ export default function BarcodeLabels() {
       setBarcodeModalTargetKey(target.key);
       setIsBarcodeModalOpen(true);
     },
-    [],
+    [selectedSuppliersByVariantKey],
   );
 
   return (
@@ -421,13 +564,20 @@ export default function BarcodeLabels() {
           ) : filteredVariants.length > 0 ? (
             <div className="grid gap-4 xl:grid-cols-2">
               {filteredVariants.map((variant) => {
-                const target = buildPrintableTarget(variant);
+                const variantKey = String(
+                  variant?.key || variant?.variant_id || variant?.id || "",
+                );
+                const selectedSupplierId =
+                  selectedSuppliersByVariantKey[variantKey] || "";
+                const target = buildPrintableTarget(variant, selectedSupplierId);
 
                 return (
                   <VariantCard
                     key={target.key}
                     target={target}
                     variant={variant}
+                    selectedSupplierId={selectedSupplierId}
+                    onSupplierChange={updateVariantSupplierSelection}
                     onPrint={openBarcodeLabelModal}
                     select={select}
                   />

@@ -203,6 +203,11 @@ export const buildVariantRows = (products, isAdmin) =>
         image_url: variant?.image_url || product?.image_url || "",
         sku: String(variant?.sku || product?.sku || "").trim(),
         barcode: String(variant?.barcode || "").trim(),
+        supplier_links: Array.isArray(variant?.supplier_links)
+          ? variant.supplier_links
+          : Array.isArray(product?.supplier_links)
+            ? product.supplier_links
+            : [],
         price,
         compare_at_price: variant?.compare_at_price ?? null,
         cost_price: costPrice,

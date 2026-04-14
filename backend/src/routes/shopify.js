@@ -127,6 +127,30 @@ const PRODUCT_LIST_SELECTS = [
     "data",
   ].join(","),
 ];
+const PRODUCT_SUPPLIER_LINK_SELECT = [
+  "id",
+  "supplier_id",
+  "store_id",
+  "product_id",
+  "variant_id",
+  "product_shopify_id",
+  "product_name",
+  "variant_title",
+  "sku",
+  "notes",
+  "is_active",
+  "created_at",
+  "updated_at",
+].join(",");
+const PRODUCT_SUPPLIER_SELECT = [
+  "id",
+  "store_id",
+  "supplier_type",
+  "code",
+  "name",
+  "phone",
+  "is_active",
+].join(",");
 const ORDER_LIST_SELECT = [
   "id",
   "shopify_id",
@@ -2049,6 +2073,126 @@ const getProductPrimaryImageUrl = (product) => {
   return String(parsedData?.image?.src || "").trim();
 };
 
+const normalizeSupplierLinkRow = (link = {}, supplier = null) => ({
+  id: String(link?.id || "").trim(),
+  supplier_id: String(link?.supplier_id || supplier?.id || "").trim(),
+  product_id: String(link?.product_id || "").trim(),
+  variant_id: String(link?.variant_id || "").trim(),
+  product_shopify_id: String(link?.product_shopify_id || "").trim(),
+  product_name: String(link?.product_name || "").trim(),
+  variant_title: String(link?.variant_title || "").trim(),
+  sku: String(link?.sku || "").trim(),
+  notes: String(link?.notes || "").trim(),
+  is_active: link?.is_active !== false && supplier?.is_active !== false,
+  supplier: supplier
+    ? {
+        id: supplier.id,
+        code: String(supplier.code || "").trim(),
+        name: String(supplier.name || "").trim(),
+        phone: String(supplier.phone || "").trim(),
+        supplier_type: supplier.supplier_type || "factory",
+        is_active: supplier.is_active !== false,
+      }
+    : null,
+});
+
+const getProductSupplierLinks = (product = {}) =>
+  Array.isArray(product?.supplier_links)
+    ? product.supplier_links.filter((link) => link?.is_active !== false)
+    : [];
+
+const getSupplierLinksForVariant = (product = {}, variant = {}) => {
+  const variantId = String(variant?.id || "").trim();
+  const links = getProductSupplierLinks(product).filter((link) => {
+    const linkVariantId = String(link?.variant_id || "").trim();
+    return !linkVariantId || (variantId && linkVariantId === variantId);
+  });
+  const seenKeys = new Set();
+
+  return links.filter((link) => {
+    const key = `${String(link?.supplier_id || "").trim()}::${String(
+      link?.variant_id || "",
+    ).trim()}`;
+    if (!key.trim() || seenKeys.has(key)) {
+      return false;
+    }
+    seenKeys.add(key);
+    return true;
+  });
+};
+
+const attachSupplierLinksToProducts = async (products = []) => {
+  const rows = Array.isArray(products) ? products : [];
+  const productIds = Array.from(
+    new Set(rows.map((product) => String(product?.id || "").trim()).filter(Boolean)),
+  );
+
+  if (productIds.length === 0) {
+    return rows;
+  }
+
+  try {
+    const { data: links, error: linksError } = await db
+      .from("supplier_products")
+      .select(PRODUCT_SUPPLIER_LINK_SELECT)
+      .in("product_id", productIds)
+      .eq("is_active", true);
+
+    if (linksError) {
+      throw linksError;
+    }
+
+    const supplierIds = Array.from(
+      new Set(
+        (links || [])
+          .map((link) => String(link?.supplier_id || "").trim())
+          .filter(Boolean),
+      ),
+    );
+    let suppliersById = new Map();
+
+    if (supplierIds.length > 0) {
+      const { data: suppliers, error: suppliersError } = await db
+        .from("suppliers")
+        .select(PRODUCT_SUPPLIER_SELECT)
+        .in("id", supplierIds);
+
+      if (suppliersError) {
+        throw suppliersError;
+      }
+
+      suppliersById = new Map(
+        (suppliers || []).map((supplier) => [String(supplier?.id || ""), supplier]),
+      );
+    }
+
+    const linksByProductId = new Map();
+    for (const link of links || []) {
+      const productId = String(link?.product_id || "").trim();
+      if (!productId) {
+        continue;
+      }
+
+      const supplier = suppliersById.get(String(link?.supplier_id || "")) || null;
+      const nextLink = normalizeSupplierLinkRow(link, supplier);
+      const currentLinks = linksByProductId.get(productId) || [];
+      currentLinks.push(nextLink);
+      linksByProductId.set(productId, currentLinks);
+    }
+
+    return rows.map((product) => ({
+      ...product,
+      supplier_links: linksByProductId.get(String(product?.id || "")) || [],
+    }));
+  } catch (error) {
+    if (!isSchemaCompatibilityError(error)) {
+      console.error("Product supplier links enrichment failed:", error);
+    }
+
+    return rows;
+  }
+};
+
 const resolveVariantImageUrl = (
   variant,
   imageRows = [],
@@ -2114,6 +2258,9 @@ const buildProductVariantSummaries = (product) => {
         inventory_quantity: toNumber(product?.inventory_quantity),
         shopify_inventory_quantity: toNumber(product?.inventory_quantity),
         warehouse_inventory_quantity: warehouseSnapshot.quantity,
+        supplier_links: getSupplierLinksForVariant(product, {
+          id: product?.shopify_id || product?.id || null,
+        }),
         requires_shipping: true,
         taxable: true,
         created_at: product?.created_at || null,
@@ -2150,6 +2297,7 @@ const buildProductVariantSummaries = (product) => {
       inventory_quantity: toNumber(variant?.inventory_quantity),
       shopify_inventory_quantity: toNumber(variant?.inventory_quantity),
       warehouse_inventory_quantity: warehouseSnapshot.quantity,
+      supplier_links: getSupplierLinksForVariant(product, variant),
       requires_shipping: Boolean(variant?.requires_shipping),
       taxable: Boolean(variant?.taxable),
       created_at: variant?.created_at || null,
@@ -2972,8 +3120,15 @@ const getFallbackProductsPage = async (req) => {
     throw scopedRowsResult.error;
   }
 
-  return applyProductsQueryFilters(scopedRowsResult?.data || [], req.query).map(
-    (product) => buildProductListItem(product, Boolean(req.user?.isAdmin)),
+  const filteredProducts = applyProductsQueryFilters(
+    scopedRowsResult?.data || [],
+    req.query,
+  );
+  const productsWithSupplierLinks =
+    await attachSupplierLinksToProducts(filteredProducts);
+
+  return productsWithSupplierLinks.map((product) =>
+    buildProductListItem(product, Boolean(req.user?.isAdmin)),
   );
 };
 
@@ -4792,7 +4947,10 @@ router.get(
       console.log(
         `Returning ${data?.length || 0} products for user ${req.user.id}`,
       );
-      const sanitizedProducts = (data || []).map((product) =>
+      const productsWithSupplierLinks = await attachSupplierLinksToProducts(
+        data || [],
+      );
+      const sanitizedProducts = productsWithSupplierLinks.map((product) =>
         buildProductListItem(product, isAdmin),
       );
       res.json(buildPaginatedCollection(sanitizedProducts, pagination));
@@ -5336,7 +5494,15 @@ router.get(
       if (!data) {
         return res.status(404).json({ error: "Product not found" });
       }
-      res.json(sanitizeProductForRole(buildProductSummary(data), isAdmin));
+      const [productWithSupplierLinks] = await attachSupplierLinksToProducts([
+        data,
+      ]);
+      res.json(
+        sanitizeProductForRole(
+          buildProductSummary(productWithSupplierLinks || data),
+          isAdmin,
+        ),
+      );
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -5357,7 +5523,12 @@ router.get(
         userId,
         productId,
       );
-      const productWithSourcing = await attachProductSourcingDetail(product);
+      const [productWithSupplierLinks] = await attachSupplierLinksToProducts([
+        product,
+      ]);
+      const productWithSourcing = await attachProductSourcingDetail(
+        productWithSupplierLinks || product,
+      );
 
       res.json(sanitizeProductForRole(productWithSourcing, isAdmin));
     } catch (error) {

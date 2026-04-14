@@ -748,6 +748,7 @@ export default function Suppliers() {
   const [savingFabric, setSavingFabric] = useState(false);
   const [savingDelivery, setSavingDelivery] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
+  const [savingProductLinks, setSavingProductLinks] = useState(false);
 
   const productCatalogOptions = useMemo(
     () => buildProductCatalogOptions(productCatalogRows),
@@ -1295,6 +1296,34 @@ export default function Suppliers() {
     }
   };
 
+  const saveSupplierProductLinks = async (links) => {
+    if (!selectedSupplierId) {
+      setMessage({ type: "error", text: "اختر موردًا أولًا" });
+      return;
+    }
+
+    try {
+      setSavingProductLinks(true);
+      setMessage({ type: "", text: "" });
+      await suppliersAPI.updateProductLinks(selectedSupplierId, { links });
+      await Promise.all([loadSuppliers(), loadSupplierDetail(selectedSupplierId)]);
+      setMessage({
+        type: "success",
+        text: "تم حفظ ربط المنتجات بالمورد",
+      });
+    } catch (requestError) {
+      console.error("Error saving supplier product links:", requestError);
+      setMessage({
+        type: "error",
+        text:
+          requestError?.response?.data?.error ||
+          "فشل حفظ ربط المنتجات بالمورد",
+      });
+    } finally {
+      setSavingProductLinks(false);
+    }
+  };
+
   if (typeof window !== "undefined") {
     return (
     <div className="flex min-h-screen bg-transparent">
@@ -1638,6 +1667,8 @@ export default function Suppliers() {
                 setPaymentForm,
                 savePayment,
                 savingPayment,
+                savingProductLinks,
+                saveSupplierProductLinks,
                 catalogLoading,
                 catalogError,
                 productCatalogOptions,
@@ -1683,6 +1714,8 @@ function renderDetails({
   setPaymentForm,
   savePayment,
   savingPayment,
+  savingProductLinks,
+  saveSupplierProductLinks,
   catalogLoading,
   catalogError,
   productCatalogOptions,
@@ -1847,6 +1880,16 @@ function renderDetails({
       />
 
       <SupplierCatalogWorkspace supplier={selectedSupplier} />
+
+      <SupplierProductLinksSection
+        supplier={selectedSupplier}
+        catalogOptions={productCatalogOptions}
+        catalogLoading={catalogLoading}
+        catalogError={catalogError}
+        canManage={canEditProducts}
+        saving={savingProductLinks}
+        onSave={saveSupplierProductLinks}
+      />
 
       {canEditProducts ? (
         <div className="grid gap-6 lg:grid-cols-2">
@@ -2082,6 +2125,207 @@ function FabricSupplierDetails({
         )}
       </SectionCard>
     </>
+  );
+}
+
+function SupplierProductLinksSection({
+  supplier,
+  catalogOptions = [],
+  catalogLoading = false,
+  catalogError = "",
+  canManage = false,
+  saving = false,
+  onSave,
+}) {
+  const productLinks = useMemo(
+    () => toArray(supplier?.product_links),
+    [supplier?.product_links],
+  );
+  const [draftValues, setDraftValues] = useState([]);
+  const [selectedOptionValue, setSelectedOptionValue] = useState("");
+
+  const optionByValue = useMemo(() => {
+    const map = new Map();
+
+    for (const option of catalogOptions || []) {
+      map.set(option.value, option);
+    }
+
+    for (const link of productLinks) {
+      const value = buildCatalogOptionValue(link?.product_id, link?.variant_id);
+      if (!value || map.has(value)) {
+        continue;
+      }
+
+      const label = [
+        normalizeText(link?.product_name) || "منتج",
+        normalizeText(link?.variant_title),
+        normalizeText(link?.sku),
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      map.set(value, {
+        value,
+        product_id: normalizeText(link?.product_id),
+        variant_id: normalizeText(link?.variant_id),
+        product_name: normalizeText(link?.product_name),
+        variant_title: normalizeText(link?.variant_title),
+        sku: normalizeText(link?.sku),
+        label: label || value,
+        searchText: label.toLowerCase(),
+      });
+    }
+
+    return map;
+  }, [catalogOptions, productLinks]);
+
+  useEffect(() => {
+    setDraftValues(
+      productLinks
+        .map((link) => buildCatalogOptionValue(link?.product_id, link?.variant_id))
+        .filter(Boolean),
+    );
+    setSelectedOptionValue("");
+  }, [supplier?.id, productLinks]);
+
+  const availableOptions = useMemo(
+    () =>
+      (catalogOptions || []).filter((option) => !draftValues.includes(option.value)),
+    [catalogOptions, draftValues],
+  );
+
+  const linkedOptions = useMemo(
+    () =>
+      draftValues
+        .map((value) => optionByValue.get(value))
+        .filter(Boolean)
+        .sort((left, right) => left.label.localeCompare(right.label, "ar")),
+    [draftValues, optionByValue],
+  );
+
+  const addSelectedProduct = () => {
+    if (!selectedOptionValue || draftValues.includes(selectedOptionValue)) {
+      return;
+    }
+
+    setDraftValues((current) => [...current, selectedOptionValue]);
+    setSelectedOptionValue("");
+  };
+
+  const removeLinkedProduct = (value) => {
+    setDraftValues((current) => current.filter((item) => item !== value));
+  };
+
+  const saveLinks = () => {
+    const links = draftValues
+      .map((value) => optionByValue.get(value))
+      .filter(Boolean)
+      .map((option) => ({
+        product_id: option.product_id,
+        variant_id: option.variant_id || null,
+      }));
+
+    onSave?.(links);
+  };
+
+  return (
+    <SectionCard
+      title="ربط المنتجات بالمورد"
+      subtitle="اختار المنتجات الموجودة في السيستم. لو المنتج له مورد واحد هيظهر كوده تلقائيًا على الليبل، ولو له أكتر من مورد هتختار المورد وقت الطباعة."
+      action={
+        canManage ? (
+          <button
+            type="button"
+            onClick={saveLinks}
+            disabled={saving}
+            className="app-button-primary rounded-2xl px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {saving ? "جارٍ الحفظ..." : "حفظ ربط المنتجات"}
+          </button>
+        ) : null
+      }
+    >
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <DetailLineCompact label="كود المورد في الليبل" value={supplier?.code || "-"} />
+        <DetailLineCompact label="اسم المورد في التفاصيل" value={supplier?.name || "-"} />
+        <DetailLineCompact label="المنتجات المرتبطة" value={formatCount(linkedOptions.length)} />
+      </div>
+
+      {canManage ? (
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+            <select
+              value={selectedOptionValue}
+              disabled={catalogLoading || availableOptions.length === 0}
+              onChange={(event) => setSelectedOptionValue(event.target.value)}
+              className="app-input px-4 py-3 text-sm disabled:cursor-not-allowed disabled:bg-slate-100"
+            >
+              <option value="">
+                {catalogLoading
+                  ? "جاري تحميل المنتجات..."
+                  : availableOptions.length === 0
+                    ? "كل المنتجات المتاحة مرتبطة"
+                    : "اختار منتج أو فاريانت"}
+              </option>
+              {availableOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={addSelectedProduct}
+              disabled={!selectedOptionValue || catalogLoading}
+              className="app-button-secondary rounded-2xl px-4 py-3 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              إضافة المنتج
+            </button>
+          </div>
+          {catalogError ? (
+            <p className="mt-3 text-sm text-red-600">{catalogError}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {linkedOptions.length > 0 ? (
+        <div className="space-y-3">
+          {linkedOptions.map((option) => (
+            <div
+              key={option.value}
+              className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-slate-900">
+                  {option.product_name || option.label}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {[
+                    option.variant_title || "المنتج الأساسي",
+                    option.sku ? `SKU: ${option.sku}` : "",
+                    supplier?.code ? `Supplier code: ${supplier.code}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" | ")}
+                </div>
+              </div>
+              {canManage ? (
+                <button
+                  type="button"
+                  onClick={() => removeLinkedProduct(option.value)}
+                  className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+                >
+                  حذف
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState text="لا توجد منتجات مرتبطة بهذا المورد حتى الآن." />
+      )}
+    </SectionCard>
   );
 }
 

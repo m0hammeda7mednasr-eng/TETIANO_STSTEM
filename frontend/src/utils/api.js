@@ -297,6 +297,10 @@ export const suppliersAPI = {
   getById: (id, params = {}) => api.get(`/suppliers/${id}`, { params }),
   create: (data) => api.post("/suppliers", data),
   update: (id, data) => api.put(`/suppliers/${id}`, data),
+  getProductLinks: (id, params = {}) =>
+    api.get(`/suppliers/${id}/product-links`, { params }),
+  updateProductLinks: (id, data) =>
+    api.put(`/suppliers/${id}/product-links`, data),
   addFabric: (id, data) => api.post(`/suppliers/${id}/fabrics`, data),
   updateFabric: (id, fabricId, data) =>
     api.put(`/suppliers/${id}/fabrics/${fabricId}`, data),

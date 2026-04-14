@@ -283,6 +283,8 @@ export default function BarcodeLabelModal({
           sku: String(target?.sku || "").trim(),
           barcode: String(target?.barcode || "").trim(),
           vendor: String(target?.vendor || "").trim(),
+          supplierCode: String(target?.supplier_code || "").trim(),
+          supplierName: String(target?.supplier_name || "").trim(),
         }))
         .filter((target) => target.title),
     [targets],
@@ -319,8 +321,14 @@ export default function BarcodeLabelModal({
 
     return {
       line1:
-        customLines?.line1 || selectedTarget.sku || savedSettings.footerLine1,
-      line2: customLines?.line2 || savedSettings.footerLine2,
+        customLines?.line1 ||
+        selectedTarget.supplierCode ||
+        selectedTarget.sku ||
+        savedSettings.footerLine1,
+      line2:
+        customLines?.line2 ||
+        (selectedTarget.supplierCode ? selectedTarget.sku : "") ||
+        savedSettings.footerLine2,
     };
   }, [
     selectedTarget,
@@ -334,6 +342,8 @@ export default function BarcodeLabelModal({
       title: selectedTarget?.title || "",
       subtitle: selectedTarget?.subtitle || "",
       vendor: selectedTarget?.vendor || "",
+      supplierCode: selectedTarget?.supplierCode || "",
+      supplierName: selectedTarget?.supplierName || "",
       code: resolvedCode.value,
       codeSourceLabel:
         resolvedCode.source === "barcode"

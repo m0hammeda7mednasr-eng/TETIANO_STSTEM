@@ -422,6 +422,30 @@ const normalizeShopDomain = (value) => {
   return `${normalizedSlug}.myshopify.com`;
 };
 
+const getEmergencyShopifyToken = ({ userId, requestedStoreId } = {}) => {
+  const accessToken = String(
+    process.env.SHOPIFY_EMERGENCY_ACCESS_TOKEN ||
+      process.env.SHOPIFY_ACCESS_TOKEN ||
+      "",
+  ).trim();
+  const shop = normalizeShopDomain(
+    process.env.SHOPIFY_EMERGENCY_SHOP || process.env.SHOPIFY_SHOP || "",
+  );
+
+  if (!accessToken || !shop || !SHOP_DOMAIN_REGEX.test(shop)) {
+    return null;
+  }
+
+  return {
+    user_id: process.env.SHOPIFY_EMERGENCY_USER_ID || userId || null,
+    store_id:
+      requestedStoreId || process.env.SHOPIFY_EMERGENCY_STORE_ID || null,
+    shop,
+    access_token: accessToken,
+    source: "env_emergency",
+  };
+};
+
 // Helper to get user-specific shopify credentials
 const getShopifyCredentials = async (userId) => {
   const { supabase } = await import("../supabaseClient.js");
@@ -1500,6 +1524,11 @@ const loadMissingOrdersSourceRows = async (req) => {
 };
 
 const resolveSyncToken = async ({ userId, requestedStoreId, isAdmin }) => {
+  const emergencyToken = getEmergencyShopifyToken({ userId, requestedStoreId });
+  if (emergencyToken) {
+    return emergencyToken;
+  }
+
   const { supabase } = await import("../supabaseClient.js");
 
   let accessibleStoreIds = [];
@@ -2694,6 +2723,12 @@ const searchOrdersFromShopifyFallback = async ({
     store_id: requestedStoreId || tokenData.store_id || null,
   }));
 
+  if (tokenData.source === "env_emergency") {
+    return ordersWithScope.map((order) =>
+      normalizeLiveShopifyOrderRow(order, tokenData),
+    );
+  }
+
   const persistedResult = await Order.updateMultiple(ordersWithScope);
   if (persistedResult?.error) {
     console.warn(
@@ -2703,6 +2738,193 @@ const searchOrdersFromShopifyFallback = async ({
   }
 
   return ordersWithScope;
+};
+
+const normalizeLiveShopifyOrderRow = (order, tokenData = {}) => ({
+  ...order,
+  id: order?.id || order?.shopify_id || null,
+  user_id: tokenData.user_id || null,
+  store_id: tokenData.store_id || null,
+  live_source: "shopify",
+});
+
+const getLiveShopifyOrdersPage = async ({
+  req,
+  pagination,
+  requestedStoreId,
+}) => {
+  const tokenData = getEmergencyShopifyToken({
+    userId: req.user?.id,
+    requestedStoreId,
+  });
+
+  if (!tokenData) {
+    return null;
+  }
+
+  const fetchLimit = Math.min(
+    250,
+    Math.max(1, pagination.offset + pagination.limit),
+  );
+  const result = await ShopifyService.getOrdersPageFromShopify(
+    tokenData.access_token,
+    tokenData.shop,
+    { limit: fetchLimit },
+  );
+  const rows = (result.orders || []).map((order) =>
+    normalizeLiveShopifyOrderRow(order, tokenData),
+  );
+  const filteredRows = applyOrdersQueryFilters(rows, req.query, {
+    maxVisible: 250,
+    paginate: false,
+  });
+
+  return {
+    rows: filteredRows.map((order) => buildOrderListItem(order)),
+    meta: {
+      source: "shopify_live_fallback",
+      fetched_count: result.fetchedCount || rows.length,
+      limited_to: fetchLimit,
+      database_available: false,
+      read_only: true,
+    },
+  };
+};
+
+const buildLiveShopifyOrderDetails = (order) => {
+  const parsedData = parseJsonField(order?.data);
+  const customer = parsedData?.customer || {};
+  const refunds = Array.isArray(parsedData?.refunds) ? parsedData.refunds : [];
+
+  return {
+    ...order,
+    id: order?.id || order?.shopify_id || null,
+    order_number: order?.order_number || parsedData?.order_number || null,
+    customer_name:
+      order?.customer_name ||
+      `${customer?.first_name || ""} ${customer?.last_name || ""}`.trim(),
+    customer_email: order?.customer_email || customer?.email || "",
+    customer_phone: getOrderCustomerPhone(order),
+    line_items: Array.isArray(parsedData?.line_items)
+      ? parsedData.line_items
+      : [],
+    shipping_address: parsedData?.shipping_address || null,
+    billing_address: parsedData?.billing_address || null,
+    customer_info: parsedData?.customer
+      ? {
+          id: customer.id,
+          email: customer.email,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          phone: customer.phone,
+          orders_count: customer.orders_count,
+          total_spent: customer.total_spent,
+          verified_email: customer.verified_email,
+          accepts_marketing: customer.accepts_marketing,
+          tags: customer.tags,
+          note: customer.note,
+          state: customer.state,
+        }
+      : null,
+    contact_edits: {
+      customer_phone: null,
+      shipping_address: null,
+    },
+    shipping_issue: null,
+    shipping_lines: Array.isArray(parsedData?.shipping_lines)
+      ? parsedData.shipping_lines
+      : [],
+    discount_codes: Array.isArray(parsedData?.discount_codes)
+      ? parsedData.discount_codes
+      : [],
+    discount_applications: Array.isArray(parsedData?.discount_applications)
+      ? parsedData.discount_applications
+      : [],
+    tax_lines: Array.isArray(parsedData?.tax_lines) ? parsedData.tax_lines : [],
+    refunds,
+    total_refunded: getOrderRefundedAmount(order),
+    fulfillments: Array.isArray(parsedData?.fulfillments)
+      ? parsedData.fulfillments
+      : [],
+    payment_details: parsedData?.payment_details || null,
+    payment_gateway_names: Array.isArray(parsedData?.payment_gateway_names)
+      ? parsedData.payment_gateway_names
+      : [],
+    processing_method: parsedData?.processing_method || null,
+    financial_status:
+      parsedData?.financial_status || order?.financial_status || order?.status,
+    payment_method: resolveOrderPaymentMethod(order),
+    tags: parsedData?.tags || "",
+    customer_note: parsedData?.note || "",
+    note_attributes: Array.isArray(parsedData?.note_attributes)
+      ? parsedData.note_attributes
+      : [],
+    source_name: parsedData?.source_name || "",
+    source_identifier: parsedData?.source_identifier || "",
+    source_url: parsedData?.source_url || "",
+    browser_ip: parsedData?.browser_ip || null,
+    client_details: parsedData?.client_details || null,
+    total_shipping:
+      parsedData?.total_shipping_price_set?.shop_money?.amount ||
+      (Array.isArray(parsedData?.shipping_lines)
+        ? parsedData.shipping_lines.reduce(
+            (sum, line) => sum + toNumber(line?.price),
+            0,
+          )
+        : 0),
+    subtotal_price: parsedData?.subtotal_price || order?.subtotal_price || 0,
+    total_line_items_price:
+      parsedData?.total_line_items_price || order?.total_price || 0,
+    total_discounts: parsedData?.total_discounts || 0,
+    total_tax: parsedData?.total_tax || 0,
+    total_tip_received: parsedData?.total_tip_received || 0,
+    total_weight: parsedData?.total_weight || 0,
+    presentment_currency: parsedData?.presentment_currency || null,
+    total_price_set: parsedData?.total_price_set || null,
+    order_status_url: parsedData?.order_status_url || null,
+    cancelled_at: parsedData?.cancelled_at || order?.cancelled_at || null,
+    cancel_reason: parsedData?.cancel_reason || null,
+    void_reason: null,
+    closed_at: parsedData?.closed_at || null,
+    test: parsedData?.test || false,
+    buyer_accepts_marketing: parsedData?.buyer_accepts_marketing || false,
+    referring_site: parsedData?.referring_site || null,
+    landing_site: parsedData?.landing_site || null,
+    checkout_id: parsedData?.checkout_id || null,
+    checkout_token: parsedData?.checkout_token || null,
+    cart_token: parsedData?.cart_token || null,
+    location_id: parsedData?.location_id || null,
+    user_id_shopify: parsedData?.user_id || null,
+    app_id: parsedData?.app_id || null,
+    notes: [],
+    live_source: "shopify",
+    read_only: true,
+  };
+};
+
+const getLiveShopifyOrderDetails = async ({ req, orderId, requestedStoreId }) => {
+  const tokenData = getEmergencyShopifyToken({
+    userId: req.user?.id,
+    requestedStoreId,
+  });
+
+  if (!tokenData) {
+    return null;
+  }
+
+  const liveOrder = await ShopifyService.getOrderByIdFromShopify(
+    tokenData.access_token,
+    tokenData.shop,
+    orderId,
+  );
+
+  if (!liveOrder) {
+    return null;
+  }
+
+  return buildLiveShopifyOrderDetails(
+    normalizeLiveShopifyOrderRow(liveOrder, tokenData),
+  );
 };
 
 const getFallbackProductsPage = async (req) => {
@@ -4783,6 +5005,38 @@ router.get(
       if (error) {
         console.error("Error fetching orders:", error);
         if (isQueryRetryableError(error) || error?.code === "ETIMEDOUT") {
+          try {
+            const liveFallback = await getLiveShopifyOrdersPage({
+              req,
+              pagination,
+              requestedStoreId,
+            });
+
+            if (liveFallback) {
+              if (liveSyncResult) {
+                res.setHeader(
+                  "X-Orders-Live-Sync",
+                  liveSyncResult.reason || "attempted",
+                );
+              }
+              res.setHeader("X-Orders-Fallback", "shopify_live");
+              return res.json(
+                buildSlicedPaginatedCollection(
+                  liveFallback.rows,
+                  pagination,
+                  {
+                    meta: liveFallback.meta,
+                  },
+                ),
+              );
+            }
+          } catch (liveFallbackError) {
+            console.error(
+              "Live Shopify orders fallback failed:",
+              liveFallbackError?.message || liveFallbackError,
+            );
+          }
+
           return res.status(503).json({
             error: "Orders are temporarily unavailable while the database finishes maintenance",
           });
@@ -5379,6 +5633,24 @@ router.get(
     } catch (error) {
       console.error("Get order details error:", error);
       if (isQueryRetryableError(error) || error?.code === "ETIMEDOUT") {
+        try {
+          const liveOrder = await getLiveShopifyOrderDetails({
+            req,
+            orderId: req.params.id,
+            requestedStoreId: getRequestedStoreId(req),
+          });
+
+          if (liveOrder) {
+            res.setHeader("X-Order-Details-Fallback", "shopify_live");
+            return res.json(liveOrder);
+          }
+        } catch (liveFallbackError) {
+          console.error(
+            "Live Shopify order details fallback failed:",
+            liveFallbackError?.message || liveFallbackError,
+          );
+        }
+
         return res.status(503).json({
           error: "Order details are temporarily unavailable while the database finishes maintenance",
         });

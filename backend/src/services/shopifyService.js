@@ -401,6 +401,39 @@ export class ShopifyService {
     }
   }
 
+  static async getOrdersPageFromShopify(accessToken, shop, options = {}) {
+    const requestedLimit = parseInt(options?.limit, 10);
+    const limit =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, 250)
+        : 50;
+    const params = {
+      limit,
+      status: "any",
+      order: "created_at desc",
+    };
+    const updatedAtMin = String(options?.updatedAtMin || "").trim();
+    if (updatedAtMin) {
+      params.updated_at_min = updatedAtMin;
+    }
+
+    const { items, nextPageUrl } = await this.#fetchPage(
+      this.#buildResourceUrl(shop, "orders", params),
+      accessToken,
+    );
+
+    return {
+      orders: items.map((order) => this.#mapOrderFromShopify(order)),
+      nextPageUrl,
+      fetchedCount: items.length,
+    };
+  }
+
+  static async getOrderByIdFromShopify(accessToken, shop, orderId) {
+    const order = await this.#fetchOrderById(accessToken, shop, orderId);
+    return order ? this.#mapOrderFromShopify(order) : null;
+  }
+
   static async searchOrdersFromShopify(
     accessToken,
     shop,

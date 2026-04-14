@@ -43,6 +43,7 @@ coverage/
 tmp/
 temp/
 backend/recovery/shipping-issue-state-recovery-*.json
+backups/
 
 # Optional npm cache directory
 .npm

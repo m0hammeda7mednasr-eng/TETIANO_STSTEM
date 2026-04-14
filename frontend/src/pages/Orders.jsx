@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import OrdersExportPanel from "../components/OrdersExportPanel";
-import api, { shopifyAPI } from "../utils/api";
+import { shopifyAPI } from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import { useLocale } from "../context/LocaleContext";

@@ -331,7 +331,7 @@ export default function BarcodeLabels() {
     } finally {
       setLoading(false);
     }
-  }, [cacheKey, formatNumber, select]);
+  }, [cacheKey, select]);
 
   useEffect(() => {
     fetchProducts();

@@ -119,13 +119,13 @@ const buildCachedPermissions = (cachedUser, cachedPermissions) => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const cachedUser = readJsonFromStorage("user");
-  const [user, setUser] = useState(cachedUser);
+  const initialCachedUser = useRef(readJsonFromStorage("user")).current;
+  const [user, setUser] = useState(initialCachedUser);
   const [permissions, setPermissions] = useState(() =>
-    buildCachedPermissions(cachedUser, readJsonFromStorage("permissions")),
+    buildCachedPermissions(initialCachedUser, readJsonFromStorage("permissions")),
   );
-  const [loading, setLoading] = useState(!cachedUser);
-  const [isAdmin, setIsAdmin] = useState(cachedUser?.role === "admin");
+  const [loading, setLoading] = useState(!initialCachedUser);
+  const [isAdmin, setIsAdmin] = useState(initialCachedUser?.role === "admin");
 
   const authRefreshInFlight = useRef(false);
   const lastAuthRefreshAt = useRef(0);
@@ -257,7 +257,7 @@ export const AuthProvider = ({ children }) => {
   );
 
   useEffect(() => {
-    loadAuthState({ silent: Boolean(cachedUser) });
+    loadAuthState({ silent: Boolean(initialCachedUser) });
 
     const interval = setInterval(() => {
       if (document.visibilityState !== "visible") {
@@ -269,7 +269,7 @@ export const AuthProvider = ({ children }) => {
     return () => {
       clearInterval(interval);
     };
-  }, [loadAuthState]);
+  }, [initialCachedUser, loadAuthState]);
 
   const logout = () => {
     localStorage.removeItem("token");

@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import OrdersExportPanel from "../components/OrdersExportPanel";
-import api from "../utils/api";
+import api, { shopifyAPI } from "../utils/api";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import { fetchAllPagesProgressively } from "../utils/pagination";
 import { useLocale } from "../context/LocaleContext";
@@ -702,11 +702,9 @@ export default function Orders() {
       try {
         const rows = await fetchAllPagesProgressively(
           ({ limit, offset }) =>
-            api.get("/shopify/orders/missing", {
-              params: {
-                limit,
-                offset,
-              },
+            shopifyAPI.getMissingOrders({
+              limit,
+              offset,
             }),
           {
             limit: MISSING_ORDERS_FETCH_PAGE_SIZE,

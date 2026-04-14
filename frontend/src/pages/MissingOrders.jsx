@@ -12,7 +12,7 @@ import {
 import Sidebar from "../components/Sidebar";
 import { useLocale } from "../context/LocaleContext";
 import { useStore } from "../context/StoreContext";
-import api from "../utils/api";
+import { shopifyAPI } from "../utils/api";
 import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 import {
@@ -351,11 +351,9 @@ export default function MissingOrders() {
     }
 
     try {
-      const response = await api.get("/shopify/orders/missing", {
-        params: {
-          limit: FETCH_PAGE_LIMIT,
-          offset: 0,
-        },
+      const response = await shopifyAPI.getMissingOrders({
+        limit: FETCH_PAGE_LIMIT,
+        offset: 0,
       });
       const rows = extractArray(response?.data);
 

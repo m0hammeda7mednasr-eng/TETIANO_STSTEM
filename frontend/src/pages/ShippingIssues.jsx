@@ -12,7 +12,7 @@ import {
   Undo2,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
-import api from "../utils/api";
+import api, { shopifyAPI } from "../utils/api";
 import { buildCsvFilename, downloadCsvSections } from "../utils/csv";
 import { extractArray } from "../utils/response";
 import { useLocale } from "../context/LocaleContext";
@@ -364,11 +364,9 @@ export default function ShippingIssues() {
         }
 
         try {
-          const response = await api.get("/shopify/orders/shipping-issues", {
-            params: {
-              limit: FETCH_PAGE_LIMIT,
-              offset: 0,
-            },
+          const response = await shopifyAPI.getShippingIssues({
+            limit: FETCH_PAGE_LIMIT,
+            offset: 0,
           });
           const rows = extractArray(response?.data);
           const activeRows = rows.filter((order) =>

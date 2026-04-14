@@ -379,7 +379,9 @@ const CUSTOMER_SORT_FIELDS = new Set([
 const orderBackgroundSyncState = new Map();
 const shippingIssueHistoryRecoveryState = new Map();
 const shippingIssueOrdersCache = new Map();
+const shippingIssueOrdersInFlight = new Map();
 const missingOrdersCache = new Map();
+const missingOrdersInFlight = new Map();
 const normalizeBaseUrl = (value) =>
   String(value || "")
     .trim()
@@ -926,6 +928,16 @@ const loadShippingIssueOrdersForRequest = async (req) => {
     };
   }
 
+  const pendingResult = shippingIssueOrdersInFlight.get(cacheKey);
+  if (pendingResult) {
+    const result = await pendingResult;
+    return {
+      ...result,
+      cacheHit: true,
+    };
+  }
+
+  const requestPromise = (async () => {
   let fastPathMatches = [];
   try {
     const fastPathResults = await Promise.allSettled([
@@ -1049,6 +1061,16 @@ const loadShippingIssueOrdersForRequest = async (req) => {
     rows,
     repairedCount: recoveryPlan.length,
   };
+  })();
+
+  shippingIssueOrdersInFlight.set(cacheKey, requestPromise);
+  try {
+    return await requestPromise;
+  } finally {
+    if (shippingIssueOrdersInFlight.get(cacheKey) === requestPromise) {
+      shippingIssueOrdersInFlight.delete(cacheKey);
+    }
+  }
 };
 
 const buildPaginatedCollection = (rows, { limit, offset }) => {
@@ -3302,6 +3324,16 @@ const getMissingOrdersForRequest = async (req) => {
     };
   }
 
+  const pendingResult = missingOrdersInFlight.get(cacheKey);
+  if (pendingResult) {
+    const result = await pendingResult;
+    return {
+      ...result,
+      cacheHit: true,
+    };
+  }
+
+  const requestPromise = (async () => {
   const scopedRowsResult = await loadMissingOrdersSourceRows(req);
   if (scopedRowsResult?.error) {
     throw scopedRowsResult.error;
@@ -3314,6 +3346,16 @@ const getMissingOrdersForRequest = async (req) => {
     orders,
     cacheHit: false,
   };
+  })();
+
+  missingOrdersInFlight.set(cacheKey, requestPromise);
+  try {
+    return await requestPromise;
+  } finally {
+    if (missingOrdersInFlight.get(cacheKey) === requestPromise) {
+      missingOrdersInFlight.delete(cacheKey);
+    }
+  }
 };
 
 const getMissingOrderRecipients = async () => {
@@ -5557,6 +5599,7 @@ router.post(
       );
 
       shippingIssueOrdersCache.clear();
+      shippingIssueOrdersInFlight.clear();
       res.json(result);
     } catch (error) {
       console.error("Update order shipping issue error:", error);

@@ -4,6 +4,7 @@ import { resolveApiBase } from "./apiConfig";
 
 const API_BASE = resolveApiBase();
 const DEFAULT_API_TIMEOUT_MS = 60 * 1000;
+const ORDER_REPORT_TIMEOUT_MS = 2 * 60 * 1000;
 const SHOPIFY_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
 const META_SYNC_TIMEOUT_MS = 3 * 60 * 1000;
 const META_ANALYSIS_TIMEOUT_MS = 2 * 60 * 1000;
@@ -250,6 +251,16 @@ export const dashboardAPI = {
 export const shopifyAPI = {
   getProducts: () => api.get("/shopify/products"),
   getOrders: () => api.get("/shopify/orders"),
+  getMissingOrders: (params = {}) =>
+    api.get("/shopify/orders/missing", {
+      params,
+      timeout: ORDER_REPORT_TIMEOUT_MS,
+    }),
+  getShippingIssues: (params = {}) =>
+    api.get("/shopify/orders/shipping-issues", {
+      params,
+      timeout: ORDER_REPORT_TIMEOUT_MS,
+    }),
   getCustomers: () => api.get("/shopify/customers"),
   sync: () =>
     api.post("/shopify/sync", {}, { timeout: SHOPIFY_SYNC_TIMEOUT_MS }),

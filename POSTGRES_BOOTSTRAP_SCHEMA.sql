@@ -38,6 +38,7 @@ create table if not exists public.users (
   name text not null default '',
   full_name text default '',
   role text not null default 'user' check (role in ('admin', 'user')),
+  created_by uuid references public.users(id) on delete set null,
   is_active boolean not null default true,
   shopify_access_token text,
   shopify_shop text,
@@ -535,6 +536,7 @@ create table if not exists public.meta_ai_analyses (
 );
 
 create unique index if not exists idx_stores_name_unique on public.stores (name);
+create index if not exists idx_users_created_by on public.users (created_by);
 create index if not exists idx_user_stores_store_id on public.user_stores (store_id);
 create index if not exists idx_shopify_tokens_user_store on public.shopify_tokens (user_id, store_id);
 create index if not exists idx_shopify_tokens_shop on public.shopify_tokens (shop);

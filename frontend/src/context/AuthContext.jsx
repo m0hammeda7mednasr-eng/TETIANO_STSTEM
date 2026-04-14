@@ -124,7 +124,7 @@ export const AuthProvider = ({ children }) => {
   const [permissions, setPermissions] = useState(() =>
     buildCachedPermissions(cachedUser, readJsonFromStorage("permissions")),
   );
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedUser);
   const [isAdmin, setIsAdmin] = useState(cachedUser?.role === "admin");
 
   const authRefreshInFlight = useRef(false);
@@ -253,7 +253,7 @@ export const AuthProvider = ({ children }) => {
   );
 
   useEffect(() => {
-    loadAuthState();
+    loadAuthState({ silent: Boolean(cachedUser) });
 
     const interval = setInterval(() => {
       if (document.visibilityState !== "visible") {

@@ -250,7 +250,19 @@ export const dashboardAPI = {
 
 export const shopifyAPI = {
   getProducts: () => api.get("/shopify/products"),
-  getOrders: () => api.get("/shopify/orders"),
+  getOrders: (params = {}) =>
+    api.get("/shopify/orders", {
+      params,
+      timeout: ORDER_REPORT_TIMEOUT_MS,
+    }),
+  getOrderDetails: (id) =>
+    api.get(`/shopify/orders/${id}/details`, {
+      timeout: ORDER_REPORT_TIMEOUT_MS,
+    }),
+  getOrderProfit: (id) =>
+    api.get(`/shopify/orders/${id}/profit`, {
+      timeout: ORDER_REPORT_TIMEOUT_MS,
+    }),
   getMissingOrders: (params = {}) =>
     api.get("/shopify/orders/missing", {
       params,

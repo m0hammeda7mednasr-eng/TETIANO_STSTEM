@@ -4780,13 +4780,37 @@ router.get(
       console.log(
         `Returning ${data?.length || 0} orders for user ${req.user.id}`,
       );
-      const recoveryResult = await maybeRecoverShippingIssuesFromHistory({
-        req,
-        orders: data || [],
-        requestedStoreId,
-        pagination,
-      });
-      const normalizedOrders = (recoveryResult.orders || []).map((order) =>
+      const waitForRecovery = toBooleanQueryFlag(
+        req.query?.recover_history,
+        false,
+      );
+      let ordersForResponse = data || [];
+      let repairedCount = 0;
+
+      if (waitForRecovery) {
+        const recoveryResult = await maybeRecoverShippingIssuesFromHistory({
+          req,
+          orders: data || [],
+          requestedStoreId,
+          pagination,
+        });
+        ordersForResponse = recoveryResult.orders || [];
+        repairedCount = recoveryResult.repairedCount || 0;
+      } else {
+        void maybeRecoverShippingIssuesFromHistory({
+          req,
+          orders: data || [],
+          requestedStoreId,
+          pagination,
+        }).catch((recoveryError) => {
+          console.error(
+            "Background shipping issue recovery failed:",
+            recoveryError?.message || recoveryError,
+          );
+        });
+      }
+
+      const normalizedOrders = ordersForResponse.map((order) =>
         buildOrderListItem(order),
       );
       if (liveSyncResult) {
@@ -4795,10 +4819,10 @@ router.get(
           liveSyncResult.reason || "attempted",
         );
       }
-      if (recoveryResult.repairedCount > 0) {
+      if (repairedCount > 0) {
         res.setHeader(
           "X-Orders-Shipping-Issue-Recovery",
-          String(recoveryResult.repairedCount),
+          String(repairedCount),
         );
       }
       res.json(

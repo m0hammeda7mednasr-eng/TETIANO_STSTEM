@@ -191,14 +191,12 @@ export default function Dashboard() {
           params: scopeParams,
         });
         const ordersPromise = canViewOrders
-          ? api.get("/shopify/orders", {
-              params: {
-                limit: 6,
-                sort_by: "created_at",
-                sort_dir: "desc",
-                sync_recent: "false",
-                ...scopeParams,
-              },
+          ? shopifyAPI.getOrders({
+              limit: 6,
+              sort_by: "created_at",
+              sort_dir: "desc",
+              sync_recent: "false",
+              ...scopeParams,
             })
           : Promise.resolve({ data: [] });
         const requestsPromise =

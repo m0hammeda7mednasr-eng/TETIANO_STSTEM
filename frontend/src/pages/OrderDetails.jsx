@@ -15,7 +15,7 @@ import {
   Copy,
   TrendingUp,
 } from "lucide-react";
-import api from "../utils/api";
+import api, { shopifyAPI } from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
 import { markSharedDataUpdated } from "../utils/realtime";
@@ -162,7 +162,7 @@ export default function OrderDetails() {
   const fetchOrderDetails = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await api.get(`/shopify/orders/${id}/details`);
+      const response = await shopifyAPI.getOrderDetails(id);
       setSelectedLineItemIds([]);
       setOrder(response.data);
     } catch (error) {
@@ -184,7 +184,7 @@ export default function OrderDetails() {
     try {
       setProfitLoading(true);
       setProfitError("");
-      const response = await api.get(`/shopify/orders/${id}/profit`);
+      const response = await shopifyAPI.getOrderProfit(id);
       setProfitData(response.data);
     } catch (error) {
       console.error("Error fetching order profit:", error);

@@ -580,13 +580,11 @@ export default function Orders() {
 
     fetchAllPagesProgressively(
       ({ limit, offset }) =>
-        api.get("/shopify/orders", {
-          params: {
-            limit,
-            offset,
-            ...fullHistoryQueryParams,
-            search_all: "true",
-          },
+        shopifyAPI.getOrders({
+          limit,
+          offset,
+          ...fullHistoryQueryParams,
+          search_all: "true",
         }),
       {
         limit: ORDER_HISTORY_SEARCH_PAGE_SIZE,
@@ -776,14 +774,12 @@ export default function Orders() {
 
         const rows = await fetchAllPagesProgressively(
           ({ limit, offset }) =>
-            api.get("/shopify/orders", {
-              params: {
-                limit,
-                offset,
-                sort_by: "created_at",
-                sort_dir: "desc",
-                sync_recent: forceSync && offset === 0 ? "force" : "false",
-              },
+            shopifyAPI.getOrders({
+              limit,
+              offset,
+              sort_by: "created_at",
+              sort_dir: "desc",
+              sync_recent: forceSync && offset === 0 ? "force" : "false",
             }),
           {
             limit: ORDERS_PAGE_FETCH_SIZE,

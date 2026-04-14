@@ -11,7 +11,7 @@ import {
   User,
   Users,
 } from "lucide-react";
-import api from "../utils/api";
+import api, { shopifyAPI } from "../utils/api";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
@@ -699,14 +699,12 @@ export default function Customers() {
       try {
         await fetchAllPagesProgressively(
           ({ limit, offset }) =>
-            api.get("/shopify/orders", {
-              params: {
-                limit,
-                offset,
-                sort_by: "created_at",
-                sort_dir: "desc",
-                sync_recent: "false",
-              },
+            shopifyAPI.getOrders({
+              limit,
+              offset,
+              sort_by: "created_at",
+              sort_dir: "desc",
+              sync_recent: "false",
             }),
           {
             limit: ORDERS_PAGE_SIZE,

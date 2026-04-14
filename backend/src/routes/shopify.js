@@ -56,6 +56,7 @@ const UUID_REGEX =
 const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const SHIPPING_ISSUE_HISTORY_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
+const SHIPPING_ISSUE_ORDERS_CACHE_TTL_MS = 30 * 1000;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 200;
 const ORDER_LIST_PAGE_LIMIT = 4500;
@@ -375,6 +376,7 @@ const CUSTOMER_SORT_FIELDS = new Set([
 ]);
 const orderBackgroundSyncState = new Map();
 const shippingIssueHistoryRecoveryState = new Map();
+const shippingIssueOrdersCache = new Map();
 const normalizeBaseUrl = (value) =>
   String(value || "")
     .trim()
@@ -750,6 +752,40 @@ const fetchScopedOrdersByIds = async ({
   return rows;
 };
 
+const getShippingIssueOrdersCacheKey = ({
+  userId,
+  requestedStoreId,
+  isAdmin,
+} = {}) =>
+  `${String(userId || "").trim()}::${isAdmin ? "admin" : "user"}::${String(
+    requestedStoreId || "all",
+  ).trim()}`;
+
+const readShippingIssueOrdersCache = (cacheKey) => {
+  const cached = shippingIssueOrdersCache.get(cacheKey);
+  if (
+    !cached ||
+    !cached.updatedAtMs ||
+    Date.now() - cached.updatedAtMs > SHIPPING_ISSUE_ORDERS_CACHE_TTL_MS
+  ) {
+    shippingIssueOrdersCache.delete(cacheKey);
+    return null;
+  }
+
+  return {
+    rows: Array.isArray(cached.rows) ? cached.rows : [],
+    repairedCount: Number(cached.repairedCount || 0),
+  };
+};
+
+const writeShippingIssueOrdersCache = (cacheKey, value = {}) => {
+  shippingIssueOrdersCache.set(cacheKey, {
+    rows: Array.isArray(value.rows) ? value.rows : [],
+    repairedCount: Number(value.repairedCount || 0),
+    updatedAtMs: Date.now(),
+  });
+};
+
 const loadScopedOrdersFastPath = async ({
   req,
   requestedStoreId,
@@ -823,9 +859,13 @@ const loadScopedOrdersFastPath = async ({
 };
 
 const normalizeShippingIssueRows = (rows = []) =>
-  dedupeRowsById((rows || []).map((order) => buildOrderListItem(order))).filter(
-    (order) => order?.shipping_issue || order?.shipping_issue_reason,
-  );
+  dedupeRowsById(
+    (rows || []).map((order) =>
+      order?.shipping_issue || order?.shipping_issue_reason
+        ? order
+        : buildOrderListItem(order),
+    ),
+  ).filter((order) => order?.shipping_issue || order?.shipping_issue_reason);
 
 const loadShippingIssueOrdersForRequest = async (req) => {
   const isAdmin = await resolveIsAdmin(req);
@@ -837,6 +877,18 @@ const loadShippingIssueOrdersForRequest = async (req) => {
     isAdmin,
     accessibleStoreIds,
   });
+  const cacheKey = getShippingIssueOrdersCacheKey({
+    userId: req.user.id,
+    requestedStoreId,
+    isAdmin,
+  });
+  const cachedResult = readShippingIssueOrdersCache(cacheKey);
+  if (cachedResult) {
+    return {
+      ...cachedResult,
+      cacheHit: true,
+    };
+  }
 
   let fastPathMatches = [];
   try {
@@ -937,9 +989,15 @@ const loadShippingIssueOrdersForRequest = async (req) => {
   const historyMatches = normalizeShippingIssueRows(
     applyShippingIssueRecoveryPlanToRows(scopedOrders, recoveryPlan),
   );
+  const rows = dedupeRowsById([...historyMatches, ...fastPathMatches]);
+
+  writeShippingIssueOrdersCache(cacheKey, {
+    rows,
+    repairedCount: recoveryPlan.length,
+  });
 
   return {
-    rows: dedupeRowsById([...historyMatches, ...fastPathMatches]),
+    rows,
     repairedCount: recoveryPlan.length,
   };
 };
@@ -4334,12 +4392,9 @@ router.get(
         .trim()
         .toLowerCase();
 
-      const { rows, repairedCount } = await loadShippingIssueOrdersForRequest(req);
-      let normalizedOrders = dedupeRowsById(
-        (rows || []).map((order) => buildOrderListItem(order)),
-      ).filter(
-        (order) => order?.shipping_issue || order?.shipping_issue_reason,
-      );
+      const { rows, repairedCount, cacheHit } =
+        await loadShippingIssueOrdersForRequest(req);
+      let normalizedOrders = normalizeShippingIssueRows(rows || []);
 
       if (reasonFilter && reasonFilter !== "all") {
         normalizedOrders = normalizedOrders.filter(
@@ -4384,6 +4439,9 @@ router.get(
           "X-Orders-Shipping-Issue-Recovery",
           String(repairedCount),
         );
+      }
+      if (cacheHit) {
+        res.setHeader("X-Orders-Shipping-Issues-Cache", "hit");
       }
 
       return res.json(
@@ -5410,6 +5468,7 @@ router.post(
         },
       );
 
+      shippingIssueOrdersCache.clear();
       res.json(result);
     } catch (error) {
       console.error("Update order shipping issue error:", error);

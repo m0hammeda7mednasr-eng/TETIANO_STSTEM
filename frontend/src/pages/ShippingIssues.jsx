@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -14,7 +14,7 @@ import {
 import Sidebar from "../components/Sidebar";
 import api from "../utils/api";
 import { buildCsvFilename, downloadCsvSections } from "../utils/csv";
-import { fetchAllPagesProgressively } from "../utils/pagination";
+import { extractArray } from "../utils/response";
 import { useLocale } from "../context/LocaleContext";
 import { useStore } from "../context/StoreContext";
 import {
@@ -27,6 +27,11 @@ import {
   resolveShippingIssueDraft,
   writeShippingIssueDrafts,
 } from "../utils/shippingIssueDrafts";
+import {
+  buildStoreScopedCacheKey,
+  readCachedView,
+  writeCachedView,
+} from "../utils/viewCache";
 import {
   getShippingIssueBadgeClassName,
   getShippingIssueReasonLabel,
@@ -280,7 +285,12 @@ export default function ShippingIssues() {
   const [noteDrafts, setNoteDrafts] = useState({});
   const [noteSaveStatusByOrderId, setNoteSaveStatusByOrderId] = useState({});
   const [draftHydrationReady, setDraftHydrationReady] = useState(false);
+  const fetchPromiseRef = useRef(null);
 
+  const cacheKey = useMemo(
+    () => buildStoreScopedCacheKey("shipping-issues:list", currentStoreId),
+    [currentStoreId],
+  );
   const reasonOptions = useMemo(() => getShippingIssueReasonOptions(select), [
     select,
   ]);
@@ -343,42 +353,83 @@ export default function ShippingIssues() {
 
   const fetchShippingIssues = useCallback(
     async ({ silent = false } = {}) => {
-      if (!silent) {
-        setLoading(true);
-        setError("");
+      if (fetchPromiseRef.current?.cacheKey === cacheKey) {
+        return fetchPromiseRef.current.promise;
       }
 
-      try {
-        const rows = await fetchAllPagesProgressively(
-          ({ limit, offset }) =>
-            api.get("/shopify/orders/shipping-issues", {
-              params: {
-                limit,
-                offset,
-              },
-            }),
-          {
-            limit: FETCH_PAGE_LIMIT,
-          },
-        );
+      const request = (async () => {
+        if (!silent) {
+          setLoading(true);
+          setError("");
+        }
 
-        setOrders(rows.filter((order) => isShippingIssueActive(order)));
-        setLastUpdatedAt(new Date());
-      } catch (requestError) {
-        console.error("Error fetching shipping issues:", requestError);
-        setError(
-          requestError?.response?.data?.error ||
-            select(
-              "\u0641\u0634\u0644 \u062a\u062d\u0645\u064a\u0644 \u0645\u0634\u0627\u0643\u0644 \u0627\u0644\u0634\u062d\u0646",
-              "Failed to load shipping issues",
-            ),
-        );
+        try {
+          const response = await api.get("/shopify/orders/shipping-issues", {
+            params: {
+              limit: FETCH_PAGE_LIMIT,
+              offset: 0,
+            },
+          });
+          const rows = extractArray(response?.data);
+          const activeRows = rows.filter((order) =>
+            isShippingIssueActive(order),
+          );
+
+          setOrders(activeRows);
+          setLastUpdatedAt(new Date());
+          await writeCachedView(cacheKey, { rows: activeRows });
+        } catch (requestError) {
+          console.error("Error fetching shipping issues:", requestError);
+          setError(
+            requestError?.response?.data?.error ||
+              select(
+                "\u0641\u0634\u0644 \u062a\u062d\u0645\u064a\u0644 \u0645\u0634\u0627\u0643\u0644 \u0627\u0644\u0634\u062d\u0646",
+                "Failed to load shipping issues",
+              ),
+          );
+        } finally {
+          setLoading(false);
+        }
+      })();
+
+      fetchPromiseRef.current = { cacheKey, promise: request };
+      try {
+        return await request;
       } finally {
-        setLoading(false);
+        if (fetchPromiseRef.current?.promise === request) {
+          fetchPromiseRef.current = null;
+        }
       }
     },
-    [select],
+    [cacheKey, select],
   );
+
+  useEffect(() => {
+    let active = true;
+
+    readCachedView(cacheKey).then((cached) => {
+      if (!active) {
+        return;
+      }
+
+      const cachedRows = Array.isArray(cached?.value?.rows)
+        ? cached.value.rows
+        : [];
+      if (cachedRows.length === 0) {
+        return;
+      }
+
+      setOrders(cachedRows.filter((order) => isShippingIssueActive(order)));
+      setLastUpdatedAt(
+        cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
+      );
+      setLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [cacheKey]);
 
   useEffect(() => {
     fetchShippingIssues();

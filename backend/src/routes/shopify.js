@@ -45,7 +45,6 @@ import {
   applyShippingIssueRecoveryPlan,
   applyShippingIssueRecoveryPlanToRows,
   buildShippingIssueRecoveryPlan,
-  fetchLatestShippingIssueOperationsByOrderId,
   recoverShippingIssuesFromHistory,
 } from "../helpers/shippingIssueRecovery.js";
 import { loadWarehouseAvailabilityByStoreIds } from "../services/warehouseAvailabilityService.js";
@@ -70,6 +69,7 @@ const MISSING_ORDER_NOTIFICATION_TYPES = new Set([
 ]);
 const SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE = 1000;
 const SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS = 1000;
+const SHIPPING_ISSUE_LOCAL_FAST_PATH_MAX_ORDERS = ORDER_LIST_MAX_VISIBLE;
 const SHIPPING_ISSUE_OPERATION_BATCH_SIZE = 1000;
 const MAX_EXPORT_ORDER_IDS = 10000;
 const PAID_LIKE_STATUSES = new Set([
@@ -141,6 +141,7 @@ const ORDER_LIST_SELECT = [
   "status",
   "items_count",
   "cancelled_at",
+  "local_updated_at",
   "created_at",
   "updated_at",
   "data",
@@ -316,6 +317,10 @@ const CUSTOMER_DETAIL_SELECTS = [
     "updated_at",
     "data",
   ].join(","),
+];
+const SHIPPING_ISSUE_ORDER_SELECTS = [
+  ORDER_LIST_SELECT,
+  ...ORDER_LIST_SELECTS.slice(1),
 ];
 const PRODUCT_SOURCING_SUPPLIER_SELECT = [
   "id",
@@ -662,15 +667,13 @@ const getListSortOptions = (
   };
 };
 
-const buildScopedOrdersByIdsQuery = ({
+const applyOrdersAccessScope = ({
+  query,
   req,
   requestedStoreId,
   isAdmin,
   accessibleStoreIds = [],
-  orderIds = [],
 } = {}) => {
-  let query = db.from("orders").select("*").in("id", orderIds);
-
   if (requestedStoreId) {
     return query.eq("store_id", requestedStoreId);
   }
@@ -684,6 +687,23 @@ const buildScopedOrdersByIdsQuery = ({
   }
 
   return query.eq("user_id", req.user.id);
+};
+
+const buildScopedOrdersByIdsQuery = ({
+  req,
+  requestedStoreId,
+  isAdmin,
+  accessibleStoreIds = [],
+  orderIds = [],
+} = {}) => {
+  const query = db.from("orders").select("*").in("id", orderIds);
+  return applyOrdersAccessScope({
+    query,
+    req,
+    requestedStoreId,
+    isAdmin,
+    accessibleStoreIds,
+  });
 };
 
 const fetchScopedOrdersByIds = async ({
@@ -730,6 +750,83 @@ const fetchScopedOrdersByIds = async ({
   return rows;
 };
 
+const loadScopedOrdersFastPath = async ({
+  req,
+  requestedStoreId,
+  isAdmin,
+  accessibleStoreIds = [],
+  selectedColumnsList = ORDER_LIST_SELECTS,
+  orderField = "updated_at",
+  maxOrders = SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS,
+  requireNotNullField = null,
+} = {}) => {
+  let lastError = null;
+  const safeMaxOrders = Math.max(
+    0,
+    Math.min(ORDER_LIST_MAX_VISIBLE, Number(maxOrders) || 0),
+  );
+
+  for (const selectedColumns of selectedColumnsList) {
+    const rows = [];
+
+    for (
+      let offset = 0;
+      offset < safeMaxOrders;
+      offset += SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE
+    ) {
+      let query = db
+        .from("orders")
+        .select(selectedColumns)
+        .order(orderField, { ascending: false })
+        .range(
+          offset,
+          Math.min(offset + SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE - 1, safeMaxOrders - 1),
+        );
+
+      if (requireNotNullField) {
+        query = query.not(requireNotNullField, "is", null);
+      }
+
+      query = applyOrdersAccessScope({
+        query,
+        req,
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+      });
+
+      const { data, error } = await query;
+      if (error) {
+        lastError = error;
+        rows.length = 0;
+        break;
+      }
+
+      const batch = Array.isArray(data) ? data : [];
+      rows.push(...batch);
+
+      if (batch.length < SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE) {
+        return dedupeRowsById(rows);
+      }
+    }
+
+    if (rows.length > 0) {
+      return dedupeRowsById(rows);
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return [];
+};
+
+const normalizeShippingIssueRows = (rows = []) =>
+  dedupeRowsById((rows || []).map((order) => buildOrderListItem(order))).filter(
+    (order) => order?.shipping_issue || order?.shipping_issue_reason,
+  );
+
 const loadShippingIssueOrdersForRequest = async (req) => {
   const isAdmin = await resolveIsAdmin(req);
   const accessibleStoreIds = isAdmin
@@ -741,80 +838,43 @@ const loadShippingIssueOrdersForRequest = async (req) => {
     accessibleStoreIds,
   });
 
-  const loadOrdersFastPath = async () => {
-    let lastError = null;
-
-    for (const selectedColumns of ORDER_LIST_SELECTS) {
-      const rows = [];
-
-      for (
-        let offset = 0;
-        offset < Math.min(ORDER_LIST_MAX_VISIBLE, SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS);
-        offset += SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE
-      ) {
-        let query = db
-          .from("orders")
-          .select(selectedColumns)
-          .order("updated_at", { ascending: false })
-          .range(
-            offset,
-            Math.min(
-              offset + SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE - 1,
-              Math.min(
-                ORDER_LIST_MAX_VISIBLE,
-                SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS,
-              ) - 1,
-            ),
-          );
-
-        if (requestedStoreId) {
-          query = query.eq("store_id", requestedStoreId);
-        } else if (!isAdmin) {
-          query =
-            accessibleStoreIds.length > 0
-              ? query.in("store_id", accessibleStoreIds)
-              : query.eq("user_id", req.user.id);
-        }
-
-        const { data, error } = await query;
-        if (error) {
-          lastError = error;
-          rows.length = 0;
-          break;
-        }
-
-        const batch = Array.isArray(data) ? data : [];
-        rows.push(...batch);
-
-        if (batch.length < SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE) {
-          return dedupeRowsById(rows);
-        }
-      }
-
-      if (rows.length > 0) {
-        return dedupeRowsById(rows);
-      }
-    }
-
-    if (lastError) {
-      throw lastError;
-    }
-
-    return [];
-  };
-
+  let fastPathMatches = [];
   try {
-    const fastPathRows = await loadOrdersFastPath();
-    const fastPathMatches = dedupeRowsById(
-      fastPathRows.map((order) => buildOrderListItem(order)),
-    ).filter((order) => order?.shipping_issue || order?.shipping_issue_reason);
+    const fastPathResults = await Promise.allSettled([
+      loadScopedOrdersFastPath({
+        req,
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+        selectedColumnsList: ORDER_LIST_SELECTS,
+        orderField: "updated_at",
+        maxOrders: SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS,
+      }),
+      loadScopedOrdersFastPath({
+        req,
+        requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+        selectedColumnsList: SHIPPING_ISSUE_ORDER_SELECTS,
+        orderField: "local_updated_at",
+        maxOrders: SHIPPING_ISSUE_LOCAL_FAST_PATH_MAX_ORDERS,
+        requireNotNullField: "local_updated_at",
+      }),
+    ]);
 
-    if (fastPathMatches.length > 0) {
-      return {
-        rows: fastPathMatches,
-        repairedCount: 0,
-      };
+    const fastPathRows = [];
+    for (const result of fastPathResults) {
+      if (result.status === "fulfilled") {
+        fastPathRows.push(...(result.value || []));
+        continue;
+      }
+
+      if (!isQueryRetryableError(result.reason)) {
+        throw result.reason;
+      }
     }
+
+    fastPathMatches = normalizeShippingIssueRows(fastPathRows);
   } catch (fastPathError) {
     if (!isQueryRetryableError(fastPathError)) {
       throw fastPathError;
@@ -874,8 +934,12 @@ const loadShippingIssueOrdersForRequest = async (req) => {
     await applyShippingIssueRecoveryPlan(db, recoveryPlan);
   }
 
+  const historyMatches = normalizeShippingIssueRows(
+    applyShippingIssueRecoveryPlanToRows(scopedOrders, recoveryPlan),
+  );
+
   return {
-    rows: applyShippingIssueRecoveryPlanToRows(scopedOrders, recoveryPlan),
+    rows: dedupeRowsById([...historyMatches, ...fastPathMatches]),
     repairedCount: recoveryPlan.length,
   };
 };
@@ -2376,6 +2440,7 @@ const buildOrderListItem = (order) => {
     total_refunded: order?.total_refunded ?? 0,
     cancelled_at: order?.cancelled_at || null,
     created_at: order?.created_at || null,
+    local_updated_at: order?.local_updated_at || null,
     updated_at: order?.updated_at || null,
     last_synced_at: order?.last_synced_at || null,
     pending_sync: Boolean(order?.pending_sync),
@@ -4287,10 +4352,15 @@ router.get(
 
       normalizedOrders.sort((left, right) => {
         const leftTimestamp = Date.parse(
-          left?.shipping_issue?.updated_at || left?.updated_at || left?.created_at || "",
+          left?.shipping_issue?.updated_at ||
+            left?.local_updated_at ||
+            left?.updated_at ||
+            left?.created_at ||
+            "",
         );
         const rightTimestamp = Date.parse(
           right?.shipping_issue?.updated_at ||
+            right?.local_updated_at ||
             right?.updated_at ||
             right?.created_at ||
             "",

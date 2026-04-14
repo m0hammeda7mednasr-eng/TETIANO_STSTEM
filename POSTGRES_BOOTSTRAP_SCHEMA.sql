@@ -538,7 +538,7 @@ create unique index if not exists idx_stores_name_unique on public.stores (name)
 create index if not exists idx_user_stores_store_id on public.user_stores (store_id);
 create index if not exists idx_shopify_tokens_user_store on public.shopify_tokens (user_id, store_id);
 create index if not exists idx_shopify_tokens_shop on public.shopify_tokens (shop);
-create unique index if not exists idx_shopify_tokens_user_shop_unique on public.shopify_tokens (user_id, shop) where user_id is not null and shop is not null;
+create unique index if not exists idx_shopify_tokens_user_shop_unique on public.shopify_tokens (user_id, shop);
 create unique index if not exists idx_products_store_shopify_unique on public.products (store_id, shopify_id) where store_id is not null and shopify_id is not null;
 create unique index if not exists idx_orders_store_shopify_unique on public.orders (store_id, shopify_id) where store_id is not null and shopify_id is not null;
 create unique index if not exists idx_customers_store_shopify_unique on public.customers (store_id, shopify_id) where store_id is not null and shopify_id is not null;

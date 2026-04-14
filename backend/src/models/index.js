@@ -1261,12 +1261,53 @@ export const ShopifyToken = {
       updated_at: new Date().toISOString(),
     };
 
-    return await supabase
+    const upsertResult = await supabase
       .from("shopify_tokens")
       .upsert(row, {
         onConflict: "user_id,shop",
       })
       .select();
+
+    const normalizedErrorMessage = String(
+      upsertResult?.error?.message || "",
+    ).toLowerCase();
+
+    if (
+      !upsertResult?.error ||
+      !normalizedErrorMessage.includes(
+        "there is no unique or exclusion constraint matching the on conflict specification",
+      )
+    ) {
+      return upsertResult;
+    }
+
+    const existingRowResult = await supabase
+      .from("shopify_tokens")
+      .select("id,created_at")
+      .eq("user_id", userId)
+      .eq("shop", shop)
+      .maybeSingle();
+
+    if (existingRowResult.error) {
+      return {
+        data: null,
+        error: existingRowResult.error,
+      };
+    }
+
+    if (existingRowResult.data?.id) {
+      return await supabase
+        .from("shopify_tokens")
+        .update({
+          access_token: accessToken,
+          store_id: storeId || null,
+          updated_at: row.updated_at,
+        })
+        .eq("id", existingRowResult.data.id)
+        .select();
+    }
+
+    return await supabase.from("shopify_tokens").insert(row).select();
   },
 
   async findByShop(shop) {

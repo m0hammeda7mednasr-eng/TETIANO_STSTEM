@@ -271,7 +271,7 @@ jest.unstable_mockModule("../supabaseClient.js", () => ({
   supabase: supabaseMock,
 }));
 
-const { Product, Customer, getAccessibleStoreIds } = await import("./index.js");
+const { Product, Customer, ShopifyToken, getAccessibleStoreIds } = await import("./index.js");
 
 describe("models/index Shopify scoping", () => {
   beforeEach(() => {
@@ -653,6 +653,62 @@ describe("models/index Shopify scoping", () => {
       }),
     );
     expect(tableData.products[0].title).toBe("After");
+  });
+
+  it("falls back to update existing Shopify tokens when upsert conflict support is missing", async () => {
+    tableData.shopify_tokens = [
+      {
+        id: "token-row-1",
+        user_id: "user-1",
+        shop: "store-a.myshopify.com",
+        access_token: "old-token",
+        store_id: "store-old",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    queryFailures = [
+      {
+        table: "shopify_tokens",
+        mode: "upsert",
+        onConflict: "user_id,shop",
+        error: {
+          message:
+            "there is no unique or exclusion constraint matching the ON CONFLICT specification",
+        },
+      },
+    ];
+
+    const result = await ShopifyToken.save(
+      "user-1",
+      "store-a.myshopify.com",
+      "new-token",
+      "store-new",
+    );
+
+    expect(result.error).toBeNull();
+    expect(tableData.shopify_tokens).toEqual([
+      expect.objectContaining({
+        id: "token-row-1",
+        user_id: "user-1",
+        shop: "store-a.myshopify.com",
+        access_token: "new-token",
+        store_id: "store-new",
+      }),
+    ]);
+    expect(
+      executedQueries.some(
+        (query) =>
+          query.table === "shopify_tokens" &&
+          query.mode === "update" &&
+          query.filters.some(
+            (filter) =>
+              filter.type === "eq" &&
+              filter.column === "id" &&
+              filter.value === "token-row-1",
+          ),
+      ),
+    ).toBe(true);
   });
 
   it("preserves local cost fields and warehouse metadata during Shopify product upserts", async () => {

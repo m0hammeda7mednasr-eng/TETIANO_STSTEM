@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -13,8 +13,13 @@ import Sidebar from "../components/Sidebar";
 import { useLocale } from "../context/LocaleContext";
 import { useStore } from "../context/StoreContext";
 import api from "../utils/api";
-import { fetchAllPagesProgressively } from "../utils/pagination";
+import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
+import {
+  buildStoreScopedCacheKey,
+  readCachedView,
+  writeCachedView,
+} from "../utils/viewCache";
 
 const FETCH_PAGE_LIMIT = 4500;
 const MISSING_ORDERS_PER_PAGE = 50;
@@ -239,8 +244,13 @@ export default function MissingOrders() {
   const [searchTerm, setSearchTerm] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const fetchPromiseRef = useRef(null);
   const isInStockFollowUpView =
     location.pathname === "/orders/in-stock-follow-up";
+  const cacheKey = useMemo(
+    () => buildStoreScopedCacheKey("missing-orders:list", currentStoreId),
+    [currentStoreId],
+  );
 
   const pageConfig = useMemo(
     () =>
@@ -330,27 +340,28 @@ export default function MissingOrders() {
   );
 
   const fetchMissingOrders = useCallback(async ({ silent = false } = {}) => {
+    if (fetchPromiseRef.current?.cacheKey === cacheKey) {
+      return fetchPromiseRef.current.promise;
+    }
+
+    const request = (async () => {
     if (!silent) {
       setLoading(true);
       setError("");
     }
 
     try {
-      const rows = await fetchAllPagesProgressively(
-        ({ limit, offset }) =>
-          api.get("/shopify/orders/missing", {
-            params: {
-              limit,
-              offset,
-            },
-          }),
-        {
+      const response = await api.get("/shopify/orders/missing", {
+        params: {
           limit: FETCH_PAGE_LIMIT,
+          offset: 0,
         },
-      );
+      });
+      const rows = extractArray(response?.data);
 
       setOrders(rows);
       setLastUpdatedAt(new Date());
+      await writeCachedView(cacheKey, { rows });
     } catch (requestError) {
       console.error("Error fetching missing orders:", requestError);
       setError(
@@ -363,7 +374,44 @@ export default function MissingOrders() {
     } finally {
       setLoading(false);
     }
-  }, [select]);
+    })();
+
+    fetchPromiseRef.current = { cacheKey, promise: request };
+    try {
+      return await request;
+    } finally {
+      if (fetchPromiseRef.current?.promise === request) {
+        fetchPromiseRef.current = null;
+      }
+    }
+  }, [cacheKey, select]);
+
+  useEffect(() => {
+    let active = true;
+
+    readCachedView(cacheKey).then((cached) => {
+      if (!active) {
+        return;
+      }
+
+      const cachedRows = Array.isArray(cached?.value?.rows)
+        ? cached.value.rows
+        : [];
+      if (cachedRows.length === 0) {
+        return;
+      }
+
+      setOrders(cachedRows);
+      setLastUpdatedAt(
+        cached?.updatedAt ? new Date(cached.updatedAt) : new Date(),
+      );
+      setLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [cacheKey]);
 
   useEffect(() => {
     fetchMissingOrders();

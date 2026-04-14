@@ -77,6 +77,52 @@ BEGIN
       FROM information_schema.columns
       WHERE table_schema = 'public'
         AND table_name = 'orders'
+        AND column_name = 'local_updated_at'
+    ) THEN
+      EXECUTE '
+        CREATE INDEX IF NOT EXISTS idx_orders_local_updated_at
+        ON public.orders (local_updated_at DESC)
+        WHERE local_updated_at IS NOT NULL
+      ';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'orders'
+        AND column_name IN ('store_id', 'local_updated_at')
+      GROUP BY table_name
+      HAVING COUNT(*) = 2
+    ) THEN
+      EXECUTE '
+        CREATE INDEX IF NOT EXISTS idx_orders_store_local_updated_at
+        ON public.orders (store_id, local_updated_at DESC)
+        WHERE local_updated_at IS NOT NULL
+      ';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'orders'
+        AND column_name IN ('user_id', 'local_updated_at')
+      GROUP BY table_name
+      HAVING COUNT(*) = 2
+    ) THEN
+      EXECUTE '
+        CREATE INDEX IF NOT EXISTS idx_orders_user_local_updated_at
+        ON public.orders (user_id, local_updated_at DESC)
+        WHERE local_updated_at IS NOT NULL
+      ';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'orders'
         AND column_name IN ('shopify_id', 'store_id')
       GROUP BY table_name
       HAVING COUNT(*) = 2
@@ -108,6 +154,22 @@ BEGIN
       EXECUTE '
         CREATE INDEX IF NOT EXISTS idx_orders_store_unfulfilled_created_at
         ON public.orders (store_id, created_at DESC)
+        WHERE fulfillment_status IS NULL OR fulfillment_status <> ''fulfilled''
+      ';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'orders'
+        AND column_name IN ('fulfillment_status', 'created_at')
+      GROUP BY table_name
+      HAVING COUNT(*) = 2
+    ) THEN
+      EXECUTE '
+        CREATE INDEX IF NOT EXISTS idx_orders_unfulfilled_created_at
+        ON public.orders (created_at DESC)
         WHERE fulfillment_status IS NULL OR fulfillment_status <> ''fulfilled''
       ';
     END IF;

@@ -57,6 +57,7 @@ const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const SHIPPING_ISSUE_HISTORY_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
 const SHIPPING_ISSUE_ORDERS_CACHE_TTL_MS = 30 * 1000;
+const MISSING_ORDERS_CACHE_TTL_MS = 30 * 1000;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 200;
 const ORDER_LIST_PAGE_LIMIT = 4500;
@@ -68,6 +69,7 @@ const MISSING_ORDER_NOTIFICATION_TYPES = new Set([
   "order_missing",
   "order_missing_escalated",
 ]);
+const MISSING_ORDER_SOURCE_MAX_ROWS = 500;
 const SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE = 1000;
 const SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS = 1000;
 const SHIPPING_ISSUE_LOCAL_FAST_PATH_MAX_ORDERS = ORDER_LIST_MAX_VISIBLE;
@@ -377,6 +379,7 @@ const CUSTOMER_SORT_FIELDS = new Set([
 const orderBackgroundSyncState = new Map();
 const shippingIssueHistoryRecoveryState = new Map();
 const shippingIssueOrdersCache = new Map();
+const missingOrdersCache = new Map();
 const normalizeBaseUrl = (value) =>
   String(value || "")
     .trim()
@@ -786,6 +789,39 @@ const writeShippingIssueOrdersCache = (cacheKey, value = {}) => {
   });
 };
 
+const getRequestScopedCacheKey = ({
+  userId,
+  requestedStoreId,
+  isAdmin,
+  scope,
+} = {}) =>
+  `${String(scope || "scope").trim()}::${String(userId || "").trim()}::${
+    isAdmin ? "admin" : "user"
+  }::${String(requestedStoreId || "all").trim()}`;
+
+const readTimedRowsCache = (cache, cacheKey, ttlMs) => {
+  const cached = cache.get(cacheKey);
+  if (
+    !cached ||
+    !cached.updatedAtMs ||
+    Date.now() - cached.updatedAtMs > ttlMs
+  ) {
+    cache.delete(cacheKey);
+    return null;
+  }
+
+  return {
+    rows: Array.isArray(cached.rows) ? cached.rows : [],
+  };
+};
+
+const writeTimedRowsCache = (cache, cacheKey, rows = []) => {
+  cache.set(cacheKey, {
+    rows: Array.isArray(rows) ? rows : [],
+    updatedAtMs: Date.now(),
+  });
+};
+
 const loadScopedOrdersFastPath = async ({
   req,
   requestedStoreId,
@@ -931,6 +967,19 @@ const loadShippingIssueOrdersForRequest = async (req) => {
     if (!isQueryRetryableError(fastPathError)) {
       throw fastPathError;
     }
+  }
+
+  if (!toBooleanQueryFlag(req.query?.recover_history, false)) {
+    writeShippingIssueOrdersCache(cacheKey, {
+      rows: fastPathMatches,
+      repairedCount: 0,
+    });
+
+    return {
+      rows: fastPathMatches,
+      repairedCount: 0,
+      fastPathOnly: true,
+    };
   }
 
   const latestOperationByOrderId = new Map();
@@ -1260,6 +1309,7 @@ const buildScopedMissingOrdersSourceQuery = ({
     .select(selectedColumns)
     .lt("created_at", cutoffIso)
     .or("fulfillment_status.is.null,fulfillment_status.neq.fulfilled")
+    .order("created_at", { ascending: false })
     .range(rangeStart, rangeEnd);
 
   if (requestedStoreId) {
@@ -1288,16 +1338,16 @@ const executeScopedMissingOrdersSourceQuery = async ({
 } = {}) => {
   const rows = [];
 
-  for (
-    let offset = 0;
-    ;
-    offset += MISSING_ORDER_SOURCE_BATCH_SIZE
-  ) {
+  for (let offset = 0; offset < MISSING_ORDER_SOURCE_MAX_ROWS; offset += MISSING_ORDER_SOURCE_BATCH_SIZE) {
+    const rangeEnd = Math.min(
+      offset + MISSING_ORDER_SOURCE_BATCH_SIZE - 1,
+      MISSING_ORDER_SOURCE_MAX_ROWS - 1,
+    );
     const { data, error } = await buildScopedMissingOrdersSourceQuery({
       req,
       selectedColumns,
       rangeStart: offset,
-      rangeEnd: offset + MISSING_ORDER_SOURCE_BATCH_SIZE - 1,
+      rangeEnd,
       requestedStoreId,
       isAdmin,
       accessibleStoreIds,
@@ -3225,12 +3275,45 @@ const getMissingOrdersForRows = async (rows = []) => {
 };
 
 const getMissingOrdersForRequest = async (req) => {
+  const isAdmin = await resolveIsAdmin(req);
+  const accessibleStoreIds = isAdmin
+    ? []
+    : await getAccessibleStoreIds(req.user.id);
+  const requestedStoreId = getAuthorizedRequestedStoreId({
+    requestedStoreId: getRequestedStoreId(req),
+    isAdmin,
+    accessibleStoreIds,
+  });
+  const cacheKey = getRequestScopedCacheKey({
+    scope: "missing-orders",
+    userId: req.user.id,
+    requestedStoreId,
+    isAdmin,
+  });
+  const cachedResult = readTimedRowsCache(
+    missingOrdersCache,
+    cacheKey,
+    MISSING_ORDERS_CACHE_TTL_MS,
+  );
+  if (cachedResult) {
+    return {
+      orders: cachedResult.rows,
+      cacheHit: true,
+    };
+  }
+
   const scopedRowsResult = await loadMissingOrdersSourceRows(req);
   if (scopedRowsResult?.error) {
     throw scopedRowsResult.error;
   }
 
-  return await getMissingOrdersForRows(scopedRowsResult?.data || []);
+  const orders = await getMissingOrdersForRows(scopedRowsResult?.data || []);
+  writeTimedRowsCache(missingOrdersCache, cacheKey, orders);
+
+  return {
+    orders,
+    cacheHit: false,
+  };
 };
 
 const getMissingOrderRecipients = async () => {
@@ -4701,17 +4784,18 @@ router.get(
         ORDER_LIST_PAGE_LIMIT,
       );
 
-      const missingOrders = await getMissingOrdersForRequest(req);
+      const { orders: missingOrders, cacheHit } =
+        await getMissingOrdersForRequest(req);
 
       if (pagination.offset === 0) {
-        try {
-          await ensureMissingOrderNotifications(missingOrders);
-        } catch (notificationError) {
-          console.error(
-            "Missing orders notification error (non-blocking):",
-            notificationError,
-          );
-        }
+        void ensureMissingOrderNotifications(missingOrders).catch(
+          (notificationError) => {
+            console.error(
+              "Missing orders notification error (non-blocking):",
+              notificationError,
+            );
+          },
+        );
       }
 
       const summary = {
@@ -4730,6 +4814,10 @@ router.get(
           (order) => order?.missing_reason === MISSING_ORDER_REASON_NO_ACTION,
         ).length,
       };
+
+      if (cacheHit) {
+        res.setHeader("X-Orders-Missing-Cache", "hit");
+      }
 
       res.json(
         buildSlicedPaginatedCollection(missingOrders, pagination, { summary }),

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertCircle,
+  ArrowLeft,
   Building2,
   CheckCircle2,
   CreditCard,
@@ -310,11 +311,22 @@ const translateSupplierUiText = (value, locale = "ar") => {
   return NORMALIZED_SUPPLIER_UI_TRANSLATIONS[decodedValue] || decodedValue;
 };
 const getSupplierViewType = (pathname = "") =>
-  pathname === "/suppliers/fabric-suppliers" ? "fabric" : "factory";
+  pathname.startsWith("/suppliers/fabric-suppliers") ? "fabric" : "factory";
 const getSupplierViewTitle = (supplierType) =>
   supplierType === "fabric" ? "موردي القماش" : "موردو المصانع";
 const getSupplierCodeLabel = (supplierType) =>
   supplierType === "fabric" ? "كود مورد القماش" : "كود المصنع";
+
+const buildSuppliersListPath = (supplierType = "factory") =>
+  supplierType === "fabric" ? "/suppliers/fabric-suppliers" : "/suppliers";
+const buildSupplierWorkspacePath = (supplierType = "factory", supplierId = "") => {
+  const normalizedSupplierId = normalizeText(supplierId);
+  const basePath = buildSuppliersListPath(supplierType);
+
+  return normalizedSupplierId
+    ? `${basePath}/${encodeURIComponent(normalizedSupplierId)}`
+    : basePath;
+};
 
 const createEmptySupplierForm = () => ({
   supplier_type: "factory",
@@ -725,9 +737,17 @@ export default function Suppliers() {
   const { hasPermission } = useAuth();
   const { locale, isRTL } = useLocale();
   const location = useLocation();
+  const navigate = useNavigate();
+  const { supplierId: routeSupplierIdParam } = useParams();
   const canManageSuppliers = hasPermission("can_edit_suppliers");
   const supplierViewType = getSupplierViewType(location.pathname);
   const isFactorySuppliersView = supplierViewType === "factory";
+  const routeSupplierId = normalizeText(routeSupplierIdParam);
+  const isDetailRoute = Boolean(routeSupplierId);
+  const suppliersListPath = useMemo(
+    () => buildSuppliersListPath(supplierViewType),
+    [supplierViewType],
+  );
   const productCatalogCacheKey = useMemo(() => buildProductsCacheKey(), []);
   const initialProductCatalogRows = useMemo(
     () => peekCachedProducts(productCatalogCacheKey),
@@ -784,6 +804,9 @@ export default function Suppliers() {
       const list = extractArray(response?.data);
       setSuppliers(list);
       setSelectedSupplierId((current) => {
+        if (routeSupplierId) {
+          return routeSupplierId;
+        }
         if (current && list.some((supplier) => supplier.id === current)) {
           return current;
         }
@@ -801,7 +824,7 @@ export default function Suppliers() {
     } finally {
       setLoading(false);
     }
-  }, [supplierViewType]);
+  }, [routeSupplierId, supplierViewType]);
 
   const loadSupplierDetail = useCallback(async (supplierId, { silent = false } = {}) => {
     if (!supplierId) {
@@ -902,18 +925,45 @@ export default function Suppliers() {
   }, [loadSuppliers]);
 
   useEffect(() => {
+    if (routeSupplierId) {
+      setSelectedSupplierId((current) =>
+        current === routeSupplierId ? current : routeSupplierId,
+      );
+    }
+  }, [routeSupplierId]);
+
+  useEffect(() => {
+    if (!isDetailRoute) {
+      setSelectedSupplier(null);
+      setDetailLoading(false);
+      return;
+    }
+
     loadSupplierDetail(selectedSupplierId);
-  }, [loadSupplierDetail, selectedSupplierId]);
+  }, [isDetailRoute, loadSupplierDetail, selectedSupplierId]);
 
   useEffect(() => {
+    if (!isDetailRoute) {
+      return;
+    }
+
     loadProductCatalog();
-  }, [loadProductCatalog]);
+  }, [isDetailRoute, loadProductCatalog]);
 
   useEffect(() => {
+    if (!isDetailRoute) {
+      setRelatedSuppliers([]);
+      return;
+    }
+
     loadRelatedSuppliers();
-  }, [loadRelatedSuppliers]);
+  }, [isDetailRoute, loadRelatedSuppliers]);
 
   useEffect(() => {
+    if (routeSupplierId) {
+      return;
+    }
+
     const requestedSupplierId = normalizeText(
       new URLSearchParams(location.search).get("supplier"),
     );
@@ -925,22 +975,22 @@ export default function Suppliers() {
       return;
     }
 
-    setSelectedSupplierId((current) =>
-      current === requestedSupplierId ? current : requestedSupplierId,
-    );
-  }, [location.search, suppliers]);
+    navigate(buildSupplierWorkspacePath(supplierViewType, requestedSupplierId), {
+      replace: true,
+    });
+  }, [location.search, navigate, routeSupplierId, supplierViewType, suppliers]);
 
   useEffect(() => {
     const unsubscribe = subscribeToSharedDataUpdates((event) => {
       if (isSuppliersRelatedUpdate(event)) {
         loadSuppliers();
-        if (selectedSupplierId) {
+        if (isDetailRoute && selectedSupplierId) {
           loadSupplierDetail(selectedSupplierId, { silent: true });
+          loadRelatedSuppliers();
         }
-        loadRelatedSuppliers();
       }
 
-      if (isProductsRelatedUpdate(event)) {
+      if (isDetailRoute && isProductsRelatedUpdate(event)) {
         loadProductCatalog({ silent: true, force: true });
       }
     });
@@ -951,6 +1001,7 @@ export default function Suppliers() {
     loadRelatedSuppliers,
     loadSupplierDetail,
     loadSuppliers,
+    isDetailRoute,
     selectedSupplierId,
   ]);
 
@@ -995,6 +1046,24 @@ export default function Suppliers() {
     [suppliers],
   );
 
+  const selectedSupplierSummary = useMemo(
+    () =>
+      suppliers.find(
+        (supplier) => normalizeText(supplier?.id) === normalizeText(routeSupplierId),
+      ) || null,
+    [routeSupplierId, suppliers],
+  );
+  const activeSupplierPreview = selectedSupplier || selectedSupplierSummary;
+
+  const openSupplierWorkspace = (supplierId) => {
+    const normalizedSupplierId = normalizeText(supplierId);
+    if (!normalizedSupplierId) {
+      return;
+    }
+
+    navigate(buildSupplierWorkspacePath(supplierViewType, normalizedSupplierId));
+  };
+
   const startCreatingSupplier = () => {
     setEditingSupplierId("");
     setSupplierForm(() => ({
@@ -1021,6 +1090,30 @@ export default function Suppliers() {
       supplier_type: supplierViewType,
     });
     setShowSupplierForm(false);
+  };
+
+  const backToSuppliersList = () => {
+    closeSupplierForm();
+    navigate(suppliersListPath);
+  };
+
+  const refreshCurrentView = async () => {
+    await loadSuppliers();
+
+    if (isDetailRoute && selectedSupplierId) {
+      await Promise.all([
+        loadSupplierDetail(selectedSupplierId, { silent: true }),
+        loadRelatedSuppliers(),
+        loadProductCatalog({ silent: true, force: true }),
+      ]);
+    }
+  };
+
+  const startCreatingSupplierFlow = () => {
+    startCreatingSupplier();
+    if (isDetailRoute) {
+      navigate(suppliersListPath);
+    }
   };
 
   const startCreatingFabric = () => {
@@ -1073,6 +1166,7 @@ export default function Suppliers() {
       if (nextSupplierId) {
         setSelectedSupplierId(nextSupplierId);
         await loadSupplierDetail(nextSupplierId);
+        navigate(buildSupplierWorkspacePath(supplierViewType, nextSupplierId));
       }
       setMessage({
         type: "success",
@@ -1396,7 +1490,7 @@ export default function Suppliers() {
 
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={loadSuppliers}
+                  onClick={refreshCurrentView}
                   className="app-button-secondary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-slate-700"
                 >
                   <RefreshCw size={18} />
@@ -1404,7 +1498,7 @@ export default function Suppliers() {
                 </button>
                 {canManageSuppliers ? (
                   <button
-                    onClick={startCreatingSupplier}
+                    onClick={startCreatingSupplierFlow}
                     className="app-button-primary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-white"
                   >
                     <Plus size={18} />
@@ -1444,6 +1538,135 @@ export default function Suppliers() {
             </div>
           ) : null}
 
+          {isDetailRoute ? (
+            <>
+              <section className="app-surface rounded-[30px] p-5 sm:p-6">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <button
+                      onClick={backToSuppliersList}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                    >
+                      <ArrowLeft size={16} />
+                      رجوع إلى قائمة الموردين
+                    </button>
+
+                    <div className="mt-4">
+                      <div className="app-chip inline-flex items-center gap-2 px-3 py-1 text-xs font-semibold text-slate-700">
+                        <Building2 size={14} />
+                        {translateSupplierUiText(
+                          isFactorySuppliersView ? "Ù…ÙˆØ±Ø¯Ùˆ Ø§Ù„Ù…ØµØ§Ù†Ø¹" : "Ù…ÙˆØ±Ø¯ÙŠ Ø§Ù„Ù‚Ù…Ø§Ø´",
+                          locale,
+                        )}
+                      </div>
+                      <h2 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-slate-900">
+                        {activeSupplierPreview?.name || "Ù…Ù„Ù Ø§Ù„Ù…ÙˆØ±Ø¯"}
+                      </h2>
+                      <p className="mt-2 text-sm text-slate-500">
+                        {translateSupplierUiText(getSupplierCodeLabel(supplierViewType), locale)}:{" "}
+                        {activeSupplierPreview?.code || "-"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {activeSupplierPreview ? (
+                    <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[420px]">
+                      <KeyValueCompact
+                        label={isFactorySuppliersView ? "Ø§Ù„ÙˆØ§Ø±Ø¯" : "Ø§Ù„Ù‚ÙŠÙ…Ø©"}
+                        value={formatCurrency(activeSupplierPreview.total_deliveries)}
+                      />
+                      <KeyValueCompact
+                        label={isFactorySuppliersView ? "Ø§Ù„Ø±ØµÙŠØ¯" : "Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª"}
+                        value={
+                          isFactorySuppliersView
+                            ? formatCurrency(activeSupplierPreview.outstanding_balance)
+                            : formatCount(activeSupplierPreview.products_count)
+                        }
+                      />
+                      <KeyValueCompact
+                        label={isFactorySuppliersView ? "Ø§Ù„Ø£ØµÙ†Ø§Ù" : "Ø§Ù„Ù…ØµØ§Ù†Ø¹"}
+                        value={
+                          isFactorySuppliersView
+                            ? formatCount(activeSupplierPreview.received_items_count)
+                            : formatCount(activeSupplierPreview.linked_factories_count)
+                        }
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+
+              {canManageSuppliers && showSupplierForm ? (
+                <section className="app-surface rounded-[28px] p-4 sm:p-5">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-semibold text-slate-900">
+                        {editingSupplierId ? "ØªØ¹Ø¯ÙŠÙ„ Ø§Ù„Ù…ÙˆØ±Ø¯" : "Ø¥Ø¶Ø§ÙØ© Ù…ÙˆØ±Ø¯"}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù…ÙˆØ±Ø¯ Ø§Ù„Ø£Ø³Ø§Ø³ÙŠØ© ÙˆØ¥Ø¯Ø§Ø±ØªÙ‡ Ø¨ØªØªÙ… Ù…Ù† Ø¯Ø§Ø®Ù„ Ù…Ù„ÙÙ‡ Ù…Ø¨Ø§Ø´Ø±Ø©.
+                      </p>
+                    </div>
+                    <button
+                      onClick={closeSupplierForm}
+                      className="app-button-secondary rounded-2xl px-3 py-2 text-sm font-semibold text-slate-600"
+                    >
+                      Ø¥ØºÙ„Ø§Ù‚
+                    </button>
+                  </div>
+
+                  <SupplierForm
+                    form={supplierForm}
+                    setForm={setSupplierForm}
+                    supplierType={supplierViewType}
+                    saving={savingSupplier}
+                    onSave={saveSupplier}
+                  />
+                </section>
+              ) : null}
+
+              <div className="space-y-6">
+                {renderDetails({
+                  selectedSupplierId,
+                  selectedSupplier,
+                  supplierViewType,
+                  detailLoading,
+                  canEditProducts: canManageSuppliers,
+                  startEditingSupplier,
+                  showFabricForm,
+                  editingFabricId,
+                  fabricForm,
+                  setFabricForm,
+                  savingFabric,
+                  startCreatingFabric,
+                  startEditingFabric,
+                  saveFabric,
+                  closeFabricForm,
+                  relatedSuppliers,
+                  deliveryForm,
+                  setDeliveryForm,
+                  updateDeliveryItem,
+                  selectDeliveryFabric,
+                  selectDeliveryProduct,
+                  removeDeliveryItem,
+                  addDeliveryItem,
+                  saveDelivery,
+                  savingDelivery,
+                  paymentForm,
+                  setPaymentForm,
+                  savePayment,
+                  savingPayment,
+                  savingProductLinks,
+                  saveSupplierProductLinks,
+                  catalogLoading,
+                  catalogError,
+                  productCatalogOptions,
+                  productCatalogByValue,
+                })}
+              </div>
+            </>
+          ) : (
+            <>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <SummaryCard
               title={isFactorySuppliersView ? "إجمالي المصانع" : "إجمالي موردي القماش"}
@@ -1502,7 +1725,7 @@ export default function Suppliers() {
           </section>
 
           <section className="grid gap-6 xl:grid-cols-12">
-            <div className="space-y-6 xl:col-span-4">
+            <div className="space-y-6 xl:col-span-12">
               <div className="app-surface rounded-[28px] p-4">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
@@ -1546,18 +1769,11 @@ export default function Suppliers() {
                   ) : filteredSuppliers.length === 0 ? (
                     <EmptyState text="لا يوجد موردون مطابقون للبحث الحالي." />
                   ) : (
-                    filteredSuppliers.map((supplier) => {
-                      const isActive = supplier.id === selectedSupplierId;
-
-                      return (
+                    filteredSuppliers.map((supplier) => (
                         <button
                           key={supplier.id}
-                          onClick={() => setSelectedSupplierId(supplier.id)}
-                          className={`w-full rounded-[24px] border p-4 text-right transition ${
-                            isActive
-                              ? "border-sky-300 bg-[linear-gradient(180deg,rgba(240,249,255,0.98),rgba(232,244,255,0.9))] shadow-[0_18px_35px_-28px_rgba(14,116,144,0.5)]"
-                              : "border-slate-200 bg-white/80 hover:border-slate-300 hover:bg-white"
-                          }`}
+                          onClick={() => openSupplierWorkspace(supplier.id)}
+                          className="w-full rounded-[24px] border border-slate-200 bg-white/80 p-4 text-right transition hover:border-sky-300 hover:bg-white"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -1612,8 +1828,7 @@ export default function Suppliers() {
                             )}
                           </div>
                         </button>
-                      );
-                    })
+                    ))
                   )}
                 </div>
               </div>
@@ -1669,46 +1884,9 @@ export default function Suppliers() {
               ) : null}
             </div>
 
-            <div className="space-y-6 xl:col-span-8">
-              {renderDetails({
-                selectedSupplierId,
-                selectedSupplier,
-                supplierViewType,
-                detailLoading,
-                canEditProducts: canManageSuppliers,
-                startEditingSupplier,
-                showFabricForm,
-                editingFabricId,
-                fabricForm,
-                setFabricForm,
-                savingFabric,
-                startCreatingFabric,
-                startEditingFabric,
-                saveFabric,
-                closeFabricForm,
-                relatedSuppliers,
-                deliveryForm,
-                setDeliveryForm,
-                updateDeliveryItem,
-                selectDeliveryFabric,
-                selectDeliveryProduct,
-                removeDeliveryItem,
-                addDeliveryItem,
-                saveDelivery,
-                savingDelivery,
-                paymentForm,
-                setPaymentForm,
-                savePayment,
-                savingPayment,
-                savingProductLinks,
-                saveSupplierProductLinks,
-                catalogLoading,
-                catalogError,
-                productCatalogOptions,
-                productCatalogByValue,
-              })}
-            </div>
           </section>
+            </>
+          )}
         </div>
       </main>
     </div>

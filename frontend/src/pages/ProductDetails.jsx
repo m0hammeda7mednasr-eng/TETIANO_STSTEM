@@ -879,7 +879,7 @@ export default function ProductDetails() {
                           supplierType === "fabric"
                             ? "/suppliers/fabric-suppliers"
                             : "/suppliers"
-                        }?supplier=${encodeURIComponent(supplierId)}`
+                        }/${encodeURIComponent(supplierId)}`
                       : supplierType === "fabric"
                         ? "/suppliers/fabric-suppliers"
                         : "/suppliers",

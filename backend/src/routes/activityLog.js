@@ -52,17 +52,22 @@ router.get("/stats", async (req, res) => {
       Date.now() - 7 * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    // Get activity counts by type
-    const { data: activityByType, error: error1 } = await supabase
-      .from("activity_log")
-      .select("entity_type, action")
-      .gte("created_at", sevenDaysAgo);
+    // Get activity counts by type and most active users in parallel
+    const [activityByTypeResult, activeUsersResult] = await Promise.all([
+      supabase
+        .from("activity_log")
+        .select("entity_type, action")
+        .gte("created_at", sevenDaysAgo)
+        .limit(5000),
+      supabase
+        .from("activity_log")
+        .select("user_id, users(name)")
+        .gte("created_at", sevenDaysAgo)
+        .limit(5000),
+    ]);
 
-    // Get most active users (with filtering)
-    const { data: activeUsers, error: error2 } = await supabase
-      .from("activity_log")
-      .select("user_id, users(name)")
-      .gte("created_at", sevenDaysAgo);
+    const { data: activityByType, error: error1 } = activityByTypeResult;
+    const { data: activeUsers, error: error2 } = activeUsersResult;
 
     if (error1) {
       console.error("Database error fetching activity by type:", error1);
@@ -118,7 +123,8 @@ router.get("/entity/:type/:id", async (req, res) => {
       )
       .eq("entity_type", type)
       .eq("entity_id", id)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(100);
 
     if (error) {
       console.error("Database error fetching entity activity:", error);

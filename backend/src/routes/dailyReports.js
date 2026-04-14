@@ -193,7 +193,8 @@ router.get("/my-reports", authenticateToken, async (req, res) => {
       .from("daily_reports")
       .select("*")
       .eq("user_id", req.user.id)
-      .order("report_date", { ascending: false });
+      .order("report_date", { ascending: false })
+      .limit(100);
 
     const { data, error } = await query;
 

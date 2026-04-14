@@ -248,7 +248,8 @@ const loadStoreSupplierEntries = async (storeId) => {
     .select(SUPPLIER_ENTRIES_SELECT)
     .eq("store_id", storeId)
     .order("entry_date", { ascending: false })
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(500);
 
   if (error) {
     throw error;
@@ -263,7 +264,8 @@ const loadStoreSupplierFabrics = async (storeId) => {
     .select(SUPPLIER_FABRICS_SELECT)
     .eq("store_id", storeId)
     .order("is_active", { ascending: false })
-    .order("name", { ascending: true });
+    .order("name", { ascending: true })
+    .limit(500);
 
   if (error) {
     throw error;

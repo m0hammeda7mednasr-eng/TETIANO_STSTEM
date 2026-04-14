@@ -79,13 +79,16 @@ export const setRlsContext = async (req, res, next) => {
       : null;
 
   try {
+    const promises = [];
     if (userId) {
-      await callRlsRpcSafely("set_current_user_id", { user_id: userId });
+      promises.push(callRlsRpcSafely("set_current_user_id", { user_id: userId }));
     }
 
     if (storeId) {
-      await callRlsRpcSafely("set_current_store_id", { store_id: storeId });
+      promises.push(callRlsRpcSafely("set_current_store_id", { store_id: storeId }));
     }
+
+    await Promise.all(promises);
 
     next();
   } catch (err) {

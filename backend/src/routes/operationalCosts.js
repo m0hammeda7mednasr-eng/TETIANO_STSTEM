@@ -71,6 +71,7 @@ router.get("/", async (req, res) => {
         product:products(id, title, image_url)
       `,
       )
+      .limit(100)
       .order("created_at", { ascending: false });
 
     query = applyUserFilter(

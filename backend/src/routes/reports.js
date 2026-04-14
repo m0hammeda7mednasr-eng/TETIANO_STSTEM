@@ -106,24 +106,32 @@ router.get("/", authenticateToken, requireAdminRole, async (req, res) => {
     const { range = "7days" } = req.query;
     const { startDate, endDate } = getDateRange(range);
 
-    const { data: orders, error: ordersError } = await supabase
-      .from("orders")
-      .select("*")
-      .gte("created_at", startDate)
-      .lte("created_at", endDate);
-    if (ordersError) throw ordersError;
+    const [ordersResult, customersResult, productsResult] = await Promise.all([
+      supabase
+        .from("orders")
+        .select("*")
+        .gte("created_at", startDate)
+        .lte("created_at", endDate)
+        .limit(5000),
+      supabase
+        .from("customers")
+        .select("*")
+        .gte("created_at", startDate)
+        .lte("created_at", endDate)
+        .limit(5000),
+      supabase
+        .from("products")
+        .select("*")
+        .limit(2000),
+    ]);
 
-    const { data: customers, error: customersError } = await supabase
-      .from("customers")
-      .select("*")
-      .gte("created_at", startDate)
-      .lte("created_at", endDate);
-    if (customersError) throw customersError;
+    if (ordersResult.error) throw ordersResult.error;
+    if (customersResult.error) throw customersResult.error;
+    if (productsResult.error) throw productsResult.error;
 
-    const { data: products, error: productsError } = await supabase
-      .from("products")
-      .select("*");
-    if (productsError) throw productsError;
+    const orders = ordersResult.data;
+    const customers = customersResult.data;
+    const products = productsResult.data;
 
     const totalSales = (orders || []).reduce(
       (sum, order) => sum + toNumber(order.total_price),

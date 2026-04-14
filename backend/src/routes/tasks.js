@@ -663,7 +663,8 @@ router.get("/", authenticateToken, async (req, res) => {
     let query = supabase
       .from("tasks")
       .select(TASK_BASE_SELECT)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(200);
 
     if (!userCanManage) {
       query = applyUserFilter(query, req.user.id, req.user.role, "tasks");

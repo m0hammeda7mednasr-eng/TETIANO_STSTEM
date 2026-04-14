@@ -262,15 +262,8 @@ export const AuthProvider = ({ children }) => {
       loadAuthState({ silent: true });
     }, AUTH_REFRESH_INTERVAL_MS);
 
-    const onFocus = () => {
-      loadAuthState({ silent: true });
-    };
-
-    window.addEventListener("focus", onFocus);
-
     return () => {
       clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
     };
   }, [loadAuthState]);
 

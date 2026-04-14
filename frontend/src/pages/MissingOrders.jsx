@@ -374,6 +374,7 @@ export default function MissingOrders() {
         const response = await shopifyAPI.getMissingOrders({
           limit: FETCH_PAGE_LIMIT,
           offset: 0,
+          ...(force ? { cache_refresh: "1" } : {}),
         });
         const rows = extractArray(response?.data);
 

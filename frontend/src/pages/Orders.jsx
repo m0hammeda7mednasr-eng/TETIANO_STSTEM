@@ -739,6 +739,7 @@ export default function Orders() {
             shopifyAPI.getMissingOrders({
               limit,
               offset,
+              ...(force ? { cache_refresh: "1" } : {}),
             }),
           {
             limit: MISSING_ORDERS_FETCH_PAGE_SIZE,

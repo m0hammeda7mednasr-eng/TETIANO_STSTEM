@@ -284,6 +284,7 @@ export default function BarcodeLabels() {
       const rows = await fetchProductPages({
         sortBy: "updated_at",
         sortDir: "desc",
+        cacheRefresh: force,
         onPage: ({ rows: accumulatedRows, hasMore }) => {
           setProducts(accumulatedRows);
           setLoadStatus({

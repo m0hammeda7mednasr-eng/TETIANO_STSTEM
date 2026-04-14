@@ -56,6 +56,7 @@ export const fetchProductPages = async ({
   sortBy = "updated_at",
   sortDir = "desc",
   timeoutMs = PRODUCT_CACHE_REQUEST_TIMEOUT_MS,
+  cacheRefresh = false,
   onPage = null,
 } = {}) =>
   fetchAllPagesProgressively(
@@ -66,6 +67,7 @@ export const fetchProductPages = async ({
           offset,
           sort_by: sortBy,
           sort_dir: sortDir,
+          ...(cacheRefresh ? { cache_refresh: "1" } : {}),
         },
         timeout: timeoutMs,
       }),

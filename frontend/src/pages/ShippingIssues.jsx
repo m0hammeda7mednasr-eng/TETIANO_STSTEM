@@ -390,6 +390,7 @@ export default function ShippingIssues() {
           const response = await shopifyAPI.getShippingIssues({
             limit: FETCH_PAGE_LIMIT,
             offset: 0,
+            ...(force ? { cache_refresh: "1" } : {}),
           });
           const rows = extractArray(response?.data);
           const activeRows = rows.filter((order) =>

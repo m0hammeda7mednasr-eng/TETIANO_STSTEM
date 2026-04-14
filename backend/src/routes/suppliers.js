@@ -4,6 +4,10 @@ import { authenticateToken } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { getAccessibleStoreIds } from "../models/index.js";
 import {
+  clearHeavyCacheByPrefix,
+  clearHeavyCacheNamespace,
+} from "../helpers/heavyRouteCache.js";
+import {
   buildSupplierDetail,
   buildSupplierList,
   normalizeSupplierType,
@@ -14,6 +18,16 @@ import {
 } from "../helpers/suppliers.js";
 
 const router = express.Router();
+const SHOPIFY_SCOPED_ENTITY_PAGE_CACHE_NAMESPACE = "shopify:scoped-entity-page";
+const PRODUCT_SUPPLIER_LINKS_CACHE_NAMESPACE = "shopify:product-supplier-links";
+
+const clearProductSupplierReadCaches = () => {
+  clearHeavyCacheByPrefix(
+    SHOPIFY_SCOPED_ENTITY_PAGE_CACHE_NAMESPACE,
+    "products::",
+  );
+  clearHeavyCacheNamespace(PRODUCT_SUPPLIER_LINKS_CACHE_NAMESPACE);
+};
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -328,6 +342,20 @@ const loadStoreSupplierProductLinks = async (storeId, supplierId = null) => {
 
   return data || [];
 };
+
+router.use((req, res, next) => {
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
+    return next();
+  }
+
+  res.on("finish", () => {
+    if (res.statusCode >= 200 && res.statusCode < 400) {
+      clearProductSupplierReadCaches();
+    }
+  });
+
+  return next();
+});
 
 const getProductVariantRows = (product = {}) => {
   const rawData = product?.data;
@@ -748,6 +776,12 @@ router.put(
           throw insertError;
         }
       }
+
+      clearHeavyCacheByPrefix(
+        SHOPIFY_SCOPED_ENTITY_PAGE_CACHE_NAMESPACE,
+        "products::",
+      );
+      clearHeavyCacheNamespace(PRODUCT_SUPPLIER_LINKS_CACHE_NAMESPACE);
 
       const links = await decorateSupplierProductLinks(
         await loadStoreSupplierProductLinks(storeId, supplier.id),

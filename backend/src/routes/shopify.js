@@ -47,6 +47,17 @@ import {
   buildShippingIssueRecoveryPlan,
   recoverShippingIssuesFromHistory,
 } from "../helpers/shippingIssueRecovery.js";
+import {
+  clearHeavyCacheByPrefix,
+  clearHeavyCacheNamespace,
+  getHeavyCacheInFlight,
+  normalizeCacheQuery,
+  readHeavyCacheEntry,
+  setHeavyCacheInFlight,
+  shouldBypassHeavyCache,
+  stableCacheStringify,
+  writeHeavyCacheEntry,
+} from "../helpers/heavyRouteCache.js";
 import { loadWarehouseAvailabilityByStoreIds } from "../services/warehouseAvailabilityService.js";
 
 const router = express.Router();
@@ -56,8 +67,12 @@ const UUID_REGEX =
 const ORDER_BACKGROUND_SYNC_COOLDOWN_MS = 45 * 1000;
 const ORDER_BACKGROUND_SYNC_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const SHIPPING_ISSUE_HISTORY_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
-const SHIPPING_ISSUE_ORDERS_CACHE_TTL_MS = 30 * 1000;
-const MISSING_ORDERS_CACHE_TTL_MS = 30 * 1000;
+const SHIPPING_ISSUE_ORDERS_CACHE_TTL_MS = 5 * 60 * 1000;
+const MISSING_ORDERS_CACHE_TTL_MS = 5 * 60 * 1000;
+const SCOPED_ENTITY_PAGE_CACHE_NAMESPACE = "shopify:scoped-entity-page";
+const PRODUCT_SUPPLIER_LINKS_CACHE_NAMESPACE = "shopify:product-supplier-links";
+const SCOPED_ENTITY_PAGE_CACHE_MAX_ENTRIES = 250;
+const PRODUCT_SUPPLIER_LINKS_CACHE_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 200;
 const ORDER_LIST_PAGE_LIMIT = 4500;
@@ -896,6 +911,89 @@ const writeTimedRowsCache = (cache, cacheKey, rows = []) => {
   });
 };
 
+const getScopedEntityPageCacheTtlMs = (tableName) => {
+  if (tableName === "products") {
+    return 15 * 60 * 1000;
+  }
+
+  if (tableName === "customers") {
+    return 15 * 60 * 1000;
+  }
+
+  if (tableName === "orders") {
+    return 2 * 60 * 1000;
+  }
+
+  return 0;
+};
+
+const buildScopedEntityPageCacheKey = ({
+  req,
+  tableName,
+  selectedColumns,
+  pagination,
+  sortOptions,
+  requestedStoreId,
+  isAdmin,
+  accessibleStoreIds = [],
+}) =>
+  `${String(tableName || "table").trim()}::${stableCacheStringify({
+    user_id: req?.user?.id || "",
+    role: isAdmin ? "admin" : "user",
+    requested_store_id: requestedStoreId || "",
+    accessible_store_ids: [...accessibleStoreIds].sort(),
+    selected_columns: selectedColumns,
+    pagination,
+    sort_options: sortOptions,
+    query: normalizeCacheQuery(req?.query || {}),
+  })}`;
+
+const clearScopedEntityPageCache = (tableNames = []) => {
+  const names = Array.isArray(tableNames) ? tableNames : [tableNames];
+  for (const tableName of names) {
+    const normalizedTable = String(tableName || "").trim();
+    if (normalizedTable) {
+      clearHeavyCacheByPrefix(
+        SCOPED_ENTITY_PAGE_CACHE_NAMESPACE,
+        `${normalizedTable}::`,
+      );
+    }
+  }
+};
+
+const clearOrderDerivedCaches = () => {
+  shippingIssueOrdersCache.clear();
+  shippingIssueOrdersInFlight.clear();
+  missingOrdersCache.clear();
+  missingOrdersInFlight.clear();
+};
+
+const invalidateShopifyReadCaches = (tableNames = ["products", "orders", "customers"]) => {
+  clearScopedEntityPageCache(tableNames);
+
+  if (tableNames.includes("products")) {
+    clearHeavyCacheNamespace(PRODUCT_SUPPLIER_LINKS_CACHE_NAMESPACE);
+  }
+
+  if (tableNames.includes("orders")) {
+    clearOrderDerivedCaches();
+  }
+};
+
+router.use((req, res, next) => {
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
+    return next();
+  }
+
+  res.on("finish", () => {
+    if (res.statusCode >= 200 && res.statusCode < 400) {
+      invalidateShopifyReadCaches();
+    }
+  });
+
+  return next();
+});
+
 const loadScopedOrdersFastPath = async ({
   req,
   requestedStoreId,
@@ -992,21 +1090,26 @@ const loadShippingIssueOrdersForRequest = async (req) => {
     requestedStoreId,
     isAdmin,
   });
-  const cachedResult = readShippingIssueOrdersCache(cacheKey);
-  if (cachedResult) {
-    return {
-      ...cachedResult,
-      cacheHit: true,
-    };
+  const bypassCache = shouldBypassHeavyCache(req);
+  if (!bypassCache) {
+    const cachedResult = readShippingIssueOrdersCache(cacheKey);
+    if (cachedResult) {
+      return {
+        ...cachedResult,
+        cacheHit: true,
+      };
+    }
   }
 
-  const pendingResult = shippingIssueOrdersInFlight.get(cacheKey);
-  if (pendingResult) {
-    const result = await pendingResult;
-    return {
-      ...result,
-      cacheHit: true,
-    };
+  if (!bypassCache) {
+    const pendingResult = shippingIssueOrdersInFlight.get(cacheKey);
+    if (pendingResult) {
+      const result = await pendingResult;
+      return {
+        ...result,
+        cacheHit: true,
+      };
+    }
   }
 
   const requestPromise = (async () => {
@@ -1306,57 +1409,131 @@ const getScopedEntityPage = async ({
     allowUnordered: true,
   });
 
-  let lastError = null;
+  const loadPage = async () => {
+    let lastError = null;
 
-  for (const selectedColumns of selectCandidates) {
-    for (const orderField of orderFieldCandidates) {
-      let result = await buildQuery(selectedColumns, orderField, false);
+    for (const selectedColumns of selectCandidates) {
+      for (const orderField of orderFieldCandidates) {
+        let result = await buildQuery(selectedColumns, orderField, false);
 
-      if (
-        !isAdmin &&
-        !requestedStoreId &&
-        accessibleStoreIds.length > 0 &&
-        offset === 0 &&
-        !result.error &&
-        (!Array.isArray(result.data) || result.data.length === 0)
-      ) {
-        result = await buildQuery(selectedColumns, orderField, true);
-      }
+        if (
+          !isAdmin &&
+          !requestedStoreId &&
+          accessibleStoreIds.length > 0 &&
+          offset === 0 &&
+          !result.error &&
+          (!Array.isArray(result.data) || result.data.length === 0)
+        ) {
+          result = await buildQuery(selectedColumns, orderField, true);
+        }
 
-      if (!result?.error) {
+        if (!result?.error) {
+          return {
+            data: result?.data || [],
+            error: null,
+            isAdmin,
+            requestedStoreId,
+          };
+        }
+
+        lastError = result.error;
+        if (isSchemaCompatibilityError(result.error)) {
+          break;
+        }
+
+        console.error("Error executing query:", result.error);
+
+        if (isQueryRetryableError(result.error)) {
+          continue;
+        }
+
         return {
-          data: result?.data || [],
-          error: null,
+          data: [],
+          error: result.error,
           isAdmin,
           requestedStoreId,
         };
       }
+    }
 
-      lastError = result.error;
-      if (isSchemaCompatibilityError(result.error)) {
-        break;
-      }
+    return {
+      data: [],
+      error: lastError,
+      isAdmin,
+      requestedStoreId,
+    };
+  };
 
-      console.error("Error executing query:", result.error);
-
-      if (isQueryRetryableError(result.error)) {
-        continue;
-      }
-
-      return {
-        data: [],
-        error: result.error,
-        isAdmin,
+  const cacheTtlMs = getScopedEntityPageCacheTtlMs(tableName);
+  const shouldUseCache = cacheTtlMs > 0 && !shouldBypassHeavyCache(req);
+  const cacheKey = shouldUseCache
+    ? buildScopedEntityPageCacheKey({
+        req,
+        tableName,
+        selectedColumns: selectCandidates,
+        pagination,
+        sortOptions,
         requestedStoreId,
+        isAdmin,
+        accessibleStoreIds,
+      })
+    : "";
+
+  if (shouldUseCache) {
+    const cachedEntry = readHeavyCacheEntry(
+      SCOPED_ENTITY_PAGE_CACHE_NAMESPACE,
+      cacheKey,
+      cacheTtlMs,
+    );
+
+    if (cachedEntry) {
+      return {
+        ...cachedEntry.value,
+        cacheStatus: "hit",
+      };
+    }
+
+    const pending = getHeavyCacheInFlight(
+      SCOPED_ENTITY_PAGE_CACHE_NAMESPACE,
+      cacheKey,
+    );
+
+    if (pending) {
+      const result = await pending;
+      return {
+        ...result,
+        cacheStatus: "coalesced",
       };
     }
   }
 
+  if (!shouldUseCache) {
+    return await loadPage();
+  }
+
+  const requestPromise = loadPage().then((result) => {
+    if (!result?.error) {
+      writeHeavyCacheEntry(
+        SCOPED_ENTITY_PAGE_CACHE_NAMESPACE,
+        cacheKey,
+        result,
+        { maxEntries: SCOPED_ENTITY_PAGE_CACHE_MAX_ENTRIES },
+      );
+    }
+
+    return result;
+  });
+
+  setHeavyCacheInFlight(
+    SCOPED_ENTITY_PAGE_CACHE_NAMESPACE,
+    cacheKey,
+    requestPromise,
+  );
+
+  const result = await requestPromise;
   return {
-    data: [],
-    error: lastError,
-    isAdmin,
-    requestedStoreId,
+    ...result,
+    cacheStatus: "miss",
   };
 };
 
@@ -2132,6 +2309,22 @@ const attachSupplierLinksToProducts = async (products = []) => {
   }
 
   try {
+    const cacheKey = stableCacheStringify([...productIds].sort());
+    const cachedLinks = readHeavyCacheEntry(
+      PRODUCT_SUPPLIER_LINKS_CACHE_NAMESPACE,
+      cacheKey,
+      PRODUCT_SUPPLIER_LINKS_CACHE_TTL_MS,
+    );
+
+    if (cachedLinks) {
+      const cachedLinksByProductId = new Map(cachedLinks.value || []);
+      return rows.map((product) => ({
+        ...product,
+        supplier_links:
+          cachedLinksByProductId.get(String(product?.id || "")) || [],
+      }));
+    }
+
     const { data: links, error: linksError } = await db
       .from("supplier_products")
       .select(PRODUCT_SUPPLIER_LINK_SELECT)
@@ -2179,6 +2372,13 @@ const attachSupplierLinksToProducts = async (products = []) => {
       currentLinks.push(nextLink);
       linksByProductId.set(productId, currentLinks);
     }
+
+    writeHeavyCacheEntry(
+      PRODUCT_SUPPLIER_LINKS_CACHE_NAMESPACE,
+      cacheKey,
+      Array.from(linksByProductId.entries()),
+      { maxEntries: SCOPED_ENTITY_PAGE_CACHE_MAX_ENTRIES },
+    );
 
     return rows.map((product) => ({
       ...product,
@@ -3752,25 +3952,30 @@ const getMissingOrdersForRequest = async (req) => {
     requestedStoreId,
     isAdmin,
   });
-  const cachedResult = readTimedRowsCache(
-    missingOrdersCache,
-    cacheKey,
-    MISSING_ORDERS_CACHE_TTL_MS,
-  );
-  if (cachedResult) {
-    return {
-      orders: cachedResult.rows,
-      cacheHit: true,
-    };
+  const bypassCache = shouldBypassHeavyCache(req);
+  if (!bypassCache) {
+    const cachedResult = readTimedRowsCache(
+      missingOrdersCache,
+      cacheKey,
+      MISSING_ORDERS_CACHE_TTL_MS,
+    );
+    if (cachedResult) {
+      return {
+        orders: cachedResult.rows,
+        cacheHit: true,
+      };
+    }
   }
 
-  const pendingResult = missingOrdersInFlight.get(cacheKey);
-  if (pendingResult) {
-    const result = await pendingResult;
-    return {
-      ...result,
-      cacheHit: true,
-    };
+  if (!bypassCache) {
+    const pendingResult = missingOrdersInFlight.get(cacheKey);
+    if (pendingResult) {
+      const result = await pendingResult;
+      return {
+        ...result,
+        cacheHit: true,
+      };
+    }
   }
 
   const requestPromise = (async () => {
@@ -4923,13 +5128,16 @@ router.get(
         "updated_at",
         "desc",
       );
-      const { data, error, isAdmin } = await getScopedEntityPage({
+      const { data, error, isAdmin, cacheStatus } = await getScopedEntityPage({
         req,
         tableName: "products",
         selects: PRODUCT_LIST_SELECTS,
         pagination,
         sortOptions,
       });
+      if (cacheStatus) {
+        res.setHeader("X-Tetiano-Products-Db-Cache", cacheStatus);
+      }
       if (error) {
         console.error("Error fetching products:", error);
         try {
@@ -5210,6 +5418,9 @@ router.get(
         );
         data = scopedPageResult?.data || [];
         error = scopedPageResult?.error || null;
+        if (scopedPageResult?.cacheStatus) {
+          res.setHeader("X-Tetiano-Orders-Db-Cache", scopedPageResult.cacheStatus);
+        }
       } catch (queryError) {
         error = queryError;
       }
@@ -5414,13 +5625,16 @@ router.get(
         "created_at",
         "desc",
       );
-      const { data, error } = await getScopedEntityPage({
+      const { data, error, cacheStatus } = await getScopedEntityPage({
         req,
         tableName: "customers",
         selects: includeData ? CUSTOMER_DETAIL_SELECTS : CUSTOMER_LIST_SELECTS,
         pagination,
         sortOptions,
       });
+      if (cacheStatus) {
+        res.setHeader("X-Tetiano-Customers-Db-Cache", cacheStatus);
+      }
       if (error) {
         console.error("Error fetching customers:", error);
         try {

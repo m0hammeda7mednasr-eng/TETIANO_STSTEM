@@ -218,7 +218,7 @@ export default function Products() {
   }, []);
 
   const fetchProducts = useCallback(
-    async ({ silent = false } = {}) => {
+    async ({ silent = false, force = false } = {}) => {
       if (fetchPromiseRef.current) {
         return fetchPromiseRef.current;
       }
@@ -241,6 +241,7 @@ export default function Products() {
           const rows = await fetchProductPages({
             sortBy: "updated_at",
             sortDir: "desc",
+            cacheRefresh: force,
             onPage: ({ rows: accumulatedRows, hasMore }) => {
               setProducts(accumulatedRows);
               setLastUpdatedAt(new Date());
@@ -745,7 +746,7 @@ export default function Products() {
               )}
             </div>
             <button
-              onClick={() => fetchProducts()}
+                onClick={() => fetchProducts({ force: true })}
               className="bg-sky-700 hover:bg-sky-800 text-white px-4 py-2 rounded-lg flex items-center gap-2"
             >
               <RefreshCw size={18} />

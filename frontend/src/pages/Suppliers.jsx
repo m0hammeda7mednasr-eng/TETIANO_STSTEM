@@ -875,6 +875,7 @@ export default function Suppliers() {
       const rows = await fetchProductPages({
         sortBy: "title",
         sortDir: "asc",
+        cacheRefresh: force,
       });
 
       setProductCatalogRows(rows);

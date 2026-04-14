@@ -530,6 +530,27 @@ router.get("/me/stores", authenticateToken, async (req, res) => {
 router.get("/me", authenticateToken, async (req, res) => {
   try {
     const includeStores = shouldIncludeRelatedStores(req.query.include_stores);
+    if (req.authFallback?.source === "token-role") {
+      const degradedRole = normalizeRole(req.user.role);
+      const degradedPermissions = buildPermissionsForRole(degradedRole);
+      primeUserAccessContext(req.user.id, {
+        role: degradedRole,
+        permissions: degradedPermissions,
+      });
+
+      return res.json({
+        id: req.user.id,
+        email: req.user.email,
+        name: null,
+        role: degradedRole,
+        is_active: true,
+        created_at: null,
+        permissions: degradedPermissions,
+        ...(includeStores ? { stores: [] } : {}),
+        degraded: true,
+      });
+    }
+
     const { data: user, error } = await withSupabaseRetry(({ signal } = {}) =>
       supabase
         .from("users")

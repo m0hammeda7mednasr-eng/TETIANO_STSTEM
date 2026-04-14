@@ -88,7 +88,11 @@ export const setRlsContext = async (req, res, next) => {
       promises.push(callRlsRpcSafely("set_current_store_id", { store_id: storeId }));
     }
 
-    await Promise.all(promises);
+    if (promises.length > 0) {
+      Promise.all(promises).catch((err) => {
+        console.warn("RLS context background setup failed:", err?.message || err);
+      });
+    }
 
     next();
   } catch (err) {

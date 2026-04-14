@@ -281,6 +281,19 @@ export const requirePermission = (permissionName) => {
         return next();
       }
 
+      if (isSafeMethod && req.authFallback?.source === "token-role") {
+        const fallbackPermissions = buildPermissionsForRole(role || "user");
+        if (fallbackPermissions[permissionName]) {
+          req.user.role = role || "user";
+          req.user.isAdmin = false;
+          req.user.permissions = fallbackPermissions;
+          req.permissionFallback = {
+            source: "token-role",
+          };
+          return next();
+        }
+      }
+
       const permissions = await getUserPermissions(req.user?.id, {
         retryOptions,
       });

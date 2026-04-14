@@ -21,7 +21,7 @@ const getSupabaseQueryTimeoutMs = () => {
 const fetchWithTimeout = async (input, init = {}) => {
   const timeoutMs = getSupabaseQueryTimeoutMs();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let timeout = null;
 
   const abortFromCaller = () => controller.abort();
   if (init.signal) {
@@ -33,12 +33,28 @@ const fetchWithTimeout = async (input, init = {}) => {
   }
 
   try {
-    return await fetch(input, {
+    const fetchPromise = fetch(input, {
       ...init,
       signal: controller.signal,
     });
+
+    const timeoutPromise = new Promise((resolve, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        reject(
+          new DOMException(
+            `Supabase request timed out after ${timeoutMs}ms`,
+            "AbortError",
+          ),
+        );
+      }, timeoutMs);
+    });
+
+    return await Promise.race([fetchPromise, timeoutPromise]);
   } finally {
-    clearTimeout(timeout);
+    if (timeout) {
+      clearTimeout(timeout);
+    }
     if (init.signal) {
       init.signal.removeEventListener("abort", abortFromCaller);
     }

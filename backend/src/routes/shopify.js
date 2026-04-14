@@ -635,6 +635,30 @@ const toBooleanQueryFlag = (value, fallback = false) => {
   return fallback;
 };
 
+const withRouteTimeout = async (
+  label,
+  operation,
+  timeoutMs = 20 * 1000,
+) => {
+  let timeout = null;
+  try {
+    return await Promise.race([
+      Promise.resolve(operation),
+      new Promise((resolve, reject) => {
+        timeout = setTimeout(() => {
+          const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+          error.code = "ETIMEDOUT";
+          reject(error);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+};
+
 const getListPagination = (
   query = {},
   defaultLimit = DEFAULT_LIST_LIMIT,
@@ -4739,13 +4763,17 @@ router.get(
       let error = null;
 
       try {
-        const scopedPageResult = await getScopedEntityPage({
-          req,
-          tableName: "orders",
-          selects: ORDER_LIST_SELECTS,
-          pagination,
-          sortOptions,
-        });
+        const scopedPageResult = await withRouteTimeout(
+          "Orders query",
+          getScopedEntityPage({
+            req,
+            tableName: "orders",
+            selects: ORDER_LIST_SELECTS,
+            pagination,
+            sortOptions,
+          }),
+          18 * 1000,
+        );
         data = scopedPageResult?.data || [];
         error = scopedPageResult?.error || null;
       } catch (queryError) {
@@ -4754,6 +4782,12 @@ router.get(
 
       if (error) {
         console.error("Error fetching orders:", error);
+        if (isQueryRetryableError(error) || error?.code === "ETIMEDOUT") {
+          return res.status(503).json({
+            error: "Orders are temporarily unavailable while the database finishes maintenance",
+          });
+        }
+
         try {
           const fallbackOrders = await getFallbackOrdersPage(req);
           if (liveSyncResult) {
@@ -5335,14 +5369,21 @@ router.get(
       const orderId = req.params.id;
       const userId = req.user.id;
 
-      const order = await OrderManagementService.getOrderDetails(
-        userId,
-        orderId,
+      const order = await withRouteTimeout(
+        "Order details query",
+        OrderManagementService.getOrderDetails(userId, orderId),
+        18 * 1000,
       );
 
       res.json(order);
     } catch (error) {
       console.error("Get order details error:", error);
+      if (isQueryRetryableError(error) || error?.code === "ETIMEDOUT") {
+        return res.status(503).json({
+          error: "Order details are temporarily unavailable while the database finishes maintenance",
+        });
+      }
+
       res.status(500).json({ error: error.message });
     }
   },

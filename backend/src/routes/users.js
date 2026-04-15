@@ -25,6 +25,7 @@ const FAST_AUTH_QUERY_RETRY_OPTIONS = {
   timeoutMs: 3000,
 };
 const unsupportedPermissionColumns = new Set();
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
 const buildPermissionsPayload = (input = {}, { includeUpdatedAt = false } = {}) => {
   const normalized = normalizePermissions(input);
@@ -343,7 +344,10 @@ router.post(
   requirePermission("can_manage_users"),
   async (req, res) => {
     try {
-      const { email, password, name, role, permissions } = req.body;
+      const email = normalizeEmail(req.body?.email);
+      const password = String(req.body?.password || "");
+      const name = String(req.body?.name || "").trim();
+      const { role, permissions } = req.body;
 
       if (!email || !password || !name) {
         return res
@@ -355,8 +359,8 @@ router.post(
       const { data: existingUser } = await supabase
         .from("users")
         .select("id")
-        .eq("email", email)
-        .single();
+        .ilike("email", email)
+        .maybeSingle();
 
       if (existingUser) {
         return res.status(400).json({ error: "User already exists" });

@@ -21,6 +21,8 @@ const AUTH_SERVICE_UNAVAILABLE_ERROR =
 const SELF_REGISTRATION_DISABLED_ERROR =
   "Self-service registration is disabled. Ask an admin to create your account.";
 
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
 const resolveRegistrationPolicy = async () => {
   const allowSelfRegistration =
     String(process.env.ALLOW_SELF_REGISTRATION || "").trim().toLowerCase() ===
@@ -60,7 +62,7 @@ const signUserToken = (user) =>
 // Register
 router.post("/register", async (req, res) => {
   try {
-    const email = String(req.body?.email || "").trim();
+    const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || "");
     const name = String(req.body?.name || "").trim();
 
@@ -142,7 +144,7 @@ router.post("/register", async (req, res) => {
 // Login
 router.post("/login", async (req, res) => {
   try {
-    const email = String(req.body?.email || "").trim();
+    const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || "");
 
     if (!email || !password) {
@@ -155,7 +157,7 @@ router.post("/login", async (req, res) => {
       supabase
         .from("users")
         .select("id, email, name, password, role")
-        .eq("email", email)
+        .ilike("email", email)
         .limit(1)
         .maybeSingle(),
     );

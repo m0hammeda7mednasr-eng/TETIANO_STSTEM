@@ -118,13 +118,13 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const loadAuthState = useCallback(
-    async ({ silent = false } = {}) => {
+    async ({ silent = false, force = false } = {}) => {
       if (authRefreshInFlight.current) {
         return;
       }
 
       const now = Date.now();
-      if (now - lastAuthRefreshAt.current < MIN_AUTH_REFRESH_GAP_MS) {
+      if (!force && now - lastAuthRefreshAt.current < MIN_AUTH_REFRESH_GAP_MS) {
         return;
       }
 
@@ -252,7 +252,7 @@ export const AuthProvider = ({ children }) => {
         loading,
         logout,
         hasPermission,
-        refreshAuth: () => loadAuthState({ silent: true }),
+        refreshAuth: () => loadAuthState({ silent: true, force: true }),
       }}
     >
       {children}

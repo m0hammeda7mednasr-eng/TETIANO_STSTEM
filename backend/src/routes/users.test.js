@@ -79,6 +79,7 @@ jest.unstable_mockModule("../middleware/auth.js", () => ({
 
 jest.unstable_mockModule("../middleware/permissions.js", () => ({
   buildPermissionsForRole: jest.fn(() => ({})),
+  clearUserAccessContextCache: jest.fn(),
   requirePermission: jest.fn(() => (req, res, next) => next()),
   DEFAULT_PERMISSIONS: {},
   PERMISSION_KEYS: [],

@@ -70,18 +70,11 @@ export const authenticateToken = async (req, res, next) => {
       const isSafeMethod = ["GET", "HEAD", "OPTIONS"].includes(
         String(req.method || "").toUpperCase(),
       );
-      const shouldUseTokenRoleForSafeRead =
+      const canFallbackToTokenRole =
         isSafeMethod &&
         String(process.env.STRICT_SAFE_GET_AUTH || "")
           .trim()
           .toLowerCase() !== "true";
-
-      if (shouldUseTokenRoleForSafeRead) {
-        normalizedRole = tokenRole;
-        req.authFallback = {
-          source: "token-role",
-        };
-      } else {
       const roleRetryOptions = isSafeMethod
         ? { attempts: 1, timeoutMs: 2500 }
         : { attempts: 2, baseDelayMs: 150, timeoutMs: 5000 };
@@ -99,7 +92,7 @@ export const authenticateToken = async (req, res, next) => {
 
         normalizedRole = normalizeRole(dbRole);
       } catch (roleError) {
-        if (isSafeMethod && isTransientSupabaseError(roleError)) {
+        if (canFallbackToTokenRole && isTransientSupabaseError(roleError)) {
           normalizedRole = tokenRole;
           req.authFallback = {
             source: "token-role",
@@ -107,7 +100,6 @@ export const authenticateToken = async (req, res, next) => {
         } else {
           throw roleError;
         }
-      }
       }
     }
 

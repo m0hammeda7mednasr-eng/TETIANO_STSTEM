@@ -1,6 +1,9 @@
 import express from 'express';
 import { authenticateToken } from "../middleware/auth.js";
-import { requireAdminRole } from "../middleware/permissions.js";
+import {
+  clearUserAccessContextCache,
+  requireAdminRole,
+} from "../middleware/permissions.js";
 import { supabase } from '../supabaseClient.js';
 
 const router = express.Router();
@@ -45,6 +48,7 @@ router.put('/users/:userId/role', async (req, res) => {
       .select();
 
     if (error) throw error;
+    clearUserAccessContextCache(userId);
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -71,10 +75,12 @@ router.put('/users/:userId/permissions', async (req, res) => {
           .insert({ user_id: userId, ...permissions })
           .select();
         if (newError) throw newError;
+        clearUserAccessContextCache(userId);
         return res.json(newData);
       }
       throw error;
     }
+    clearUserAccessContextCache(userId);
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });

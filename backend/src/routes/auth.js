@@ -181,7 +181,9 @@ router.post("/login", async (req, res) => {
     const normalizedRole = normalizeRole(user.role || "user");
     const permissions = buildPermissionsForRole(
       normalizedRole,
-      normalizedRole === "admin" ? null : await getUserPermissions(user.id),
+      normalizedRole === "admin"
+        ? null
+        : await getUserPermissions(user.id, { useCache: false }),
     );
     primeUserAccessContext(user.id, {
       role: normalizedRole,

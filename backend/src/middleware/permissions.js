@@ -100,6 +100,9 @@ const getCachedUserAccessContext = (userId) => {
   return cachedEntry.value;
 };
 
+export const peekUserAccessContext = (userId) =>
+  getCachedUserAccessContext(userId);
+
 const rememberUserAccessContext = (userId, nextValue = {}) => {
   const cacheKey = getUserAccessCacheKey(userId);
   if (!cacheKey) {
@@ -123,7 +126,13 @@ const rememberUserAccessContext = (userId, nextValue = {}) => {
 export const primeUserAccessContext = (userId, nextValue = {}) =>
   rememberUserAccessContext(userId, nextValue);
 
-export const clearUserAccessContextCache = () => {
+export const clearUserAccessContextCache = (userId = null) => {
+  const cacheKey = getUserAccessCacheKey(userId);
+  if (cacheKey) {
+    userAccessCache.delete(cacheKey);
+    return;
+  }
+
   userAccessCache.clear();
 };
 
@@ -183,15 +192,17 @@ export const normalizeRole = (role) => {
 
 export const getUserRole = async (
   userId,
-  { retryOptions = undefined } = {},
+  { retryOptions = undefined, useCache = true } = {},
 ) => {
   if (!userId) {
     return null;
   }
 
-  const cachedContext = getCachedUserAccessContext(userId);
-  if (cachedContext?.role) {
-    return cachedContext.role;
+  if (useCache) {
+    const cachedContext = getCachedUserAccessContext(userId);
+    if (cachedContext?.role) {
+      return cachedContext.role;
+    }
   }
 
   const { data: user, error } = await withSupabaseRetry(
@@ -221,15 +232,17 @@ export const getUserRole = async (
 
 export const getUserPermissions = async (
   userId,
-  { retryOptions = undefined } = {},
+  { retryOptions = undefined, useCache = true } = {},
 ) => {
   if (!userId) {
     return { ...DEFAULT_PERMISSIONS };
   }
 
-  const cachedContext = getCachedUserAccessContext(userId);
-  if (cachedContext?.permissions) {
-    return cachedContext.permissions;
+  if (useCache) {
+    const cachedContext = getCachedUserAccessContext(userId);
+    if (cachedContext?.permissions) {
+      return cachedContext.permissions;
+    }
   }
 
   const { data: permissions, error } = await withSupabaseRetry(
@@ -251,6 +264,15 @@ export const getUserPermissions = async (
   const normalizedPermissions = normalizePermissions(permissions);
   rememberUserAccessContext(userId, { permissions: normalizedPermissions });
   return normalizedPermissions;
+};
+
+const getPermissionFallbackContext = (userId, role) => {
+  const normalizedRole = normalizeRole(role);
+  if (normalizedRole === "admin") {
+    return buildPermissionsForRole("admin");
+  }
+
+  return getCachedUserAccessContext(userId)?.permissions || null;
 };
 
 export const requireAdminRole = async (req, res, next) => {
@@ -307,10 +329,13 @@ export const requirePermission = (permissionName) => {
       }
 
       if (isSafeMethod && req.authFallback?.source === "token-role") {
-        const fallbackPermissions = buildPermissionsForRole(role || "user");
-        if (fallbackPermissions[permissionName]) {
+        const fallbackPermissions = getPermissionFallbackContext(
+          req.user?.id,
+          role || "user",
+        );
+        if (fallbackPermissions?.[permissionName]) {
           req.user.role = role || "user";
-          req.user.isAdmin = false;
+          req.user.isAdmin = normalizeRole(role) === "admin";
           req.user.permissions = fallbackPermissions;
           req.permissionFallback = {
             source: "token-role",
@@ -340,8 +365,11 @@ export const requirePermission = (permissionName) => {
     } catch (error) {
       console.error("Permission check error:", error);
       if (isSafeMethod && isTransientSupabaseError(error) && req.user?.role) {
-        const fallbackPermissions = buildPermissionsForRole(req.user.role);
-        if (fallbackPermissions[permissionName]) {
+        const fallbackPermissions = getPermissionFallbackContext(
+          req.user?.id,
+          req.user.role,
+        );
+        if (fallbackPermissions?.[permissionName]) {
           req.user.permissions = fallbackPermissions;
           req.permissionFallback = {
             source: "token-role",
@@ -388,13 +416,16 @@ export const requireAnyPermission = (permissionNames) => {
       }
 
       if (isSafeMethod && req.authFallback?.source === "token-role") {
-        const fallbackPermissions = buildPermissionsForRole(role || "user");
+        const fallbackPermissions = getPermissionFallbackContext(
+          req.user?.id,
+          role || "user",
+        );
         const hasAnyPermission = permissionNames.some(
-          (permissionName) => fallbackPermissions[permissionName],
+          (permissionName) => fallbackPermissions?.[permissionName],
         );
         if (hasAnyPermission) {
           req.user.role = role || "user";
-          req.user.isAdmin = false;
+          req.user.isAdmin = normalizeRole(role) === "admin";
           req.user.permissions = fallbackPermissions;
           req.permissionFallback = {
             source: "token-role",
@@ -427,9 +458,12 @@ export const requireAnyPermission = (permissionNames) => {
     } catch (error) {
       console.error("Permission check error:", error);
       if (isSafeMethod && isTransientSupabaseError(error) && req.user?.role) {
-        const fallbackPermissions = buildPermissionsForRole(req.user.role);
+        const fallbackPermissions = getPermissionFallbackContext(
+          req.user?.id,
+          req.user.role,
+        );
         const hasAnyPermission = permissionNames.some(
-          (permissionName) => fallbackPermissions[permissionName],
+          (permissionName) => fallbackPermissions?.[permissionName],
         );
         if (hasAnyPermission) {
           req.user.permissions = fallbackPermissions;

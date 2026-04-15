@@ -5,6 +5,12 @@
 -- 2. Warehouse scanner/edit implies barcode label printing.
 -- 3. Order edit implies order view.
 
+-- Repair live schema drift first so warehouse permissions can actually be saved.
+ALTER TABLE permissions
+  ADD COLUMN IF NOT EXISTS can_view_warehouse boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS can_edit_warehouse boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS can_print_barcode_labels boolean NOT NULL DEFAULT true;
+
 -- Scanner users must be able to open warehouse screens and print barcode labels.
 UPDATE permissions
 SET can_view_warehouse = true,

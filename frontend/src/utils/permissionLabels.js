@@ -93,9 +93,9 @@ const PERMISSION_COPY = {
       can_edit_suppliers:
         "Allows creating and editing suppliers plus recording deliveries and payments.",
       can_view_orders:
-        "Shows orders, missing orders, order details, and product images inside orders.",
+        "Shows orders, missing orders, order details, shipping issues list, and product images inside orders.",
       can_edit_orders:
-        "Allows changing order/payment status and fulfilling or restocking full orders or selected items.",
+        "Allows changing order/payment status, updating shipping issue follow-up and notes, and fulfilling or restocking full orders or selected items.",
       can_view_customers:
         "Shows the customer list, contact details, and linked orders.",
       can_edit_customers: "Allows updating customer data and related actions.",

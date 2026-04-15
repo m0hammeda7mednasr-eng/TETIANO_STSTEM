@@ -15,6 +15,7 @@ import Sidebar from "../components/Sidebar";
 import api, { shopifyAPI } from "../utils/api";
 import { buildCsvFilename, downloadCsvSections } from "../utils/csv";
 import { extractArray } from "../utils/response";
+import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
 import { useStore } from "../context/StoreContext";
 import {
@@ -274,8 +275,10 @@ function ShippingIssueNoteField({
 export default function ShippingIssues() {
   const navigate = useNavigate();
   const { currentStoreId } = useStore();
+  const { hasPermission } = useAuth();
   const { select, isRTL, formatDateTime, formatNumber, formatTime } =
     useLocale();
+  const canEditOrders = hasPermission("can_edit_orders");
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -659,7 +662,21 @@ export default function ShippingIssues() {
     }));
   };
 
+  const showEditPermissionMessage = useCallback(() => {
+    setError(
+      select(
+        "يمكنك عرض مشاكل الشحن فقط. لتعديل الحالة أو حفظ الملاحظات، فعّل صلاحية تعديل الطلبات.",
+        "You can view shipping issues only. Enable order edit permission to update status or save notes.",
+      ),
+    );
+  }, [select]);
+
   const updateNoteDraft = (order, field, value) => {
+    if (!canEditOrders) {
+      showEditPermissionMessage();
+      return;
+    }
+
     const orderId = String(order?.id || "");
     if (!orderId) {
       return;
@@ -865,6 +882,11 @@ export default function ShippingIssues() {
   };
 
   const handleIssueReasonChange = async (orderId, reason) => {
+    if (!canEditOrders) {
+      showEditPermissionMessage();
+      return;
+    }
+
     setUpdatingState(orderId, true);
     try {
       await api.post(`/shopify/orders/${orderId}/shipping-issue`, {
@@ -904,6 +926,11 @@ export default function ShippingIssues() {
   };
 
   const handleSaveIssueNotes = async (order) => {
+    if (!canEditOrders) {
+      showEditPermissionMessage();
+      return;
+    }
+
     const orderId = order.id;
     const reason = normalizeShippingIssueReason(order?.shipping_issue?.reason);
     const shippingCompanyNote = normalizeText(
@@ -995,6 +1022,11 @@ export default function ShippingIssues() {
   };
 
   const handleReturnToOrders = async (orderId) => {
+    if (!canEditOrders) {
+      showEditPermissionMessage();
+      return;
+    }
+
     setUpdatingState(orderId, true);
     try {
       await api.post(`/shopify/orders/${orderId}/shipping-issue`, {
@@ -1072,6 +1104,16 @@ export default function ShippingIssues() {
             <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
               <AlertCircle size={18} />
               {error}
+            </div>
+          ) : null}
+
+          {!canEditOrders ? (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800">
+              <AlertCircle size={18} />
+              {select(
+                "هذه الصفحة متاحة لك للعرض فقط. تغيير حالة المشكلة أو حفظ الملاحظات يحتاج صلاحية تعديل الطلبات.",
+                "This page is view-only for your account. Changing issue status or saving notes requires order edit permission.",
+              )}
             </div>
           ) : null}
 
@@ -1365,7 +1407,7 @@ export default function ShippingIssues() {
                                   event.target.value,
                                 )
                               }
-                              disabled={isUpdating}
+                              disabled={isUpdating || !canEditOrders}
                               className="app-input w-full px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                             >
                               {reasonOptions.map((option) => (
@@ -1399,7 +1441,7 @@ export default function ShippingIssues() {
                                 event.target.value,
                               )
                             }
-                            disabled={isUpdating}
+                            disabled={isUpdating || !canEditOrders}
                             isRTL={isRTL}
                           />
 
@@ -1424,7 +1466,7 @@ export default function ShippingIssues() {
                                 event.target.value,
                               )
                             }
-                            disabled={isUpdating}
+                            disabled={isUpdating || !canEditOrders}
                             isRTL={isRTL}
                           />
 
@@ -1472,7 +1514,7 @@ export default function ShippingIssues() {
                               <button
                                 type="button"
                                 onClick={() => handleSaveIssueNotes(order)}
-                                disabled={!hasUnsavedNotes || isUpdating}
+                                disabled={!canEditOrders || !hasUnsavedNotes || isUpdating}
                                 className="inline-flex items-center gap-1 rounded-lg bg-sky-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 {select(
@@ -1495,7 +1537,7 @@ export default function ShippingIssues() {
                               <button
                                 type="button"
                                 onClick={() => handleReturnToOrders(order.id)}
-                                disabled={isUpdating}
+                                disabled={!canEditOrders || isUpdating}
                                 className="inline-flex items-center gap-1 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 <Undo2 size={15} />

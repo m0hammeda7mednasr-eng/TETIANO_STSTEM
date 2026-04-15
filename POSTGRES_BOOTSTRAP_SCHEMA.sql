@@ -71,6 +71,15 @@ create table if not exists public.permissions (
   updated_at timestamptz not null default now()
 );
 
+comment on column public.permissions.can_view_warehouse is
+  'Allows opening warehouse stock and scan history views.';
+comment on column public.permissions.can_edit_warehouse is
+  'Allows using the warehouse scanner, changing stock movements, and syncing warehouse stock to Shopify.';
+comment on column public.permissions.can_view_orders is
+  'Allows opening orders, missing orders, order details, and shipping issues list views.';
+comment on column public.permissions.can_edit_orders is
+  'Allows changing order follow-up state, including shipping issue updates and notes.';
+
 create table if not exists public.stores (
   id uuid primary key default gen_random_uuid(),
   name text not null,

@@ -314,13 +314,99 @@ export const requirePermission = (permissionName) => {
       next();
     } catch (error) {
       console.error("Permission check error:", error);
-      if (
-        isSafeMethod &&
-        isTransientSupabaseError(error) &&
-        req.user?.role
-      ) {
+      if (isSafeMethod && isTransientSupabaseError(error) && req.user?.role) {
         const fallbackPermissions = buildPermissionsForRole(req.user.role);
         if (fallbackPermissions[permissionName]) {
+          req.user.permissions = fallbackPermissions;
+          req.permissionFallback = {
+            source: "token-role",
+          };
+          return next();
+        }
+      }
+
+      res.status(isTransientSupabaseError(error) ? 503 : 500).json({
+        error: isTransientSupabaseError(error)
+          ? "Permission validation is temporarily unavailable"
+          : "Failed to validate permissions",
+      });
+    }
+  };
+};
+
+export const requireAnyPermission = (permissionNames) => {
+  return async (req, res, next) => {
+    try {
+      const isSafeMethod = ["GET", "HEAD", "OPTIONS"].includes(
+        String(req.method || "").toUpperCase(),
+      );
+      const retryOptions = isSafeMethod
+        ? { attempts: 1, timeoutMs: 2500 }
+        : { attempts: 2, baseDelayMs: 150, timeoutMs: 5000 };
+      const role = normalizeRole(
+        req.user?.role ||
+          (await getUserRole(req.user?.id, {
+            retryOptions,
+          })),
+      );
+
+      if (role === "admin") {
+        const adminPermissions = buildPermissionsForRole("admin");
+        req.user.role = "admin";
+        req.user.isAdmin = true;
+        req.user.permissions = adminPermissions;
+        primeUserAccessContext(req.user?.id, {
+          role: "admin",
+          permissions: adminPermissions,
+        });
+        return next();
+      }
+
+      if (isSafeMethod && req.authFallback?.source === "token-role") {
+        const fallbackPermissions = buildPermissionsForRole(role || "user");
+        const hasAnyPermission = permissionNames.some(
+          (permissionName) => fallbackPermissions[permissionName],
+        );
+        if (hasAnyPermission) {
+          req.user.role = role || "user";
+          req.user.isAdmin = false;
+          req.user.permissions = fallbackPermissions;
+          req.permissionFallback = {
+            source: "token-role",
+          };
+          return next();
+        }
+      }
+
+      const permissions = await getUserPermissions(req.user?.id, {
+        retryOptions,
+      });
+
+      const hasAnyPermission = permissionNames.some(
+        (permissionName) => permissions[permissionName],
+      );
+      if (!hasAnyPermission) {
+        return res.status(403).json({
+          error: "Access denied: insufficient permissions",
+        });
+      }
+
+      req.user.role = role || "user";
+      req.user.isAdmin = false;
+      req.user.permissions = permissions;
+      primeUserAccessContext(req.user?.id, {
+        role: role || "user",
+        permissions,
+      });
+      next();
+    } catch (error) {
+      console.error("Permission check error:", error);
+      if (isSafeMethod && isTransientSupabaseError(error) && req.user?.role) {
+        const fallbackPermissions = buildPermissionsForRole(req.user.role);
+        const hasAnyPermission = permissionNames.some(
+          (permissionName) => fallbackPermissions[permissionName],
+        );
+        if (hasAnyPermission) {
           req.user.permissions = fallbackPermissions;
           req.permissionFallback = {
             source: "token-role",

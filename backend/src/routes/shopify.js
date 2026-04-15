@@ -21,6 +21,7 @@ import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 import {
   requireAdminRole,
   requirePermission,
+  requireAnyPermission,
 } from "../middleware/permissions.js";
 import { authenticateToken } from "../middleware/auth.js";
 import { supabase as db } from "../supabaseClient.js";
@@ -698,11 +699,7 @@ const toBooleanQueryFlag = (value, fallback = false) => {
   return fallback;
 };
 
-const withRouteTimeout = async (
-  label,
-  operation,
-  timeoutMs = 20 * 1000,
-) => {
+const withRouteTimeout = async (label, operation, timeoutMs = 20 * 1000) => {
   let timeout = null;
   try {
     return await Promise.race([
@@ -808,7 +805,11 @@ const fetchScopedOrdersByIds = async ({
   orderIds = [],
 } = {}) => {
   const normalizedIds = Array.from(
-    new Set((orderIds || []).map((value) => String(value || "").trim()).filter(Boolean)),
+    new Set(
+      (orderIds || [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
   );
 
   if (normalizedIds.length === 0) {
@@ -968,7 +969,9 @@ const clearOrderDerivedCaches = () => {
   missingOrdersInFlight.clear();
 };
 
-const invalidateShopifyReadCaches = (tableNames = ["products", "orders", "customers"]) => {
+const invalidateShopifyReadCaches = (
+  tableNames = ["products", "orders", "customers"],
+) => {
   clearScopedEntityPageCache(tableNames);
 
   if (tableNames.includes("products")) {
@@ -981,7 +984,11 @@ const invalidateShopifyReadCaches = (tableNames = ["products", "orders", "custom
 };
 
 router.use((req, res, next) => {
-  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
+  if (
+    req.method === "GET" ||
+    req.method === "HEAD" ||
+    req.method === "OPTIONS"
+  ) {
     return next();
   }
 
@@ -1024,7 +1031,10 @@ const loadScopedOrdersFastPath = async ({
         .order(orderField, { ascending: false })
         .range(
           offset,
-          Math.min(offset + SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE - 1, safeMaxOrders - 1),
+          Math.min(
+            offset + SHIPPING_ISSUE_FAST_PATH_BATCH_SIZE - 1,
+            safeMaxOrders - 1,
+          ),
         );
 
       if (requireNotNullField) {
@@ -1113,129 +1123,127 @@ const loadShippingIssueOrdersForRequest = async (req) => {
   }
 
   const requestPromise = (async () => {
-  let fastPathMatches = [];
-  try {
-    const fastPathResults = await Promise.allSettled([
-      loadScopedOrdersFastPath({
-        req,
-        requestedStoreId,
-        isAdmin,
-        accessibleStoreIds,
-        selectedColumnsList: ORDER_LIST_SELECTS,
-        orderField: "updated_at",
-        maxOrders: SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS,
-      }),
-      loadScopedOrdersFastPath({
-        req,
-        requestedStoreId,
-        isAdmin,
-        accessibleStoreIds,
-        selectedColumnsList: SHIPPING_ISSUE_ORDER_SELECTS,
-        orderField: "local_updated_at",
-        maxOrders: SHIPPING_ISSUE_LOCAL_FAST_PATH_MAX_ORDERS,
-        requireNotNullField: "local_updated_at",
-      }),
-    ]);
+    let fastPathMatches = [];
+    try {
+      const fastPathResults = await Promise.allSettled([
+        loadScopedOrdersFastPath({
+          req,
+          requestedStoreId,
+          isAdmin,
+          accessibleStoreIds,
+          selectedColumnsList: ORDER_LIST_SELECTS,
+          orderField: "updated_at",
+          maxOrders: SHIPPING_ISSUE_FAST_PATH_MAX_ORDERS,
+        }),
+        loadScopedOrdersFastPath({
+          req,
+          requestedStoreId,
+          isAdmin,
+          accessibleStoreIds,
+          selectedColumnsList: SHIPPING_ISSUE_ORDER_SELECTS,
+          orderField: "local_updated_at",
+          maxOrders: SHIPPING_ISSUE_LOCAL_FAST_PATH_MAX_ORDERS,
+          requireNotNullField: "local_updated_at",
+        }),
+      ]);
 
-    const fastPathRows = [];
-    for (const result of fastPathResults) {
-      if (result.status === "fulfilled") {
-        fastPathRows.push(...(result.value || []));
-        continue;
+      const fastPathRows = [];
+      for (const result of fastPathResults) {
+        if (result.status === "fulfilled") {
+          fastPathRows.push(...(result.value || []));
+          continue;
+        }
+
+        if (!isQueryRetryableError(result.reason)) {
+          throw result.reason;
+        }
       }
 
-      if (!isQueryRetryableError(result.reason)) {
-        throw result.reason;
+      fastPathMatches = normalizeShippingIssueRows(fastPathRows);
+    } catch (fastPathError) {
+      if (!isQueryRetryableError(fastPathError)) {
+        throw fastPathError;
       }
     }
 
-    fastPathMatches = normalizeShippingIssueRows(fastPathRows);
-  } catch (fastPathError) {
-    if (!isQueryRetryableError(fastPathError)) {
-      throw fastPathError;
-    }
-  }
+    if (!toBooleanQueryFlag(req.query?.recover_history, false)) {
+      writeShippingIssueOrdersCache(cacheKey, {
+        rows: fastPathMatches,
+        repairedCount: 0,
+      });
 
-  if (!toBooleanQueryFlag(req.query?.recover_history, false)) {
+      return {
+        rows: fastPathMatches,
+        repairedCount: 0,
+        fastPathOnly: true,
+      };
+    }
+
+    const latestOperationByOrderId = new Map();
+
+    for (let offset = 0; ; offset += SHIPPING_ISSUE_OPERATION_BATCH_SIZE) {
+      const { data, error } = await db
+        .from("sync_operations")
+        .select("entity_id, created_at, request_data")
+        .eq("operation_type", "order_shipping_issue_update")
+        .order("created_at", { ascending: false })
+        .range(offset, offset + SHIPPING_ISSUE_OPERATION_BATCH_SIZE - 1);
+
+      if (error) {
+        throw error;
+      }
+
+      const batch = Array.isArray(data) ? data : [];
+      for (const row of batch) {
+        const entityId = String(row?.entity_id || "").trim();
+        if (!entityId || latestOperationByOrderId.has(entityId)) {
+          continue;
+        }
+
+        latestOperationByOrderId.set(entityId, row);
+      }
+
+      if (batch.length < SHIPPING_ISSUE_OPERATION_BATCH_SIZE) {
+        break;
+      }
+    }
+
+    const activeHistoryOrderIds = Array.from(latestOperationByOrderId.entries())
+      .filter(([, operation]) =>
+        Boolean(operation?.request_data?.new_shipping_issue),
+      )
+      .map(([orderId]) => orderId);
+    const scopedOrders = await fetchScopedOrdersByIds({
+      req,
+      requestedStoreId,
+      isAdmin,
+      accessibleStoreIds,
+      orderIds: activeHistoryOrderIds,
+    });
+
+    const recoveryPlan = buildShippingIssueRecoveryPlan(
+      scopedOrders,
+      latestOperationByOrderId,
+    );
+
+    if (recoveryPlan.length > 0) {
+      await applyShippingIssueRecoveryPlan(db, recoveryPlan);
+    }
+
+    const historyMatches = normalizeShippingIssueRows(
+      applyShippingIssueRecoveryPlanToRows(scopedOrders, recoveryPlan),
+    );
+    const rows = dedupeRowsById([...historyMatches, ...fastPathMatches]);
+
     writeShippingIssueOrdersCache(cacheKey, {
-      rows: fastPathMatches,
-      repairedCount: 0,
+      rows,
+      repairedCount: recoveryPlan.length,
     });
 
     return {
-      rows: fastPathMatches,
-      repairedCount: 0,
-      fastPathOnly: true,
+      rows,
+      repairedCount: recoveryPlan.length,
     };
-  }
-
-  const latestOperationByOrderId = new Map();
-
-  for (
-    let offset = 0;
-    ;
-    offset += SHIPPING_ISSUE_OPERATION_BATCH_SIZE
-  ) {
-    const { data, error } = await db
-      .from("sync_operations")
-      .select("entity_id, created_at, request_data")
-      .eq("operation_type", "order_shipping_issue_update")
-      .order("created_at", { ascending: false })
-      .range(offset, offset + SHIPPING_ISSUE_OPERATION_BATCH_SIZE - 1);
-
-    if (error) {
-      throw error;
-    }
-
-    const batch = Array.isArray(data) ? data : [];
-    for (const row of batch) {
-      const entityId = String(row?.entity_id || "").trim();
-      if (!entityId || latestOperationByOrderId.has(entityId)) {
-        continue;
-      }
-
-      latestOperationByOrderId.set(entityId, row);
-    }
-
-    if (batch.length < SHIPPING_ISSUE_OPERATION_BATCH_SIZE) {
-      break;
-    }
-  }
-
-  const activeHistoryOrderIds = Array.from(latestOperationByOrderId.entries())
-    .filter(([, operation]) => Boolean(operation?.request_data?.new_shipping_issue))
-    .map(([orderId]) => orderId);
-  const scopedOrders = await fetchScopedOrdersByIds({
-    req,
-    requestedStoreId,
-    isAdmin,
-    accessibleStoreIds,
-    orderIds: activeHistoryOrderIds,
-  });
-
-  const recoveryPlan = buildShippingIssueRecoveryPlan(
-    scopedOrders,
-    latestOperationByOrderId,
-  );
-
-  if (recoveryPlan.length > 0) {
-    await applyShippingIssueRecoveryPlan(db, recoveryPlan);
-  }
-
-  const historyMatches = normalizeShippingIssueRows(
-    applyShippingIssueRecoveryPlanToRows(scopedOrders, recoveryPlan),
-  );
-  const rows = dedupeRowsById([...historyMatches, ...fastPathMatches]);
-
-  writeShippingIssueOrdersCache(cacheKey, {
-    rows,
-    repairedCount: recoveryPlan.length,
-  });
-
-  return {
-    rows,
-    repairedCount: recoveryPlan.length,
-  };
   })();
 
   shippingIssueOrdersInFlight.set(cacheKey, requestPromise);
@@ -1609,7 +1617,11 @@ const executeScopedMissingOrdersSourceQuery = async ({
 } = {}) => {
   const rows = [];
 
-  for (let offset = 0; offset < MISSING_ORDER_SOURCE_MAX_ROWS; offset += MISSING_ORDER_SOURCE_BATCH_SIZE) {
+  for (
+    let offset = 0;
+    offset < MISSING_ORDER_SOURCE_MAX_ROWS;
+    offset += MISSING_ORDER_SOURCE_BATCH_SIZE
+  ) {
     const rangeEnd = Math.min(
       offset + MISSING_ORDER_SOURCE_BATCH_SIZE - 1,
       MISSING_ORDER_SOURCE_MAX_ROWS - 1,
@@ -2067,18 +2079,16 @@ const grantUserStoreAccess = async ({ supabase, userId, storeId }) => {
     return { skipped: true };
   }
 
-  const result = await supabase
-    .from("user_stores")
-    .upsert(
-      {
-        user_id: userId,
-        store_id: storeId,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: "user_id,store_id",
-      },
-    );
+  const result = await supabase.from("user_stores").upsert(
+    {
+      user_id: userId,
+      store_id: storeId,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      onConflict: "user_id,store_id",
+    },
+  );
 
   if (result.error && !isSchemaCompatibilityError(result.error)) {
     throw result.error;
@@ -2210,7 +2220,8 @@ const getProductTotalInventory = (product) => {
 const getProductTotalWarehouseInventory = (product) => {
   const variants = getProductVariantRows(product);
   if (variants.length === 0) {
-    return extractWarehouseInventorySnapshot(parseJsonField(product?.data)).quantity;
+    return extractWarehouseInventorySnapshot(parseJsonField(product?.data))
+      .quantity;
   }
 
   return variants.reduce(
@@ -2301,7 +2312,9 @@ const getSupplierLinksForVariant = (product = {}, variant = {}) => {
 const attachSupplierLinksToProducts = async (products = []) => {
   const rows = Array.isArray(products) ? products : [];
   const productIds = Array.from(
-    new Set(rows.map((product) => String(product?.id || "").trim()).filter(Boolean)),
+    new Set(
+      rows.map((product) => String(product?.id || "").trim()).filter(Boolean),
+    ),
   );
 
   if (productIds.length === 0) {
@@ -2355,7 +2368,10 @@ const attachSupplierLinksToProducts = async (products = []) => {
       }
 
       suppliersById = new Map(
-        (suppliers || []).map((supplier) => [String(supplier?.id || ""), supplier]),
+        (suppliers || []).map((supplier) => [
+          String(supplier?.id || ""),
+          supplier,
+        ]),
       );
     }
 
@@ -2366,7 +2382,8 @@ const attachSupplierLinksToProducts = async (products = []) => {
         continue;
       }
 
-      const supplier = suppliersById.get(String(link?.supplier_id || "")) || null;
+      const supplier =
+        suppliersById.get(String(link?.supplier_id || "")) || null;
       const nextLink = normalizeSupplierLinkRow(link, supplier);
       const currentLinks = linksByProductId.get(productId) || [];
       currentLinks.push(nextLink);
@@ -3289,7 +3306,11 @@ const buildLiveShopifyOrderDetails = (order) => {
   };
 };
 
-const getLiveShopifyOrderDetails = async ({ req, orderId, requestedStoreId }) => {
+const getLiveShopifyOrderDetails = async ({
+  req,
+  orderId,
+  requestedStoreId,
+}) => {
   const tokenData = getEmergencyShopifyToken({
     userId: req.user?.id,
     requestedStoreId,
@@ -3528,8 +3549,8 @@ const applyOrdersQueryFilters = (
       .trim();
     filtered = filtered.filter((order) => {
       const shippingIssue =
-        extractOrderLocalMetadata(parseJsonField(order?.data))?.shipping_issue ||
-        null;
+        extractOrderLocalMetadata(parseJsonField(order?.data))
+          ?.shipping_issue || null;
 
       if (shippingIssueFilter === "active") {
         return Boolean(shippingIssue);
@@ -3549,8 +3570,8 @@ const applyOrdersQueryFilters = (
       .trim();
     filtered = filtered.filter((order) => {
       const shippingIssue =
-        extractOrderLocalMetadata(parseJsonField(order?.data))?.shipping_issue ||
-        null;
+        extractOrderLocalMetadata(parseJsonField(order?.data))
+          ?.shipping_issue || null;
       return shippingIssue?.reason === shippingIssueReason;
     });
   }
@@ -3844,8 +3865,13 @@ const loadLatestOrderActionTimestampsByKey = async (orders = []) => {
   const actionTimestampsByKey = new Map();
 
   for (const order of rows) {
-    const latestLegacyActionTimestamp = getLatestLegacyOrderActionTimestamp(order);
-    setLatestActionTimestamp(actionTimestampsByKey, order?.id, latestLegacyActionTimestamp);
+    const latestLegacyActionTimestamp =
+      getLatestLegacyOrderActionTimestamp(order);
+    setLatestActionTimestamp(
+      actionTimestampsByKey,
+      order?.id,
+      latestLegacyActionTimestamp,
+    );
     setLatestActionTimestamp(
       actionTimestampsByKey,
       order?.shopify_id,
@@ -3924,7 +3950,8 @@ const getMissingOrdersForRows = async (rows = []) => {
     ),
   );
 
-  const warehouseRowsByStoreId = await loadWarehouseAvailabilityByStoreIds(storeIds);
+  const warehouseRowsByStoreId =
+    await loadWarehouseAvailabilityByStoreIds(storeIds);
   const orderActionTimestampsByKey =
     await loadLatestOrderActionTimestampsByKey(rawRows);
 
@@ -3979,18 +4006,18 @@ const getMissingOrdersForRequest = async (req) => {
   }
 
   const requestPromise = (async () => {
-  const scopedRowsResult = await loadMissingOrdersSourceRows(req);
-  if (scopedRowsResult?.error) {
-    throw scopedRowsResult.error;
-  }
+    const scopedRowsResult = await loadMissingOrdersSourceRows(req);
+    if (scopedRowsResult?.error) {
+      throw scopedRowsResult.error;
+    }
 
-  const orders = await getMissingOrdersForRows(scopedRowsResult?.data || []);
-  writeTimedRowsCache(missingOrdersCache, cacheKey, orders);
+    const orders = await getMissingOrdersForRows(scopedRowsResult?.data || []);
+    writeTimedRowsCache(missingOrdersCache, cacheKey, orders);
 
-  return {
-    orders,
-    cacheHit: false,
-  };
+    return {
+      orders,
+      cacheHit: false,
+    };
   })();
 
   missingOrdersInFlight.set(cacheKey, requestPromise);
@@ -5171,7 +5198,7 @@ router.get(
 router.get(
   "/orders/shipping-issues",
   verifyToken,
-  requirePermission("can_view_orders"),
+  requireAnyPermission(["can_view_orders", "can_edit_orders"]),
   async (req, res) => {
     try {
       const pagination = getListPagination(
@@ -5179,7 +5206,9 @@ router.get(
         DEFAULT_LIST_LIMIT,
         ORDER_LIST_PAGE_LIMIT,
       );
-      const reasonFilter = String(req.query.reason || req.query.shipping_issue_reason || "")
+      const reasonFilter = String(
+        req.query.reason || req.query.shipping_issue_reason || "",
+      )
         .trim()
         .toLowerCase();
 
@@ -5419,7 +5448,10 @@ router.get(
         data = scopedPageResult?.data || [];
         error = scopedPageResult?.error || null;
         if (scopedPageResult?.cacheStatus) {
-          res.setHeader("X-Tetiano-Orders-Db-Cache", scopedPageResult.cacheStatus);
+          res.setHeader(
+            "X-Tetiano-Orders-Db-Cache",
+            scopedPageResult.cacheStatus,
+          );
         }
       } catch (queryError) {
         error = queryError;
@@ -5444,13 +5476,9 @@ router.get(
               }
               res.setHeader("X-Orders-Fallback", "shopify_live");
               return res.json(
-                buildSlicedPaginatedCollection(
-                  liveFallback.rows,
-                  pagination,
-                  {
-                    meta: liveFallback.meta,
-                  },
-                ),
+                buildSlicedPaginatedCollection(liveFallback.rows, pagination, {
+                  meta: liveFallback.meta,
+                }),
               );
             }
           } catch (liveFallbackError) {
@@ -5461,7 +5489,8 @@ router.get(
           }
 
           return res.status(503).json({
-            error: "Orders are temporarily unavailable while the database finishes maintenance",
+            error:
+              "Orders are temporarily unavailable while the database finishes maintenance",
           });
         }
 
@@ -6091,7 +6120,8 @@ router.get(
         }
 
         return res.status(503).json({
-          error: "Order details are temporarily unavailable while the database finishes maintenance",
+          error:
+            "Order details are temporarily unavailable while the database finishes maintenance",
         });
       }
 

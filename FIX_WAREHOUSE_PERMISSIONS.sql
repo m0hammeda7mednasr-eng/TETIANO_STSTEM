@@ -1,8 +1,9 @@
--- Fix linked permissions for warehouse/scanner, barcode labels, and orders.
--- This keeps existing users aligned with the permission dependencies used by the app:
--- 1. Editing warehouse/scanner implies viewing warehouse.
--- 2. Editing warehouse/scanner implies barcode label printing.
--- 3. Editing orders implies viewing orders.
+-- Fix direct permission dependencies only.
+-- This script avoids granting broad extra access and only repairs the links
+-- that are guaranteed by the app:
+-- 1. Warehouse scanner/edit implies warehouse view.
+-- 2. Warehouse scanner/edit implies barcode label printing.
+-- 3. Order edit implies order view.
 
 -- Scanner users must be able to open warehouse screens and print barcode labels.
 UPDATE permissions
@@ -15,26 +16,6 @@ WHERE can_edit_warehouse = true
     OR can_print_barcode_labels = false
   );
 
--- Product editors should still receive warehouse access on legacy rows.
-UPDATE permissions
-SET can_edit_warehouse = true,
-    can_view_warehouse = true,
-    can_print_barcode_labels = true,
-    updated_at = NOW()
-WHERE can_edit_products = true
-  AND (
-    can_edit_warehouse = false
-    OR can_view_warehouse = false
-    OR can_print_barcode_labels = false
-  );
-
--- Product viewers should still receive warehouse view access on legacy rows.
-UPDATE permissions
-SET can_view_warehouse = true,
-    updated_at = NOW()
-WHERE can_view_products = true
-  AND can_view_warehouse = false;
-
 -- Order editors must also be able to open orders, details, and shipping issue screens.
 UPDATE permissions
 SET can_view_orders = true,
@@ -46,8 +27,6 @@ WHERE can_edit_orders = true
 SELECT
     u.name,
     u.email,
-    p.can_view_products,
-    p.can_edit_products,
     p.can_view_warehouse,
     p.can_edit_warehouse,
     p.can_print_barcode_labels,

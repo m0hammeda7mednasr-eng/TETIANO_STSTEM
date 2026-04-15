@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import api, { getErrorMessage } from "../utils/api";
 import Sidebar from "../components/Sidebar";
+import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../context/LocaleContext";
 import {
   getPermissionDescription,
@@ -46,6 +47,7 @@ const formatStatusLabel = (status, locale) => {
 
 export default function Users() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { user, refreshAuth } = useAuth();
   const { locale, select, formatDate, formatNumber } = useLocale();
   const [users, setUsers] = useState([]);
   const [accessRequests, setAccessRequests] = useState([]);
@@ -206,6 +208,13 @@ export default function Users() {
         role: editRole,
         permissions,
       });
+      if (
+        selectedUser?.id &&
+        user?.id &&
+        String(selectedUser.id) === String(user.id)
+      ) {
+        await refreshAuth();
+      }
       setMessage({
         type: "success",
         text: select("تم تحديث المستخدم بنجاح", "User updated successfully"),

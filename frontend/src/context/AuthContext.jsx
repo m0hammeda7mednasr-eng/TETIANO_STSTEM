@@ -7,6 +7,10 @@ import React, {
   useRef,
 } from "react";
 import api from "../utils/api";
+import {
+  DEFAULT_CLIENT_PERMISSIONS,
+  normalizeClientPermissions,
+} from "../utils/permissionState";
 
 const AuthContext = createContext(null);
 const AUTH_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
@@ -14,31 +18,6 @@ const MIN_AUTH_REFRESH_GAP_MS = 5000;
 const STORE_ID_UPDATED_EVENT = "tetiano:store-id-updated";
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const DEFAULT_CLIENT_PERMISSIONS = {
-  can_view_dashboard: true,
-  can_view_products: true,
-  can_edit_products: false,
-  can_view_warehouse: true,
-  can_edit_warehouse: false,
-  can_view_suppliers: true,
-  can_edit_suppliers: false,
-  can_view_orders: true,
-  can_edit_orders: false,
-  can_view_customers: true,
-  can_edit_customers: false,
-  can_manage_users: false,
-  can_manage_settings: false,
-  can_view_profits: false,
-  can_manage_tasks: false,
-  can_view_all_reports: false,
-  can_view_activity_log: false,
-  can_print_barcode_labels: true,
-};
-
-const CLIENT_PERMISSION_FALLBACK_KEYS = {
-  can_view_warehouse: ["can_view_products"],
-  can_edit_warehouse: ["can_edit_products"],
-};
 
 const readJsonFromStorage = (key) => {
   try {
@@ -88,24 +67,6 @@ const syncCurrentStoreId = (stores = []) => {
   emitStoreIdUpdated();
   return nextStoreId;
 };
-
-const normalizeClientPermissions = (rawPermissions = null) =>
-  Object.keys(DEFAULT_CLIENT_PERMISSIONS).reduce((acc, key) => {
-    if (Object.prototype.hasOwnProperty.call(rawPermissions || {}, key)) {
-      acc[key] = Boolean(rawPermissions[key]);
-      return acc;
-    }
-
-    const fallbackKey = (CLIENT_PERMISSION_FALLBACK_KEYS[key] || []).find(
-      (candidateKey) =>
-        Object.prototype.hasOwnProperty.call(rawPermissions || {}, candidateKey),
-    );
-
-    acc[key] = fallbackKey
-      ? Boolean(rawPermissions[fallbackKey])
-      : DEFAULT_CLIENT_PERMISSIONS[key];
-    return acc;
-  }, {});
 
 const buildCachedPermissions = (cachedUser, cachedPermissions) => {
   if (cachedUser?.role === "admin") {

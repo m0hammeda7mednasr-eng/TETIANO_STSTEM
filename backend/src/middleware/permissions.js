@@ -51,6 +51,31 @@ const PERMISSION_FALLBACK_KEYS = {
   can_edit_warehouse: ["can_edit_products"],
 };
 
+const applyPermissionDependencies = (permissions = {}) => {
+  const normalized = {
+    ...permissions,
+  };
+
+  if (normalized.can_edit_orders) {
+    normalized.can_view_orders = true;
+  }
+
+  if (normalized.can_edit_warehouse) {
+    normalized.can_view_warehouse = true;
+    normalized.can_print_barcode_labels = true;
+  }
+
+  if (!normalized.can_view_orders) {
+    normalized.can_edit_orders = false;
+  }
+
+  if (!normalized.can_view_warehouse) {
+    normalized.can_edit_warehouse = false;
+  }
+
+  return normalized;
+};
+
 const USER_ACCESS_CACHE_TTL_MS = 60 * 1000;
 const userAccessCache = new Map();
 
@@ -106,7 +131,7 @@ export const normalizePermissions = (permissionsRow = null) => {
   const normalized = { ...DEFAULT_PERMISSIONS };
 
   if (!permissionsRow) {
-    return normalized;
+    return applyPermissionDependencies(normalized);
   }
 
   for (const key of PERMISSION_KEYS) {
@@ -125,7 +150,7 @@ export const normalizePermissions = (permissionsRow = null) => {
     }
   }
 
-  return normalized;
+  return applyPermissionDependencies(normalized);
 };
 
 export const buildPermissionsForRole = (role, permissionsRow = null) => {

@@ -128,7 +128,7 @@ const buildSharedNav = (t, select) => [
         icon: Printer,
         label: select("الباركود والطباعة", "Barcode Labels"),
         path: "/barcode-labels",
-        permission: "can_view_products",
+        permission: "can_print_barcode_labels",
       },
       {
         icon: Server,

@@ -113,6 +113,7 @@ export default function ProductDetails() {
   const { isAdmin, hasPermission } = useAuth();
   const { select, currencyLabel } = useLocale();
   const canEditProducts = hasPermission("can_edit_products");
+  const canPrintBarcodeLabels = hasPermission("can_print_barcode_labels");
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -540,6 +541,17 @@ export default function ProductDetails() {
 
   const openBarcodeModal = useCallback(
     (targetKey = "") => {
+      if (!canPrintBarcodeLabels) {
+        showNotification(
+          select(
+            "صلاحية طباعة الباركود غير مفعلة لهذا الحساب.",
+            "Barcode label printing is not enabled for this account.",
+          ),
+          "error",
+        );
+        return;
+      }
+
       if (!hasPrintableBarcodeTarget) {
         showNotification(
           select(
@@ -554,7 +566,7 @@ export default function ProductDetails() {
       setBarcodeModalTargetKey(targetKey);
       setIsBarcodeModalOpen(true);
     },
-    [hasPrintableBarcodeTarget, select, showNotification],
+    [canPrintBarcodeLabels, hasPrintableBarcodeTarget, select, showNotification],
   );
 
   const toggleLowStockAlerts = useCallback(async () => {
@@ -786,7 +798,7 @@ export default function ProductDetails() {
               </div>
             </div>
             <div className="flex gap-2">
-              {hasPrintableBarcodeTarget && (
+              {canPrintBarcodeLabels && hasPrintableBarcodeTarget && (
                 <button
                   onClick={() => openBarcodeModal(barcodeTargets[0]?.key || "")}
                   className="app-button-secondary flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-slate-700"
@@ -1011,7 +1023,8 @@ export default function ProductDetails() {
                                   فيه فرق بين Shopify والمخزن لهذا الـ Variant.
                                 </p>
                               ) : null}
-                              {(variant.barcode || displayedVariantSku) && (
+                              {canPrintBarcodeLabels &&
+                              (variant.barcode || displayedVariantSku) && (
                                 <button
                                   type="button"
                                   onClick={() =>

@@ -142,6 +142,7 @@ export default function Products() {
   const { isAdmin, hasPermission } = useAuth();
   const { select } = useLocale();
   const canEditProducts = hasPermission("can_edit_products");
+  const canPrintBarcodeLabels = hasPermission("can_print_barcode_labels");
   const cacheKey = useMemo(() => buildProductsCacheKey(), []);
   const initialCachedSnapshot = useMemo(() => {
     const rows = peekCachedProducts(cacheKey);
@@ -681,6 +682,17 @@ export default function Products() {
 
   const openBarcodeLabelModal = useCallback(
     (variant) => {
+      if (!canPrintBarcodeLabels) {
+        showNotification(
+          select(
+            "صلاحية طباعة الباركود غير مفعلة لهذا الحساب.",
+            "Barcode label printing is not enabled for this account.",
+          ),
+          "error",
+        );
+        return;
+      }
+
       const target = {
         key: String(variant?.key || variant?.variant_id || variant?.id || ""),
         title: String(variant?.product_title || "").trim(),
@@ -705,7 +717,7 @@ export default function Products() {
       setBarcodeModalTargetKey(target.key);
       setIsBarcodeModalOpen(true);
     },
-    [showNotification],
+    [canPrintBarcodeLabels, select, showNotification],
   );
 
   return (
@@ -1349,13 +1361,17 @@ export default function Products() {
                       )}
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                      <button
-                        onClick={() => openBarcodeLabelModal(variant)}
-                        className="app-button-secondary flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700"
-                      >
-                        <Printer size={14} />
-                        Label
-                      </button>
+                      {canPrintBarcodeLabels ? (
+                        <button
+                          onClick={() => openBarcodeLabelModal(variant)}
+                          className="app-button-secondary flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700"
+                        >
+                          <Printer size={14} />
+                          Label
+                        </button>
+                      ) : (
+                        <div />
+                      )}
                       <button
                         onClick={() => openProductWorkspace(variant.id)}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg flex items-center justify-center gap-2 text-sm"

@@ -14,61 +14,18 @@ import {
   getPermissionDescription,
   getPermissionLabel,
 } from "../utils/permissionLabels";
+import {
+  DEFAULT_CLIENT_PERMISSIONS,
+  normalizeClientPermissions,
+  setPermissionWithDependencies,
+} from "../utils/permissionState";
 import { extractArray } from "../utils/response";
 import { subscribeToSharedDataUpdates } from "../utils/realtime";
 
 const POLLING_INTERVAL_MS = 30000;
-const DEFAULT_PERMISSION_STATE = {
-  can_view_dashboard: true,
-  can_view_products: true,
-  can_edit_products: false,
-  can_view_warehouse: true,
-  can_edit_warehouse: false,
-  can_view_suppliers: false,
-  can_edit_suppliers: false,
-  can_view_orders: true,
-  can_edit_orders: false,
-  can_view_customers: true,
-  can_edit_customers: false,
-  can_manage_users: false,
-  can_manage_settings: false,
-  can_view_profits: false,
-  can_manage_tasks: false,
-  can_view_all_reports: false,
-  can_view_activity_log: false,
-  can_print_barcode_labels: true,
-};
-
-const PERMISSION_FALLBACK_KEYS = {
-  can_view_warehouse: ["can_view_products"],
-  can_edit_warehouse: ["can_edit_products"],
-};
-
 const TABS = ["users", "requests", "reports"];
 
 const getTabFromQuery = (value) => (TABS.includes(value) ? value : "users");
-
-const normalizePermissions = (rawPermissions) => {
-  const source = Array.isArray(rawPermissions)
-    ? rawPermissions[0] || {}
-    : rawPermissions || {};
-
-  return Object.keys(DEFAULT_PERMISSION_STATE).reduce((acc, key) => {
-    if (source[key] !== undefined) {
-      acc[key] = Boolean(source[key]);
-      return acc;
-    }
-
-    const fallbackKey = (PERMISSION_FALLBACK_KEYS[key] || []).find(
-      (candidateKey) => source[candidateKey] !== undefined,
-    );
-
-    acc[key] = fallbackKey
-      ? Boolean(source[fallbackKey])
-      : DEFAULT_PERMISSION_STATE[key];
-    return acc;
-  }, {});
-};
 
 const formatRoleLabel = (role, locale) =>
   role === "admin"
@@ -109,7 +66,7 @@ export default function Users() {
   });
   const [editRole, setEditRole] = useState("user");
   const [permissions, setPermissions] = useState({
-    ...DEFAULT_PERMISSION_STATE,
+    ...DEFAULT_CLIENT_PERMISSIONS,
   });
 
   const pendingRequests = useMemo(
@@ -234,7 +191,7 @@ export default function Users() {
       });
       setShowAddModal(false);
       setNewUser({ name: "", email: "", password: "", role: "user" });
-      setPermissions({ ...DEFAULT_PERMISSION_STATE });
+      setPermissions({ ...DEFAULT_CLIENT_PERMISSIONS });
       await loadUsers();
     } catch (error) {
       setMessage({ type: "error", text: getErrorMessage(error) });
@@ -263,7 +220,11 @@ export default function Users() {
   const openEditModal = (user) => {
     setSelectedUser(user);
     setEditRole(user.role || "user");
-    setPermissions(normalizePermissions(user.permissions));
+    setPermissions(
+      normalizeClientPermissions(
+        Array.isArray(user.permissions) ? user.permissions[0] || {} : user.permissions,
+      ),
+    );
     setShowEditModal(true);
   };
 
@@ -859,10 +820,13 @@ function PermissionGrid({ locale, permissions, setPermissions }) {
                 type="checkbox"
                 checked={permissions[key]}
                 onChange={(event) =>
-                  setPermissions((current) => ({
-                    ...current,
-                    [key]: event.target.checked,
-                  }))
+                  setPermissions((current) =>
+                    setPermissionWithDependencies(
+                      current,
+                      key,
+                      event.target.checked,
+                    ),
+                  )
                 }
                 className="mt-1 h-4 w-4"
               />

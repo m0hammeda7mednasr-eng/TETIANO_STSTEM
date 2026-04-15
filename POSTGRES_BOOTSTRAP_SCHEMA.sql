@@ -74,11 +74,13 @@ create table if not exists public.permissions (
 comment on column public.permissions.can_view_warehouse is
   'Allows opening warehouse stock and scan history views.';
 comment on column public.permissions.can_edit_warehouse is
-  'Allows using the warehouse scanner, changing stock movements, and syncing warehouse stock to Shopify.';
+  'Allows using the warehouse scanner, changing stock movements, syncing warehouse stock to Shopify, and automatically includes barcode label printing access.';
 comment on column public.permissions.can_view_orders is
   'Allows opening orders, missing orders, order details, and shipping issues list views.';
 comment on column public.permissions.can_edit_orders is
-  'Allows changing order follow-up state, including shipping issue updates and notes.';
+  'Allows full order editing across order details, including status, payment method, fulfillment or restock, contact/address overrides, shipping issue follow-up, and internal notes. It also guarantees order view access.';
+comment on column public.permissions.can_print_barcode_labels is
+  'Allows printing barcode labels and is automatically included with warehouse scanner access.';
 
 create table if not exists public.stores (
   id uuid primary key default gen_random_uuid(),

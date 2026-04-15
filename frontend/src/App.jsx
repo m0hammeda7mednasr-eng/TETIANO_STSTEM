@@ -138,7 +138,7 @@ function App() {
               <Route
                 path="/barcode-labels"
                 element={
-                  <ProtectedRoute permission="can_view_products">
+                  <ProtectedRoute permission="can_print_barcode_labels">
                     <BarcodeLabels />
                   </ProtectedRoute>
                 }

@@ -1,5 +1,6 @@
 import { Order } from "../models/index.js";
 import axios from "axios";
+import { ShopifyService } from "./shopifyService.js";
 import {
   DEFAULT_SHIPPING_ISSUE_REASON,
   applyOrderLocalMetadata,
@@ -112,6 +113,163 @@ const parseOrderData = (order) => {
     }
   }
   return typeof value === "object" ? value : {};
+};
+
+const hasNonEmptyObject = (value) =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length > 0,
+  );
+
+// Legacy/migrated rows can keep only summary fields in `data`, which breaks
+// the order details view that expects the full Shopify payload.
+const isOrderDetailsDataIncomplete = (order, orderData = {}) => {
+  if (!order?.shopify_id) {
+    return false;
+  }
+
+  if (
+    !orderData ||
+    typeof orderData !== "object" ||
+    Array.isArray(orderData) ||
+    Object.keys(orderData).length === 0
+  ) {
+    return true;
+  }
+
+  if (!Array.isArray(orderData.line_items)) {
+    return true;
+  }
+
+  const expectedLineItems = Number(order?.items_count || 0);
+  if (expectedLineItems > 0 && orderData.line_items.length === 0) {
+    return true;
+  }
+
+  const hasOrderIdentity = Boolean(
+    orderData?.id ||
+      orderData?.admin_graphql_api_id ||
+      orderData?.order_number ||
+      orderData?.name,
+  );
+  if (!hasOrderIdentity) {
+    return true;
+  }
+
+  return !(
+    hasNonEmptyObject(orderData.customer) ||
+    hasNonEmptyObject(orderData.shipping_address) ||
+    hasNonEmptyObject(orderData.billing_address) ||
+    Array.isArray(orderData.shipping_lines) ||
+    Array.isArray(orderData.fulfillments) ||
+    Array.isArray(orderData.refunds) ||
+    Array.isArray(orderData.note_attributes)
+  );
+};
+
+const resolveOrderCustomerPhone = (orderData = {}, order = {}) =>
+  String(
+    orderData?.customer?.phone ||
+      orderData?.shipping_address?.phone ||
+      orderData?.billing_address?.phone ||
+      order?.customer_phone ||
+      "",
+  ).trim();
+
+const hydrateOrderDetailsFromShopify = async ({
+  userId,
+  order,
+  orderData,
+}) => {
+  if (!isOrderDetailsDataIncomplete(order, orderData)) {
+    return { order, orderData };
+  }
+
+  const tokenData = await getShopifyTokenForStore(order?.store_id, userId);
+  if (!tokenData?.access_token || !tokenData?.shop) {
+    return { order, orderData };
+  }
+
+  const refreshedOrder = await ShopifyService.getOrderByIdFromShopify(
+    tokenData.access_token,
+    tokenData.shop,
+    order.shopify_id,
+  );
+  if (!refreshedOrder?.data) {
+    return { order, orderData };
+  }
+
+  const nextOrderData = preserveOrderLocalMetadata(
+    refreshedOrder.data,
+    order.data,
+  );
+  const nextStatus =
+    refreshedOrder.status ||
+    order.status ||
+    refreshedOrder.data?.financial_status ||
+    null;
+  const nextFinancialStatus =
+    refreshedOrder.data?.financial_status ||
+    refreshedOrder.status ||
+    order.financial_status ||
+    null;
+  const nextCustomerPhone = resolveOrderCustomerPhone(nextOrderData, order);
+  const nowIso = new Date().toISOString();
+  const updatePayload = {
+    order_number: refreshedOrder.order_number ?? order.order_number,
+    customer_name: refreshedOrder.customer_name ?? order.customer_name,
+    customer_email: refreshedOrder.customer_email ?? order.customer_email,
+    customer_phone: nextCustomerPhone || null,
+    total_price: refreshedOrder.total_price ?? order.total_price,
+    subtotal_price: refreshedOrder.subtotal_price ?? order.subtotal_price,
+    total_tax: refreshedOrder.total_tax ?? order.total_tax,
+    total_discounts: refreshedOrder.total_discounts ?? order.total_discounts,
+    currency: refreshedOrder.currency ?? order.currency,
+    status: nextStatus,
+    financial_status: nextFinancialStatus,
+    fulfillment_status:
+      refreshedOrder.fulfillment_status ?? order.fulfillment_status,
+    items_count: refreshedOrder.items_count ?? order.items_count,
+    data: nextOrderData,
+    pending_sync: false,
+    last_synced_at: nowIso,
+    shopify_updated_at: refreshedOrder.updated_at || nowIso,
+    sync_error: null,
+  };
+
+  try {
+    const { supabase } = await import("../supabaseClient.js");
+    const { error } = await supabase
+      .from("orders")
+      .update(updatePayload)
+      .eq("id", order.id);
+
+    if (error) {
+      console.warn(
+        "Order details hydration persistence warning:",
+        error?.message || error,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      "Order details hydration persistence warning:",
+      error?.message || error,
+    );
+  }
+
+  return {
+    order: {
+      ...order,
+      ...refreshedOrder,
+      customer_phone: nextCustomerPhone || order.customer_phone || "",
+      status: nextStatus,
+      financial_status: nextFinancialStatus,
+      data: nextOrderData,
+    },
+    orderData: nextOrderData,
+  };
 };
 
 const normalizeAttributeName = (value) =>
@@ -829,8 +987,24 @@ export class OrderManagementService {
         }
       }
 
+      try {
+        const hydratedOrderResult = await hydrateOrderDetailsFromShopify({
+          userId,
+          order,
+          orderData,
+        });
+        orderData = hydratedOrderResult.orderData;
+        Object.assign(order, hydratedOrderResult.order);
+      } catch (hydrationError) {
+        console.warn(
+          "Order details hydration skipped:",
+          hydrationError?.message || hydrationError,
+        );
+      }
+
       const localOrderMetadata = extractOrderLocalMetadata(orderData);
       orderData = applyOrderLocalMetadata(orderData, localOrderMetadata);
+      order.data = orderData;
 
       // Extract ALL line items details from data
       const lineItems = orderData?.line_items || [];

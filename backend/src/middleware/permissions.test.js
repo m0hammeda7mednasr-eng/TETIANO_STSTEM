@@ -16,6 +16,16 @@ const { buildPermissionsForRole, normalizePermissions } = await import(
 );
 
 describe("middleware/permissions warehouse access", () => {
+  it("makes order edit permission automatically include order view access", () => {
+    const permissions = normalizePermissions({
+      can_view_orders: false,
+      can_edit_orders: true,
+    });
+
+    expect(permissions.can_view_orders).toBe(true);
+    expect(permissions.can_edit_orders).toBe(true);
+  });
+
   it("falls back warehouse permissions to product permissions when warehouse columns are missing", () => {
     const permissions = normalizePermissions({
       can_view_products: false,
@@ -24,20 +34,23 @@ describe("middleware/permissions warehouse access", () => {
 
     expect(permissions.can_view_products).toBe(false);
     expect(permissions.can_edit_products).toBe(true);
-    expect(permissions.can_view_warehouse).toBe(false);
+    expect(permissions.can_view_warehouse).toBe(true);
     expect(permissions.can_edit_warehouse).toBe(true);
+    expect(permissions.can_print_barcode_labels).toBe(true);
   });
 
   it("preserves explicit warehouse permissions when they are present", () => {
     const permissions = normalizePermissions({
       can_view_products: false,
       can_edit_products: true,
-      can_view_warehouse: true,
-      can_edit_warehouse: false,
+      can_view_warehouse: false,
+      can_edit_warehouse: true,
+      can_print_barcode_labels: false,
     });
 
     expect(permissions.can_view_warehouse).toBe(true);
-    expect(permissions.can_edit_warehouse).toBe(false);
+    expect(permissions.can_edit_warehouse).toBe(true);
+    expect(permissions.can_print_barcode_labels).toBe(true);
   });
 
   it("grants warehouse permissions to admins automatically", () => {
@@ -45,5 +58,8 @@ describe("middleware/permissions warehouse access", () => {
 
     expect(permissions.can_view_warehouse).toBe(true);
     expect(permissions.can_edit_warehouse).toBe(true);
+    expect(permissions.can_print_barcode_labels).toBe(true);
+    expect(permissions.can_view_orders).toBe(true);
+    expect(permissions.can_edit_orders).toBe(true);
   });
 });

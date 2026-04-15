@@ -31,15 +31,15 @@ const PERMISSION_COPY = {
       can_view_warehouse:
         "يعرض شاشة المخزن والرصيد المحلي المنفصل عن Shopify وسجل المسح.",
       can_edit_warehouse:
-        "يسمح باستخدام الماسح وتعديل حركات المخزن ومزامنة رصيد المخزن إلى Shopify.",
+        "يسمح باستخدام السكانر وتعديل حركات المخزن ومزامنة رصيد المخزن إلى Shopify، ويتضمن أيضًا صلاحية طباعة الباركود.",
       can_view_suppliers:
         "يعرض قوائم الموردين والحسابات وحركاتهم بدون تعديل.",
       can_edit_suppliers:
-        "يسمح بإدارة الموردين وإضافتهم وتعديلهم وتسجيل الوارد والدفعات.",
+        "يسمح بإدارة الموردين وإضافتهم وتعديلهم وتسجيل الوارد والمدفوعات.",
       can_view_orders:
         "يعرض الطلبات والطلبات الخارجة عن المخزون وتفاصيل الطلب وصور المنتجات داخل الطلب.",
       can_edit_orders:
-        "يسمح بتعديل حالة الطلب والدفع وتنفيذ أو restock الطلب كله أو عناصر محددة منه.",
+        "يسمح بتعديل تفاصيل الأوردر بالكامل، ويشمل الحالة والدفع والتنفيذ أو restock وتعديلات الهاتف والعنوان ومشكلة الشحن والمتابعة الداخلية، ويضمن أيضًا فتح شاشات الطلبات وتفاصيلها.",
       can_view_customers:
         "يعرض قائمة العملاء وبيانات التواصل والطلبات المرتبطة بهم.",
       can_edit_customers:
@@ -54,7 +54,7 @@ const PERMISSION_COPY = {
       can_view_activity_log:
         "يعرض سجل النشاط والعمليات التي تمت داخل النظام.",
       can_print_barcode_labels:
-        "يسمح بطباعة ليبلات الباركود للمنتجات بمقاسات مختلفة.",
+        "يسمح بطباعة ليبلات الباركود، ويتم منحه تلقائيًا مع صلاحية السكانر/إدارة المخزن.",
     },
   },
   en: {
@@ -87,7 +87,7 @@ const PERMISSION_COPY = {
       can_view_warehouse:
         "Shows warehouse stock, the separate warehouse balance, and scan history.",
       can_edit_warehouse:
-        "Allows using the scanner, changing warehouse movements, and syncing warehouse stock to Shopify.",
+        "Allows using the scanner, changing warehouse movements, syncing warehouse stock to Shopify, and automatically includes barcode label printing access.",
       can_view_suppliers:
         "Shows supplier lists, balances, and supplier activity without editing.",
       can_edit_suppliers:
@@ -95,7 +95,7 @@ const PERMISSION_COPY = {
       can_view_orders:
         "Shows orders, missing orders, order details, shipping issues list, and product images inside orders.",
       can_edit_orders:
-        "Allows changing order/payment status, updating shipping issue follow-up and notes, and fulfilling or restocking full orders or selected items.",
+        "Allows full order editing across order details, including status, payment method, fulfillment or restock, contact/address overrides, shipping issue follow-up, and internal notes. It also guarantees access to order views.",
       can_view_customers:
         "Shows the customer list, contact details, and linked orders.",
       can_edit_customers: "Allows updating customer data and related actions.",
@@ -110,7 +110,7 @@ const PERMISSION_COPY = {
       can_view_activity_log:
         "Shows the activity log and operations done inside the system.",
       can_print_barcode_labels:
-        "Allows printing barcode labels for products in different sizes.",
+        "Allows printing barcode labels and is automatically included with warehouse scanner access.",
     },
   },
 };

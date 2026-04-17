@@ -43,6 +43,10 @@ import {
 } from "../helpers/missingOrders.js";
 import { extractOrderLocalMetadata } from "../helpers/orderLocalMetadata.js";
 import {
+  buildWarehouseVariantCatalog,
+  normalizeWarehouseCode,
+} from "../helpers/warehouseCatalog.js";
+import {
   applyShippingIssueRecoveryPlan,
   applyShippingIssueRecoveryPlanToRows,
   buildShippingIssueRecoveryPlan,
@@ -2218,6 +2222,11 @@ const getProductTotalInventory = (product) => {
 };
 
 const getProductTotalWarehouseInventory = (product) => {
+  const tableTotal = getProductWarehouseInventoryTotal(product);
+  if (tableTotal !== null) {
+    return tableTotal;
+  }
+
   const variants = getProductVariantRows(product);
   if (variants.length === 0) {
     return extractWarehouseInventorySnapshot(parseJsonField(product?.data))
@@ -2288,6 +2297,184 @@ const getProductSupplierLinks = (product = {}) =>
   Array.isArray(product?.supplier_links)
     ? product.supplier_links.filter((link) => link?.is_active !== false)
     : [];
+
+const PRODUCT_WAREHOUSE_INVENTORY_KEY = Symbol("productWarehouseInventory");
+
+const normalizeWarehouseInventoryCode = (value) => normalizeWarehouseCode(value);
+
+const getProductWarehouseInventoryMeta = (product = {}) =>
+  product?.[PRODUCT_WAREHOUSE_INVENTORY_KEY] || null;
+
+const rememberProductWarehouseInventory = (product, meta) => {
+  if (!product || !meta) {
+    return;
+  }
+
+  Object.defineProperty(product, PRODUCT_WAREHOUSE_INVENTORY_KEY, {
+    value: meta,
+    configurable: true,
+    enumerable: false,
+    writable: true,
+  });
+};
+
+const getWarehouseInventoryOverride = (product = {}, variant = {}) => {
+  const meta = getProductWarehouseInventoryMeta(product);
+  if (!meta) {
+    return null;
+  }
+
+  const variantId = String(variant?.id || "").trim();
+  if (variantId && meta.byVariantId.has(variantId)) {
+    return meta.byVariantId.get(variantId);
+  }
+
+  const codeCandidates = [
+    variant?.sku,
+    variant?.barcode,
+    variant?.warehouse_code,
+    product?.sku,
+  ]
+    .map(normalizeWarehouseInventoryCode)
+    .filter(Boolean);
+
+  for (const code of codeCandidates) {
+    if (meta.byCode.has(code)) {
+      return meta.byCode.get(code);
+    }
+  }
+
+  return null;
+};
+
+const getProductWarehouseInventoryTotal = (product = {}) => {
+  const meta = getProductWarehouseInventoryMeta(product);
+  return meta ? meta.totalQuantity : null;
+};
+
+const attachWarehouseInventoryToProducts = async (products = []) => {
+  const rows = Array.isArray(products) ? products : [];
+  const storeIds = Array.from(
+    new Set(rows.map((product) => String(product?.store_id || "").trim())),
+  ).filter(Boolean);
+
+  if (rows.length === 0 || storeIds.length === 0) {
+    return rows;
+  }
+
+  try {
+    const { data: inventoryRows, error } = await db
+      .from("warehouse_inventory")
+      .select(
+        "store_id, product_id, sku, quantity, last_scanned_at, last_movement_type, last_movement_quantity, updated_at",
+      )
+      .in("store_id", storeIds);
+
+    if (error) {
+      throw error;
+    }
+
+    const inventoryByStoreAndCode = new Map(
+      (inventoryRows || [])
+        .map((row) => [
+          `${String(row?.store_id || "").trim()}:${normalizeWarehouseInventoryCode(
+            row?.sku,
+          )}`,
+          row,
+        ])
+        .filter(([key]) => !key.endsWith(":")),
+    );
+    const productsById = new Map(
+      rows
+        .map((product) => [String(product?.id || "").trim(), product])
+        .filter(([id]) => id),
+    );
+    const metaByProductId = new Map();
+    const catalog = buildWarehouseVariantCatalog(rows);
+
+    for (const catalogRow of catalog.rows) {
+      const productId = String(catalogRow?.product_id || "").trim();
+      const product = productsById.get(productId);
+      if (!product) {
+        continue;
+      }
+
+      const code = normalizeWarehouseInventoryCode(catalogRow?.warehouse_code);
+      const storeId = String(catalogRow?.store_id || "").trim();
+      const inventoryRow = inventoryByStoreAndCode.get(`${storeId}:${code}`);
+      if (!inventoryRow) {
+        continue;
+      }
+
+      const quantity = Math.max(0, toNumber(inventoryRow.quantity));
+      const entry = {
+        quantity,
+        sku: code,
+        last_scanned_at: inventoryRow.last_scanned_at || null,
+        last_movement_type: inventoryRow.last_movement_type || null,
+        last_movement_quantity: toNumber(inventoryRow.last_movement_quantity),
+        updated_at: inventoryRow.updated_at || null,
+      };
+      const meta =
+        metaByProductId.get(productId) || {
+          byVariantId: new Map(),
+          byCode: new Map(),
+          totalQuantity: 0,
+          countedCodes: new Set(),
+        };
+
+      if (!meta.countedCodes.has(code)) {
+        meta.totalQuantity += quantity;
+        meta.countedCodes.add(code);
+      }
+
+      if (catalogRow?.variant_id) {
+        meta.byVariantId.set(String(catalogRow.variant_id), entry);
+      }
+
+      [catalogRow?.warehouse_code, catalogRow?.sku, catalogRow?.barcode]
+        .map(normalizeWarehouseInventoryCode)
+        .filter(Boolean)
+        .forEach((candidateCode) => meta.byCode.set(candidateCode, entry));
+
+      metaByProductId.set(productId, meta);
+    }
+
+    for (const [productId, meta] of metaByProductId.entries()) {
+      const product = productsById.get(productId);
+      rememberProductWarehouseInventory(product, meta);
+    }
+  } catch (error) {
+    if (!isSchemaCompatibilityError(error)) {
+      console.error("Product warehouse inventory enrichment failed:", error);
+    }
+  }
+
+  return rows;
+};
+
+const applyWarehouseInventoryToProductDetail = (product = {}) => {
+  const meta = getProductWarehouseInventoryMeta(product);
+  if (!meta) {
+    return product;
+  }
+
+  if (Array.isArray(product.variants) && product.variants.length > 0) {
+    product.variants = product.variants.map((variant) => {
+      const override = getWarehouseInventoryOverride(product, variant);
+      return override
+        ? {
+            ...variant,
+            warehouse_inventory_quantity: override.quantity,
+          }
+        : variant;
+    });
+  }
+
+  product.warehouse_inventory_quantity = meta.totalQuantity;
+  product.total_warehouse_inventory = meta.totalQuantity;
+  return product;
+};
 
 const getSupplierLinksForVariant = (product = {}, variant = {}) => {
   const variantId = String(variant?.id || "").trim();
@@ -2452,6 +2639,10 @@ const buildProductVariantSummaries = (product) => {
     const warehouseSnapshot = extractWarehouseInventorySnapshot(
       parseJsonField(product?.data),
     );
+    const warehouseOverride = getWarehouseInventoryOverride(product, {
+      id: product?.shopify_id || product?.id || null,
+      sku: getProductPrimarySku(product),
+    });
 
     return [
       {
@@ -2474,7 +2665,8 @@ const buildProductVariantSummaries = (product) => {
         weight_unit: null,
         inventory_quantity: toNumber(product?.inventory_quantity),
         shopify_inventory_quantity: toNumber(product?.inventory_quantity),
-        warehouse_inventory_quantity: warehouseSnapshot.quantity,
+        warehouse_inventory_quantity:
+          warehouseOverride?.quantity ?? warehouseSnapshot.quantity,
         supplier_links: getSupplierLinksForVariant(product, {
           id: product?.shopify_id || product?.id || null,
         }),
@@ -2490,6 +2682,7 @@ const buildProductVariantSummaries = (product) => {
     const warehouseSnapshot = extractWarehouseInventorySnapshot(
       parseJsonField(variant),
     );
+    const warehouseOverride = getWarehouseInventoryOverride(product, variant);
 
     return {
       id: variant?.id || null,
@@ -2513,7 +2706,8 @@ const buildProductVariantSummaries = (product) => {
       weight_unit: variant?.weight_unit ?? null,
       inventory_quantity: toNumber(variant?.inventory_quantity),
       shopify_inventory_quantity: toNumber(variant?.inventory_quantity),
-      warehouse_inventory_quantity: warehouseSnapshot.quantity,
+      warehouse_inventory_quantity:
+        warehouseOverride?.quantity ?? warehouseSnapshot.quantity,
       supplier_links: getSupplierLinksForVariant(product, variant),
       requires_shipping: Boolean(variant?.requires_shipping),
       taxable: Boolean(variant?.taxable),
@@ -3347,6 +3541,7 @@ const getFallbackProductsPage = async (req) => {
   );
   const productsWithSupplierLinks =
     await attachSupplierLinksToProducts(filteredProducts);
+  await attachWarehouseInventoryToProducts(productsWithSupplierLinks);
 
   return productsWithSupplierLinks.map((product) =>
     buildProductListItem(product, Boolean(req.user?.isAdmin)),
@@ -5185,6 +5380,7 @@ router.get(
       const productsWithSupplierLinks = await attachSupplierLinksToProducts(
         data || [],
       );
+      await attachWarehouseInventoryToProducts(productsWithSupplierLinks);
       const sanitizedProducts = productsWithSupplierLinks.map((product) =>
         buildProductListItem(product, isAdmin),
       );
@@ -5740,6 +5936,9 @@ router.get(
       const [productWithSupplierLinks] = await attachSupplierLinksToProducts([
         data,
       ]);
+      await attachWarehouseInventoryToProducts([
+        productWithSupplierLinks || data,
+      ]);
       res.json(
         sanitizeProductForRole(
           buildProductSummary(productWithSupplierLinks || data),
@@ -5772,6 +5971,8 @@ router.get(
       const productWithSourcing = await attachProductSourcingDetail(
         productWithSupplierLinks || product,
       );
+      await attachWarehouseInventoryToProducts([productWithSourcing]);
+      applyWarehouseInventoryToProductDetail(productWithSourcing);
 
       res.json(sanitizeProductForRole(productWithSourcing, isAdmin));
     } catch (error) {

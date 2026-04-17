@@ -63,13 +63,8 @@ const parseData = (value) => {
 const stable = (value) => JSON.stringify(value ?? null);
 
 const createDb = () => {
-  const url = env("NEW_SUPABASE_URL", "SUPABASE_URL");
-  const key = env(
-    "NEW_SUPABASE_SERVICE_ROLE_KEY",
-    "NEW_SUPABASE_KEY",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "SUPABASE_KEY",
-  );
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_KEY");
 
   if (!url || !key) {
     throw new Error("Missing target Supabase URL or service role key");

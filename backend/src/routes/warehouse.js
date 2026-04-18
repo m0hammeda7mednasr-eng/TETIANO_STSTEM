@@ -8,6 +8,10 @@ import {
   calculateScannedQuantity,
   buildMirroredInventoryRow,
 } from "../helpers/warehouseScan.js";
+import {
+  partitionWarehouseStockRows,
+  toBooleanQueryFlag,
+} from "../helpers/warehouseStock.js";
 import { emitRealtimeEvent } from "../services/realtimeEventService.js";
 import {
   buildWarehouseVariantCatalog,
@@ -1230,9 +1234,14 @@ router.get("/stock", requirePermission("can_view_warehouse"), async (req, res) =
     const { storeId } = await resolveStoreContext(req);
     const pagination = getPagination(req.query);
     const sortOptions = getSortOptions(req.query);
+    const includeArchived = toBooleanQueryFlag(req.query?.include_archived, false);
     const inventoryState = await loadWarehouseInventoryState(storeId);
     const sortedRows = sortWarehouseRows(inventoryState.rows, sortOptions);
-    const rows = sortedRows.slice(
+    const { visibleRows, archivedRowsHidden, archivedRowsTotal } =
+      partitionWarehouseStockRows(sortedRows, {
+        includeArchived,
+      });
+    const rows = visibleRows.slice(
       pagination.offset,
       pagination.offset + pagination.limit,
     );
@@ -1244,6 +1253,9 @@ router.get("/stock", requirePermission("can_view_warehouse"), async (req, res) =
       schema_ready: inventoryState.warehouseTablesReady,
       setup_required: !inventoryState.warehouseTablesReady,
       tracking_mode: inventoryState.trackingMode,
+      include_archived: includeArchived,
+      archived_rows_hidden: archivedRowsHidden,
+      archived_rows_total: archivedRowsTotal,
       message: inventoryState.warehouseTablesReady
         ? null
         : "Warehouse tables are not deployed yet. Showing local warehouse stock saved on the product record.",

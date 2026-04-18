@@ -142,6 +142,7 @@ export default function WarehouseStock() {
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [setupNotice, setSetupNotice] = useState("");
+  const [archivedRowsHidden, setArchivedRowsHidden] = useState(0);
   const [syncingToShopify, setSyncingToShopify] = useState(false);
   const [syncNotice, setSyncNotice] = useState(null);
 
@@ -153,11 +154,13 @@ export default function WarehouseStock() {
       setLoading(true);
       setError("");
       setSetupNotice("");
+      setArchivedRowsHidden(0);
     }
 
     try {
       let schemaReady = true;
       let setupMessage = "";
+      let nextArchivedRowsHidden = 0;
       const variants = await fetchAllPagesProgressively(
         ({ limit, offset }) =>
           warehouseAPI.getStock({
@@ -180,12 +183,16 @@ export default function WarehouseStock() {
                 responsePayload?.message ||
                 "Warehouse tables are not configured yet on the database.";
             }
+            nextArchivedRowsHidden = toNumber(
+              responsePayload?.archived_rows_hidden,
+            );
           },
         },
       );
 
       setRows(variants);
       setSetupNotice(schemaReady ? "" : setupMessage);
+      setArchivedRowsHidden(nextArchivedRowsHidden);
       setLastUpdatedAt(new Date());
     } catch (requestError) {
       console.error("Error fetching warehouse stock:", requestError);
@@ -222,7 +229,6 @@ export default function WarehouseStock() {
     let warehouseUnits = 0;
     let mismatched = 0;
     let zeroStock = 0;
-    let archived = 0;
 
     filteredRows.forEach((row) => {
       warehouseUnits += toNumber(row?.warehouse_quantity);
@@ -234,10 +240,6 @@ export default function WarehouseStock() {
       if (toNumber(row?.warehouse_quantity) <= 0) {
         zeroStock += 1;
       }
-
-      if (row?.is_archived) {
-        archived += 1;
-      }
     });
 
     return {
@@ -245,7 +247,6 @@ export default function WarehouseStock() {
       warehouseUnits,
       mismatched,
       zeroStock,
-      archived,
     };
   }, [filteredRows]);
 
@@ -482,6 +483,23 @@ export default function WarehouseStock() {
             </div>
           )}
 
+          {archivedRowsHidden > 0 && (
+            <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
+              <Package size={18} className="mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold">
+                  {select("تم إخفاء أكواد مؤرشفة", "Archived codes hidden")}
+                </p>
+                <p className="mt-1 text-sm">
+                  {select(
+                    `تم إخفاء ${formatCount(archivedRowsHidden)} كود مؤرشف من شاشة المخزون الأساسية لأنه لم يعد ضمن كتالوج Shopify النشط.`,
+                    `Hidden ${formatCount(archivedRowsHidden)} archived code(s) from the main warehouse stock list because they are no longer part of the active Shopify catalog.`,
+                  )}
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
             <SummaryCard
               title={select("الفاريانتات", "Variants")}
@@ -509,7 +527,7 @@ export default function WarehouseStock() {
             />
             <SummaryCard
               title={select("أكواد مؤرشفة", "Archived Codes")}
-              value={formatCount(summary.archived)}
+              value={formatCount(archivedRowsHidden)}
               tone="slate"
               icon={Package}
             />
